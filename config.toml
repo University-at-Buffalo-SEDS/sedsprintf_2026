@@ -1,0 +1,7 @@
+# .cargo/config.toml  (optional)
+[build]
+# target = "thumbv7em-none-eabihf"  # uncomment to make embedded the default
+
+[target.thumbv7em-none-eabihf]
+# runner = "probe-rs run --chip STM32G491CEUx"
+# rustflags = ["-C", "link-arg=-Tlink.x"]   # only if using cortex-m-rt in a firmware BIN crate

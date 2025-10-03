@@ -1,0 +1,23 @@
+[package]
+name = "sedsprintf_rs"
+version = "0.1.0"
+edition = "2021" # keep your edition if you want; 2021 is broadly compatible
+
+[lib]
+crate-type = ["rlib", "staticlib"]
+
+[features]
+# Host/dev convenience: enable std by default so `cargo build` / `cargo test` work.
+default = ["std"]
+std = []
+
+[dependencies]
+# put common deps here (none required for this snippet)
+
+# Pull cortex-m ONLY for bare-metal builds (target_os = "none")
+[target.'cfg(target_os = "none")'.dependencies]
+cortex-m = "0.7"
+
+[profile.release]
+panic = "abort"
+lto = false
