@@ -1,4 +1,15 @@
 // src/serialize.rs
+
+
+// Dear programmer:
+// When I wrote this code, only god and I knew how it worked.
+// Now, only god knows it!
+// Therefore, if you are trying to optimize
+// this routine, and it fails (it most surely will),
+// please increase this counter as a warning for the next person:
+// total hours_wasted_here = 12
+
+
 use crate::{config::DataType, TelemetryError, TelemetryPacket};
 
 // <- pull from alloc so this works under both std and no_std
