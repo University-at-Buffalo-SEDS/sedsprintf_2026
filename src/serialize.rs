@@ -37,7 +37,7 @@ pub fn serialize_packet(pkt: &TelemetryPacket) -> Vec<u8> {
 
     out.extend_from_slice(&(pkt.ty as u32).to_le_bytes());
     out.extend_from_slice(&(pkt.data_size as u32).to_le_bytes());
-    out.extend_from_slice(&(pkt.timestamp as u64).to_le_bytes());
+    out.extend_from_slice(&pkt.timestamp.to_le_bytes());
     out.extend_from_slice(&(pkt.endpoints.len() as u32).to_le_bytes());
 
     for ep in pkt.endpoints.iter() {
