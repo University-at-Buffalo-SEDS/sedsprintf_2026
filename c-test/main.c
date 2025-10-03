@@ -4,10 +4,6 @@
 #include <string.h>
 #include <inttypes.h>
 
-// Keep these in sync with your Rust enums:
-// DataType:     0=GpsData, 1=ImuData, 2=BatteryStatus, 3=SystemStatus
-// DataEndpoint: 0=SdCard,  1=Radio
-
 // --- Optional: stash last TX buffer so we can demonstrate seds_router_receive() later
 static uint8_t g_last_tx[256];
 static size_t  g_last_tx_len = 0;
@@ -74,7 +70,7 @@ int main(void) {
   }
 
   // Router A: local handler for SD_CARD, transmit loops into router B
-  SedsHandlerDesc a_handlers[] = {
+  const SedsHandlerDesc a_handlers[] = {
     { SEDS_EP_SD,   &print_handler,  NULL },
   };
   SedsRouter* router_a = seds_router_new(&loopback_tx, /*tx_user=*/router_b,
@@ -85,7 +81,7 @@ int main(void) {
     return 1;
   }
 
-  // Log a GPS packet (3*f32). Per your schema the router will:
+  // Log a GPS packet (3*f32). Per the schema the router will:
   //  - serialize once
   //  - call transmit (bytes -> router_b)
   //  - locally dispatch to endpoints present (SD on router_a)
