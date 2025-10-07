@@ -1,6 +1,9 @@
 // src/config.rs
-use crate::schema::{MESSAGE_ELEMENTS, MESSAGE_SIZES};
 
+use core::mem::size_of;
+
+
+//----------------------User Editable----------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u32)]
@@ -42,7 +45,51 @@ impl DataType {
         }
     }
 }
-// Optional helpers that mirror the C++ "infer element type" idea.
+
+/// how many elements each message carries
+pub const MESSAGE_ELEMENTS: [usize; DataType::COUNT] = [3, 6, 2, 8];
+
+/// total byte size per message (mirrors the C++ `message_size[]`)
+/// GPS/IMU/BATTERY use f32 (=4 bytes each element). SYSTEM_STATUS uses u8.
+pub const MESSAGE_SIZES: [usize; DataType::COUNT] = [
+    size_of::<u32>() * MESSAGE_ELEMENTS[DataType::GpsData as usize], // 3 * f32
+    size_of::<u32>() * MESSAGE_ELEMENTS[DataType::ImuData as usize], // 6 * f32
+    size_of::<u32>() * MESSAGE_ELEMENTS[DataType::BatteryStatus as usize], // 2 * f32
+    size_of::<bool>() * MESSAGE_ELEMENTS[DataType::SystemStatus as usize], // 8 * u8
+];
+
+/// Static default endpoints per type (no heap, just slices).
+pub const GPS_ENDPOINTS: &[DataEndpoint] = &[DataEndpoint::SdCard, DataEndpoint::Radio];
+pub const IMU_ENDPOINTS: &[DataEndpoint] = &[DataEndpoint::SdCard, DataEndpoint::Radio];
+pub const BATT_ENDPOINTS: &[DataEndpoint] = &[DataEndpoint::SdCard, DataEndpoint::Radio];
+pub const SYS_ENDPOINTS: &[DataEndpoint] = &[DataEndpoint::SdCard];
+
+pub const MESSAGE_TYPES: [MessageMeta; DataType::COUNT] = [
+    MessageMeta {
+        ty: DataType::GpsData,
+        data_size: MESSAGE_SIZES[DataType::GpsData as usize],
+        endpoints: GPS_ENDPOINTS,
+    },
+    MessageMeta {
+        ty: DataType::ImuData,
+        data_size: MESSAGE_SIZES[DataType::ImuData as usize],
+        endpoints: IMU_ENDPOINTS,
+    },
+    MessageMeta {
+        ty: DataType::BatteryStatus,
+        data_size: MESSAGE_SIZES[DataType::BatteryStatus as usize],
+        endpoints: BATT_ENDPOINTS,
+    },
+    MessageMeta {
+        ty: DataType::SystemStatus,
+        data_size: MESSAGE_SIZES[DataType::SystemStatus as usize],
+        endpoints: SYS_ENDPOINTS,
+    },
+];
+// -------------------------------------------------------------
+
+
+// ----------------------Not User Editable----------------------
 #[derive(Debug, Clone, Copy)]
 pub enum ElementKind {
     Bytes1,
@@ -50,6 +97,7 @@ pub enum ElementKind {
     U32OrF32,
     U64OrF64,
 }
+// Optional helpers that mirror the C++ "infer element type" idea.
 
 impl DataType {
     /// Per-type element count (from schema).
@@ -71,4 +119,15 @@ impl DataType {
             _ => ElementKind::Bytes1,
         }
     }
+}
+#[derive(Debug, Clone, Copy)]
+pub struct MessageMeta {
+    pub ty: DataType,
+    pub data_size: usize,
+    pub endpoints: &'static [DataEndpoint],
+}
+
+#[inline]
+pub fn message_meta(ty: DataType) -> &'static MessageMeta {
+    &MESSAGE_TYPES[ty as usize]
 }

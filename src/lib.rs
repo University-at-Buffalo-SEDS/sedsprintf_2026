@@ -5,12 +5,13 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
+
 #[cfg(test)]
 mod tests;
 
 
 // ---- core/alloc imports usable in both std and no_std ----
-use alloc::{string::String, sync::Arc, vec::Vec, format};
+use alloc::{format, string::String, sync::Arc, vec::Vec};
 use core::{convert::TryInto, fmt::Write};
 
 
@@ -61,16 +62,16 @@ mod embedded_alloc {
 // No custom panic handler needed.
 
 // ---------- Your portable core logic ----------
+mod c_api;
 mod config;
 mod router;
-mod schema;
 mod serialize;
-mod c_api;
 
 
-pub use config::{DataEndpoint, DataType};
+pub use config::{
+    message_meta, DataEndpoint, DataType, MessageMeta, MESSAGE_ELEMENTS, MESSAGE_SIZES,
+};
 pub use router::{BoardConfig, Router};
-pub use schema::{message_meta, MessageMeta, MESSAGE_ELEMENTS, MESSAGE_SIZES};
 pub use serialize::{deserialize_packet, serialize_packet, ByteReader};
 
 

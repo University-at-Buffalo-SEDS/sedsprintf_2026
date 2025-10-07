@@ -72,10 +72,8 @@ mod tests {
         use crate::router::EndpointHandler;
         use crate::router::Payload; // Router::log payload enum
         use crate::{
-            config::{DataEndpoint, DataType}, schema::{MESSAGE_ELEMENTS, MESSAGE_SIZES}, serialize, BoardConfig,
-            Router,
-            TelemetryError,
-            TelemetryPacket,
+            config::{DataEndpoint, DataType, MESSAGE_ELEMENTS, MESSAGE_SIZES},
+            serialize, BoardConfig, Router, TelemetryError, TelemetryPacket,
         };
         use std::sync::{Arc, Mutex};
 

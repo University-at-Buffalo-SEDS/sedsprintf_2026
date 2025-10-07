@@ -1,7 +1,6 @@
 // src/router.rs
 use crate::{
-    config::{DataEndpoint, DataType},
-    schema::message_meta,
+    config::{DataEndpoint, DataType, message_meta},
     serialize, validate_packet,
     TelemetryError, TelemetryPacket, Result,
 };
