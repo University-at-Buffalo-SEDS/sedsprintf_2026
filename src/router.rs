@@ -10,6 +10,7 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
 
 // -------------------- endpoint + board config --------------------
+/// The maximum number of retries for handlers before giving up.
 const MAX_NUMBER_OF_RETRYS: usize = 3;
 /// A local handler bound to a specific endpoint.
 pub struct EndpointHandler {
@@ -159,11 +160,15 @@ impl Router {
 
         if any_remote {
             if let Some(tx) = &self.transmit {
-                match tx(&bytes) {
-                    Ok(_) => {}
-                    Err(e) => {
-                        // If transmission fails, we can notify local endpoints about the error.
-                        self.handle_callback_error(pkt, None, e)?;
+                for i in 0..MAX_NUMBER_OF_RETRYS {
+                    match tx(&bytes) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            if i == MAX_NUMBER_OF_RETRYS - 1 {
+                                // create a packet to all endpoints except the one that failed
+                                self.handle_callback_error(pkt, None, e)?;
+                            }
+                        }
                     }
                 }
             }
