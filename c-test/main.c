@@ -47,11 +47,11 @@ static SedsResult rx_handler(const SedsPacketView * pkt, void * user)
 int main(void)
 {
     // Router B: local handler for RADIO only
-    SedsHandlerDesc b_handlers[] = {
+    SedsLocalEndpointDesc b_local_endpoint_handlers[] = {
         {SEDS_EP_RADIO, &rx_handler, NULL},
     };
     SedsRouter * router_b = seds_router_new(/*tx*/NULL, /*tx_user*/NULL,
-                                                  b_handlers, sizeof(b_handlers) / sizeof(b_handlers[0]));
+                                                  b_local_endpoint_handlers, sizeof(b_local_endpoint_handlers) / sizeof(b_local_endpoint_handlers[0]));
     if (!router_b)
     {
         fprintf(stderr, "failed to create router_b\n");
@@ -59,11 +59,11 @@ int main(void)
     }
 
     // Router A: local handler for SD_CARD, transmit loops into router B
-    const SedsHandlerDesc a_handlers[] = {
+    const SedsLocalEndpointDesc a_local_endpoint_handlers[] = {
         {SEDS_EP_SD, &rx_handler, NULL},
     };
     SedsRouter * router_a = seds_router_new(&loopback_tx, /*tx_user=*/router_b,
-                                            a_handlers, sizeof(a_handlers) / sizeof(a_handlers[0]));
+                                            a_local_endpoint_handlers, sizeof(a_local_endpoint_handlers) / sizeof(a_local_endpoint_handlers[0]));
     if (!router_a)
     {
         fprintf(stderr, "failed to create router_a\n");

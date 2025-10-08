@@ -64,12 +64,12 @@ typedef SedsResult (* SedsTransmitFn)(const uint8_t * bytes, size_t len, void * 
 typedef SedsResult (* SedsEndpointHandlerFn)(const SedsPacketView * pkt, void * user);
 
 /** \brief Endpoint handler descriptor (used when constructing a router). */
-typedef struct SedsHandlerDesc
+typedef struct SedsLocalEndpointDesc
 {
     uint32_t endpoint; /**< DataEndpoint as u32 */
     SedsEndpointHandlerFn handler; /**< Callback function */
     void * user; /**< Opaque user context passed to callback */
-} SedsHandlerDesc;
+} SedsLocalEndpointDesc;
 
 /**
  * \brief Get required buffer length for seds_pkt_header_string() (includes NUL).
@@ -136,7 +136,7 @@ SedsResult seds_pkt_to_string(const SedsPacketView * pkt, char * buf, size_t buf
  */
 SedsRouter * seds_router_new(SedsTransmitFn tx,
                              void * tx_user,
-                             const SedsHandlerDesc * handlers,
+                             const SedsLocalEndpointDesc * handlers,
                              size_t n_handlers);
 
 /**
