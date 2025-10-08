@@ -14,5 +14,5 @@ into strings for logging.
     - The thumbv7m-none-eabi target for Rust (if you want to build for ARM Cortex-M)
       Get it with:
   ```bash
-  rustup target add thumbv7m-none-eabi
+  rustup target add thumbv7em-none-eabihf
   ```
