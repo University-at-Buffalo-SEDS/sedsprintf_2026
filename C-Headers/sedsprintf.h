@@ -40,7 +40,7 @@ typedef enum
     SEDS_INVALID_TYPE = -3,
     SEDS_SIZE_MISMATCH = -4,
     SEDS_DESERIALIZE = -5
-} SedsError;
+} SedsResult;
 
 /** \brief Opaque Router handle. */
 typedef struct SedsRouter SedsRouter;
@@ -58,10 +58,10 @@ typedef struct SedsPacketView
 } SedsPacketView;
 
 /** \brief Transmit callback: return 0 on success, non-zero on failure. */
-typedef int (* SedsTransmitFn)(const uint8_t * bytes, size_t len, void * user);
+typedef SedsResult (* SedsTransmitFn)(const uint8_t * bytes, size_t len, void * user);
 
 /** \brief Local endpoint handler: return 0 on success, non-zero on failure. */
-typedef int (* SedsEndpointHandlerFn)(const SedsPacketView * pkt, void * user);
+typedef SedsResult (* SedsEndpointHandlerFn)(const SedsPacketView * pkt, void * user);
 
 /** \brief Endpoint handler descriptor (used when constructing a router). */
 typedef struct SedsHandlerDesc
@@ -76,14 +76,14 @@ typedef struct SedsHandlerDesc
  * \param pkt Pointer to a valid SedsPacketView.
  * \return Required number of bytes (>=1) or negative on error.
  */
-int seds_pkt_header_string_len(const SedsPacketView * pkt);
+SedsResult seds_pkt_header_string_len(const SedsPacketView * pkt);
 
 /**
  * \brief Get required buffer length for seds_pkt_to_string() (includes NUL).
  * \param pkt Pointer to a valid SedsPacketView.
  * \return Required number of bytes (>=1) or negative on error.
  */
-int seds_pkt_to_string_len(const SedsPacketView * pkt);
+SedsResult seds_pkt_to_string_len(const SedsPacketView * pkt);
 
 // ==============================
 // Packet -> string formatting (NEW)
@@ -102,7 +102,7 @@ int seds_pkt_to_string_len(const SedsPacketView * pkt);
  * \return         Required length including NUL on success (>=1), or a negative error code.
  *                 Possible errors: SEDS_BAD_ARG (-2).
  */
-int seds_pkt_header_string(const SedsPacketView * pkt, char * buf, size_t buf_len);
+SedsResult seds_pkt_header_string(const SedsPacketView * pkt, char * buf, size_t buf_len);
 
 /**
  * \brief Write the full packet (header + formatted payload) as text
@@ -118,7 +118,7 @@ int seds_pkt_header_string(const SedsPacketView * pkt, char * buf, size_t buf_le
  * \return         Required length including NUL on success (>=1), or a negative error code.
  *                 Possible errors: SEDS_BAD_ARG (-2).
  */
-int seds_pkt_to_string(const SedsPacketView * pkt, char * buf, size_t buf_len);
+SedsResult seds_pkt_to_string(const SedsPacketView * pkt, char * buf, size_t buf_len);
 
 
 // ==============================
@@ -174,13 +174,13 @@ typedef enum SedsElemKind
  * \param timestamp   Timestamp value to attach to the packet.
  * \return            0 on success; negative error code on failure (see status codes).
  */
-int seds_router_log_typed(SedsRouter * r,
-                          uint32_t ty,
-                          const void * data,
-                          size_t count,
-                          size_t elem_size,
-                          SedsElemKind elem_kind,
-                          uint64_t timestamp);
+SedsResult seds_router_log_typed(SedsRouter * r,
+                                 uint32_t ty,
+                                 const void * data,
+                                 size_t count,
+                                 size_t elem_size,
+                                 SedsElemKind elem_kind,
+                                 uint64_t timestamp);
 
 
 // ==============================
@@ -197,11 +197,11 @@ int seds_router_log_typed(SedsRouter * r,
  * \param timestamp Timestamp to attach.
  * \return          0 on success; negative error code on failure.
  */
-int seds_router_log_bytes(SedsRouter * r,
-                          uint32_t ty,
-                          const uint8_t * data,
-                          size_t len,
-                          uint64_t timestamp);
+SedsResult seds_router_log_bytes(SedsRouter * r,
+                                 uint32_t ty,
+                                 const uint8_t * data,
+                                 size_t len,
+                                 uint64_t timestamp);
 
 /**
  * \brief Log an array of f32 values; n_vals*4 must match the schema size for \p ty.
@@ -213,11 +213,11 @@ int seds_router_log_bytes(SedsRouter * r,
  * \param timestamp Timestamp to attach.
  * \return          0 on success; negative error code on failure.
  */
-int seds_router_log_f32(SedsRouter * r,
-                        uint32_t ty,
-                        const float * vals,
-                        size_t n_vals,
-                        uint64_t timestamp);
+SedsResult seds_router_log_f32(SedsRouter * r,
+                               uint32_t ty,
+                               const float * vals,
+                               size_t n_vals,
+                               uint64_t timestamp);
 
 
 // ==============================
@@ -232,9 +232,9 @@ int seds_router_log_f32(SedsRouter * r,
  * \param len   Length of \p bytes.
  * \return      0 on success; negative error code on failure.
  */
-int seds_router_receive(SedsRouter * r,
-                        const uint8_t * bytes,
-                        size_t len);
+SedsResult seds_router_receive(SedsRouter * r,
+                               const uint8_t * bytes,
+                               size_t len);
 
 /**
  * \brief Decode a packet view's payload into f32 values.
@@ -244,7 +244,7 @@ int seds_router_receive(SedsRouter * r,
  * \param n   Number of floats to decode; must satisfy n*4 == pkt->payload_len.
  * \return    0 on success; negative error code on failure.
  */
-int seds_pkt_get_f32(const SedsPacketView * pkt, float * out, size_t n);
+SedsResult seds_pkt_get_f32(const SedsPacketView * pkt, float * out, size_t n);
 
 /**
  * \brief Generic typed extractor (mirror of seds_router_log_typed).
@@ -260,11 +260,11 @@ int seds_pkt_get_f32(const SedsPacketView * pkt, float * out, size_t n);
  * \param elem_kind  Element kind (SEDS_EK_UNSIGNED, SEDS_EK_SIGNED, SEDS_EK_FLOAT).
  * \return           0 on success; negative error code on failure.
  */
-int seds_pkt_get_typed(const SedsPacketView * pkt,
-                       void * out,
-                       size_t count,
-                       size_t elem_size,
-                       SedsElemKind elem_kind);
+SedsResult seds_pkt_get_typed(const SedsPacketView * pkt,
+                              void * out,
+                              size_t count,
+                              size_t elem_size,
+                              SedsElemKind elem_kind);
 
 #ifdef __cplusplus
 } // extern "C"
@@ -363,11 +363,11 @@ namespace seds_detail
  * \return           0 on success; negative error code on failure.
  */
 template<typename T>
-static inline int seds_router(SedsRouter * router,
-                              uint32_t datatype,
-                              const T * data,
-                              size_t count,
-                              uint64_t timestamp)
+static inline SedsResult seds_router(SedsRouter * router,
+                                     uint32_t datatype,
+                                     const T * data,
+                                     size_t count,
+                                     uint64_t timestamp)
 {
     return seds_router_log_typed(router,
                                  datatype,
@@ -388,7 +388,7 @@ static inline int seds_router(SedsRouter * router,
  * \return     0 on success; negative error code on failure.
  */
 template<typename T>
-static inline int seds_pkt_get(const SedsPacketView * pkt, T * out, size_t count)
+static inline SedsResult seds_pkt_get(const SedsPacketView * pkt, T * out, size_t count)
 {
     return seds_pkt_get_typed(pkt,
                               (void *) out,

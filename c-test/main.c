@@ -9,7 +9,7 @@ static uint8_t g_last_tx[256];
 static size_t g_last_tx_len = 0;
 
 // ---- A transmit function that "sends" bytes to another router (loopback demo)
-static int loopback_tx(const uint8_t * bytes, size_t len, void * user)
+static SedsResult loopback_tx(const uint8_t * bytes, size_t len, void * user)
 {
     SedsRouter * remote = user;
 
@@ -30,11 +30,11 @@ static int loopback_tx(const uint8_t * bytes, size_t len, void * user)
 }
 
 // ---- A simple C endpoint handler: print metadata and decode f32 payloads
-static int rx_handler(const SedsPacketView * pkt, void * user)
+static SedsResult rx_handler(const SedsPacketView * pkt, void * user)
 {
     (void) user;
     char data[seds_pkt_to_string_len(pkt)];
-    SedsError status = seds_pkt_to_string(pkt, data, sizeof(data));
+    SedsResult status = seds_pkt_to_string(pkt, data, sizeof(data));
     if (status != SEDS_OK)
     {
         printf("rx_handler: seds_pkt_to_string failed: %d\n", status);
