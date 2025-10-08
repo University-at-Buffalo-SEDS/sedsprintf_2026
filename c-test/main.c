@@ -39,11 +39,11 @@ static int print_handler(const SedsPacketView* pkt, void* user) {
   // For GPS (3*f32 = 12 bytes), demonstrate decoding to floats:
   if (pkt->ty == SEDS_DT_GPS && pkt->payload_len == 12) {
     float vals[3];
-    int rc = seds_pkt_get_f32(pkt, vals, 3);
+    int rc = seds_pkt_get(pkt, vals, 3);
     if (rc == SEDS_OK) {
       printf("  payload(f32): [%g, %g, %g]\n", vals[0], vals[1], vals[2]);
     } else {
-      printf("  seds_pkt_get_f32 failed: %d\n", rc);
+      printf("  seds_pkt_get failed: %d\n", rc);
     }
   } else {
     // Otherwise just print first few bytes

@@ -89,6 +89,7 @@ pub struct TelemetryPacket {
 pub enum TelemetryError {
     InvalidType,
     SizeMismatch { expected: usize, got: usize },
+    SizeMismatchError,
     EmptyEndpoints,
     TimestampInvalid,
     MissingPayload,

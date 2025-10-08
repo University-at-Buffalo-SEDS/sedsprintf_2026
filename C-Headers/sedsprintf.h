@@ -94,7 +94,7 @@ void seds_router_free(SedsRouter *r);
 // Generic typed logging
 // ==============================
 
-/** \brief Element kind used by the generic logging API. */
+/** \brief Element kind used by the generic logging/extraction APIs. */
 typedef enum SedsElemKind {
     SEDS_EK_UNSIGNED = 0,  /**< u8/u16/u32/u64/... */
     SEDS_EK_SIGNED   = 1,  /**< i8/i16/i32/i64/... */
@@ -188,6 +188,26 @@ int seds_router_receive(SedsRouter *r,
  */
 int seds_pkt_get_f32(const SedsPacketView *pkt, float *out, size_t n);
 
+/**
+ * \brief Generic typed extractor (mirror of seds_router_log_typed).
+ *
+ * Reads \p count elements from \p pkt->payload as little-endian values of the
+ * given (elem_kind, elem_size) and writes them to \p out in host endianness.
+ * \p out may be unaligned. Supported elem_size values: 1,2,4,8.
+ *
+ * \param pkt        Pointer to a valid SedsPacketView (from a callback).
+ * \param out        Destination buffer (array of elements).
+ * \param count      Number of elements to decode.
+ * \param elem_size  Size of each element in bytes (1,2,4,8).
+ * \param elem_kind  Element kind (SEDS_EK_UNSIGNED, SEDS_EK_SIGNED, SEDS_EK_FLOAT).
+ * \return           0 on success; negative error code on failure.
+ */
+int seds_pkt_get_typed(const SedsPacketView *pkt,
+                       void *out,
+                       size_t count,
+                       size_t elem_size,
+                       SedsElemKind elem_kind);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif
@@ -226,14 +246,14 @@ template <> struct elem_traits<double>   { static constexpr SedsElemKind kind = 
  * \param data       Pointer to first element.
  * \param count      Number of elements.
  * \param timestamp  Timestamp to attach.
- * \return         0 on success; negative error code on failure.
+ * \return           0 on success; negative error code on failure.
  */
 template <typename T>
 static inline int seds_router(SedsRouter *router,
-                                  uint32_t datatype,
-                                  const T *data,
-                                  size_t count,
-                                  uint64_t timestamp)
+                              uint32_t datatype,
+                              const T *data,
+                              size_t count,
+                              uint64_t timestamp)
 {
     return seds_router_log_typed(router,
                                  datatype,
@@ -243,6 +263,25 @@ static inline int seds_router(SedsRouter *router,
                                  seds_detail::elem_traits<T>::kind,
                                  timestamp);
 }
+
+/**
+ * \brief C++ convenience extractor that deduces element kind/size from \p T.
+ *
+ * \tparam T   Element type (uint8_t/16/32/64, int8_t/16/32/64, float, double).
+ * \param pkt  Pointer to valid SedsPacketView.
+ * \param out  Destination buffer for \p count elements of \p T.
+ * \param count Number of elements to decode.
+ * \return     0 on success; negative error code on failure.
+ */
+template <typename T>
+static inline int seds_pkt_get(const SedsPacketView *pkt, T *out, size_t count)
+{
+    return seds_pkt_get_typed(pkt,
+                              (void*)out,
+                              count,
+                              seds_detail::elem_traits<T>::size,
+                              seds_detail::elem_traits<T>::kind);
+}
 #endif // __cplusplus
 
 #ifdef __cplusplus
@@ -250,7 +289,7 @@ static inline int seds_router(SedsRouter *router,
 #endif
 
 
-// ---------- C11 _Generic convenience macro ----------
+// ---------- C11 _Generic convenience macros ----------
 #if !defined(__cplusplus) && defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 
 /**
@@ -281,24 +320,50 @@ static inline int seds_router(SedsRouter *router,
 } while(0)
 
 /**
- * \brief C11 convenience wrapper that deduces element kind/size from \p ptr.
+ * \brief C11 convenience wrapper that deduces element kind/size from \p data.
  *
  * \param router     SedsRouter*
  * \param datatype   Data type (SedsDataType as u32)
  * \param data       Pointer to first element (e.g., uint16_t*, float*, ...)
  * \param count      Number of elements
  * \param timestamp  Timestamp to attach
- * \return       0 on success; negative error code on failure.
+ * \return          0 on success; negative error code on failure.
  */
-#define seds_router_log(router, datatype, data, count, timestamp)                                     \
+#define seds_router_log(router, datatype, data, count, timestamp)                      \
     (__extension__({                                                                    \
-        const void   *_seds_data  = (const void*)(data);                                 \
+        const void   *_seds_data  = (const void*)(data);                                \
         size_t        _seds_count = (size_t)(count);                                    \
         size_t        _seds_esize;                                                      \
         SedsElemKind  _seds_kind;                                                       \
-        SEDS__KIND_SIZE((data), _seds_kind, _seds_esize);                                 \
-        seds_router_log_typed((router), (datatype), _seds_data, _seds_count,                        \
-                              _seds_esize, _seds_kind, (timestamp));                            \
+        SEDS__KIND_SIZE((data), _seds_kind, _seds_esize);                               \
+        seds_router_log_typed((router), (datatype), _seds_data, _seds_count,            \
+                              _seds_esize, _seds_kind, (timestamp));                    \
+    }))
+
+/**
+ * \brief C11 convenience extractor that deduces element kind/size from \p out.
+ *
+ * Example:
+ * \code
+ *   float vals[16];
+ *   seds_pkt_get(pkt, vals, 16);
+ * \endcode
+ *
+ * \param pkt    Pointer to SedsPacketView.
+ * \param out    Destination pointer (type drives kind/size deduction).
+ * \param count  Number of elements to decode.
+ * \return       0 on success; negative error code on failure.
+ */
+#define SEDS__PKT_KIND_SIZE(x, KIND_OUT, SIZE_OUT) SEDS__KIND_SIZE(x, KIND_OUT, SIZE_OUT)
+
+#define seds_pkt_get(pkt, out, count)                                             \
+    (__extension__({                                                                    \
+        void       *_s_out     = (void*)(out);                                          \
+        size_t      _s_count   = (size_t)(count);                                       \
+        size_t      _s_esize;                                                           \
+        SedsElemKind _s_kind;                                                           \
+        SEDS__PKT_KIND_SIZE((out), _s_kind, _s_esize);                                  \
+        seds_pkt_get_typed((pkt), _s_out, _s_count, _s_esize, _s_kind);                 \
     }))
 
 #endif // C11 generic
