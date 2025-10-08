@@ -4,10 +4,12 @@ use crate::{
     serialize, Result, TelemetryError, TelemetryPacket,
 };
 
+use crate::config::DEVICE_IDENTIFIER;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
-// -------------------- endpoint + board config --------------------
 
+// -------------------- endpoint + board config --------------------
+const MAX_NUMBER_OF_RETRYS: usize = 3;
 /// A local handler bound to a specific endpoint.
 pub struct EndpointHandler {
     pub endpoint: DataEndpoint,
@@ -100,6 +102,48 @@ impl Router {
         }
     }
 
+    fn handle_callback_error(
+        &self,
+        pkt: &TelemetryPacket,
+        dest: Option<DataEndpoint>,
+        e: TelemetryError,
+    ) -> Result<()> {
+        let error_endpoints: Vec<DataEndpoint> = match dest {
+            Some(dest) => {
+                // If we know which endpoint failed, we create an error packet for all other endpoints.
+                pkt.endpoints
+                    .iter()
+                    .copied()
+                    .filter(|&ep| ep != dest)
+                    .collect()
+            }
+            None => {
+                // If we don't know which endpoint failed (e.g., transmission failure), we notify all local endpoints.
+                pkt.endpoints.iter().copied().collect()
+            }
+        };
+
+        let error_payload = match dest {
+            Some(dest) => format!(
+                "Handler for endpoint {:?} failed on device {:?}: {:?}",
+                dest, DEVICE_IDENTIFIER, e
+            ),
+            None => format!(
+                "TX Handler failed on device {:?}: {:?}",
+                DEVICE_IDENTIFIER, e
+            ),
+        };
+
+        let error_pkt = TelemetryPacket::new(
+            DataType::TelemetryError,
+            &error_endpoints,
+            pkt.timestamp,
+            Arc::<[u8]>::from(error_payload.into_bytes()),
+        )?;
+        // send the error packet
+        self.send(&error_pkt)
+    }
+
     /// Log (send) a packet: serialize once, transmit (if any remote endpoint), then deliver to matching locals.
     fn send(&self, pkt: &TelemetryPacket) -> Result<()> {
         pkt.validate()?;
@@ -114,14 +158,31 @@ impl Router {
 
         if any_remote {
             if let Some(tx) = &self.transmit {
-                tx(&bytes)?;
+                match tx(&bytes) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        // If transmission fails, we can notify local endpoints about the error.
+                        self.handle_callback_error(pkt, None, e)?;
+                    }
+                }
             }
         }
 
         for &dest in pkt.endpoints.iter() {
             for h in &self.cfg.handlers {
                 if h.endpoint == dest {
-                    (h.handler)(pkt)?;
+                    for i in 0..MAX_NUMBER_OF_RETRYS {
+                        match (h.handler)(pkt) {
+                            Ok(_) => break,
+                            Err(e) => {
+                                // Here we just retry up to 3 times.
+                                if i == MAX_NUMBER_OF_RETRYS - 1 {
+                                    // create a packet to all endpoints except the one that failed
+                                    self.handle_callback_error(pkt, Some(dest), e)?;
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -135,7 +196,18 @@ impl Router {
         for &dest in pkt.endpoints.iter() {
             for h in &self.cfg.handlers {
                 if h.endpoint == dest {
-                    (h.handler)(&pkt)?;
+                    for i in 0..MAX_NUMBER_OF_RETRYS {
+                        match (h.handler)(&pkt) {
+                            Ok(_) => break,
+                            Err(e) => {
+                                // Here we just retry up to 3 times.
+                                if i == MAX_NUMBER_OF_RETRYS - 1 {
+                                    // create a packet to all endpoints except the one that failed
+                                    self.handle_callback_error(&pkt, Some(dest), e)?;
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

@@ -4,6 +4,7 @@ use core::mem::size_of;
 
 //----------------------User Editable----------------------
 
+pub const DEVICE_IDENTIFIER: &str = "TEST_PLATFORM";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u32)]
 pub enum DataEndpoint {
@@ -30,10 +31,11 @@ pub enum DataType {
     BatteryStatus = 2,
     SystemStatus = 3,
     BarometerData = 4,
+    TelemetryError = 5,
 }
 
 impl DataType {
-    pub const COUNT: usize = 5;
+    pub const COUNT: usize = 6;
 
     #[inline]
     pub fn as_str(self) -> &'static str {
@@ -43,12 +45,13 @@ impl DataType {
             DataType::BatteryStatus => "BATTERY_STATUS",
             DataType::SystemStatus => "SYSTEM_STATUS",
             DataType::BarometerData => "BAROMETER_DATA",
+            DataType::TelemetryError => "TELEMETRY_ERROR",
         }
     }
 }
 
 /// how many elements each message carries
-pub const MESSAGE_ELEMENTS: [usize; DataType::COUNT] = [3, 6, 2, 8, 1];
+pub const MESSAGE_ELEMENTS: [usize; DataType::COUNT] = [3, 6, 2, 8, 1, 1];
 
 /// total byte size per message (mirrors the C++ `message_size[]`)
 /// GPS/IMU/BATTERY use f32 (=4 bytes each element). SYSTEM_STATUS uses u8.
@@ -58,6 +61,7 @@ pub const MESSAGE_SIZES: [usize; DataType::COUNT] = [
     size_of::<u32>() * MESSAGE_ELEMENTS[DataType::BatteryStatus as usize], // 2 * f32
     size_of::<bool>() * MESSAGE_ELEMENTS[DataType::SystemStatus as usize], // 8 * u8
     size_of::<u32>() * MESSAGE_ELEMENTS[DataType::SystemStatus as usize], // 8 * u8
+    size_of::<&str>() * MESSAGE_ELEMENTS[DataType::BarometerData as usize], // 1 * f32
 ];
 
 /// Static default endpoints per type (no heap, just slices).
@@ -66,6 +70,10 @@ pub const IMU_ENDPOINTS: &[DataEndpoint] = &[DataEndpoint::SdCard, DataEndpoint:
 pub const BATT_ENDPOINTS: &[DataEndpoint] = &[DataEndpoint::SdCard, DataEndpoint::Radio];
 pub const SYS_ENDPOINTS: &[DataEndpoint] = &[DataEndpoint::SdCard];
 pub const BAROMETER_ENDPOINTS: &[DataEndpoint] = &[DataEndpoint::SdCard, DataEndpoint::Radio];
+
+pub const TELEMETRY_ERROR_ENDPOINTS: &[DataEndpoint] = &[DataEndpoint::SdCard, DataEndpoint::Radio];
+
+/// All message types with their metadata.
 
 pub const MESSAGE_TYPES: [MessageMeta; DataType::COUNT] = [
     MessageMeta {
@@ -92,6 +100,11 @@ pub const MESSAGE_TYPES: [MessageMeta; DataType::COUNT] = [
         ty: DataType::BarometerData,
         data_size: MESSAGE_SIZES[DataType::BarometerData as usize],
         endpoints: BAROMETER_ENDPOINTS,
+    },
+    MessageMeta {
+        ty: DataType::TelemetryError,
+        data_size: MESSAGE_SIZES[DataType::TelemetryError as usize],
+        endpoints: TELEMETRY_ERROR_ENDPOINTS,
     },
 ];
 // -------------------------------------------------------------
