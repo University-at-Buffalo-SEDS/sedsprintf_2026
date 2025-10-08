@@ -2,9 +2,12 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        packet_header_string, packet_to_string, serialize, validate_packet, DataEndpoint,
-        MESSAGE_ELEMENTS, MESSAGE_SIZES,
+        config::{DataEndpoint, DataType, MESSAGE_ELEMENTS, MESSAGE_SIZES},
+        serialize, Result, TelemetryPacket,
     };
+    use core::convert::TryInto;
+    use std::sync::{Arc, Mutex};
+    use std::vec::Vec;
 
 
     #[test]
@@ -17,7 +20,7 @@ mod tests {
     fn serialize_roundtrip_gps() {
         // GPS: 3 * f32
         let endpoints = &[DataEndpoint::SdCard, DataEndpoint::Radio];
-        let pkt = packet_from_f32_slice(
+        let pkt = TelemetryPacket::from_f32_slice(
             DataType::GpsData,
             &[5.2141414, 3.1342144, 1.1231232],
             endpoints,
@@ -25,12 +28,12 @@ mod tests {
         )
         .unwrap();
 
-        validate_packet(&pkt).unwrap();
+        pkt.validate().unwrap();
 
         let bytes = serialize::serialize_packet(&pkt);
         let rpkt = serialize::deserialize_packet(&bytes).unwrap();
 
-        validate_packet(&rpkt).unwrap();
+        rpkt.validate().unwrap();
         assert_eq!(rpkt.ty, pkt.ty);
         assert_eq!(rpkt.data_size, pkt.data_size);
         assert_eq!(rpkt.timestamp, pkt.timestamp);
@@ -41,8 +44,10 @@ mod tests {
     #[test]
     fn header_string_matches_expectation() {
         let endpoints = &[DataEndpoint::SdCard, DataEndpoint::Radio];
-        let pkt = packet_from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], endpoints, 0).unwrap();
-        let s = packet_header_string(&pkt);
+        let pkt =
+            TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], endpoints, 0)
+                .unwrap();
+        let s = pkt.header_string();
         assert_eq!(
             s,
             "Type: GPS_DATA, Size: 12, Endpoints: [SD_CARD, RADIO], Timestamp: 0"
@@ -53,8 +58,9 @@ mod tests {
     fn packet_to_string_formats_floats() {
         let endpoints = &[DataEndpoint::SdCard, DataEndpoint::Radio];
         let pkt =
-            packet_from_f32_slice(DataType::GpsData, &[1.0, 2.5, 3.25], endpoints, 0).unwrap();
-        let text = packet_to_string(&pkt);
+            TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.5, 3.25], endpoints, 0)
+                .unwrap();
+        let text = pkt.to_string_alloc();
         assert!(text.starts_with(
             "Type: GPS_DATA, Size: 12, Endpoints: [SD_CARD, RADIO], Timestamp: 0, Data: "
         ));
@@ -63,19 +69,10 @@ mod tests {
         assert!(text.contains("3.25"));
     }
 
-
-    use crate::{config::DataType, packet_from_f32_slice};
-
-
     #[test]
     fn router_sends_and_receives() {
         use crate::router::EndpointHandler;
-        use crate::router::Payload; // Router::log payload enum
-        use crate::{
-            config::{DataEndpoint, DataType, MESSAGE_ELEMENTS, MESSAGE_SIZES},
-            serialize, BoardConfig, Router, TelemetryError, TelemetryPacket,
-        };
-        use std::sync::{Arc, Mutex};
+        use crate::{BoardConfig, Router};
 
         // capture spaces
         let tx_seen: Arc<Mutex<Option<TelemetryPacket>>> = Arc::new(Mutex::new(None));
@@ -83,7 +80,7 @@ mod tests {
 
         // transmitter: record the deserialized packet we "sent"
         let tx_seen_c = tx_seen.clone();
-        let transmit = move |bytes: &[u8]| -> Result<(), TelemetryError> {
+        let transmit = move |bytes: &[u8]| -> Result<()> {
             let pkt = serialize::deserialize_packet(bytes)?;
             *tx_seen_c.lock().unwrap() = Some(pkt);
             Ok(())
@@ -115,9 +112,7 @@ mod tests {
 
         // send GPS_DATA (3 * f32) using Router::log (uses default endpoints from schema)
         let data = [1.0_f32, 2.0, 3.0];
-        router
-            .log(DataType::GpsData, Payload::F32(&data), 0)
-            .unwrap();
+        router.log(DataType::GpsData, &data, 0).unwrap();
 
         // --- assertions ---
 

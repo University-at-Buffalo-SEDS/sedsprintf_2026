@@ -86,9 +86,9 @@ int main(void) {
   //  - call transmit (bytes -> router_b)
   //  - locally dispatch to endpoints present (SD on router_a)
   float gps[3] = { 1.0f, 2.5f, 3.25f };
-  int rc = seds_router_log_f32(router_a, SEDS_DT_GPS, gps, 3, /*timestamp=*/0);
+  const int rc = seds_router_log(router_a, SEDS_DT_GPS, gps, 3, /*timestamp=*/0);
   if (rc != SEDS_OK) {
-    fprintf(stderr, "seds_router_log_f32 failed: %d\n", rc);
+    fprintf(stderr, "seds_router_log failed: %d\n", rc);
   }
 
   // (Optional) Demonstrate calling seds_router_receive() yourself with the last TX copy.

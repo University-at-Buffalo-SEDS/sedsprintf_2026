@@ -4,13 +4,14 @@
 
 use crate::{
     config::DataEndpoint,
-    router::{BoardConfig, EndpointHandler, Payload, Router},
-    DataType, Result, TelemetryError, TelemetryPacket,
+    router::{BoardConfig, EndpointHandler, Router}
+    , DataType, Result, TelemetryError, TelemetryPacket,
 };
 
 use alloc::{boxed::Box, vec::Vec};
 use core::{ffi::c_void, ptr};
 
+// ----------------- router wrapper -----------------
 
 #[repr(C)]
 pub struct SedsRouter {
@@ -45,7 +46,6 @@ struct CHandler {
     cb: CEndpointHandler,
     user_addr: usize, // store pointer as integer to avoid capturing *mut c_void
 }
-// Safety: we just pass the opaque address through; thread-safety is caller’s contract.
 unsafe impl Send for CHandler {}
 unsafe impl Sync for CHandler {}
 
@@ -57,7 +57,7 @@ struct TxCtx {
 unsafe impl Send for TxCtx {}
 unsafe impl Sync for TxCtx {}
 
-// ----- helpers -----
+// ----------------- helpers -----------------
 
 #[inline]
 fn status_from_err(e: TelemetryError) -> i32 {
@@ -87,7 +87,7 @@ fn endpoint_from_u32(x: u32) -> Result<DataEndpoint> {
     DataEndpoint::try_from_u32(x).ok_or(TelemetryError::Deserialize("bad endpoint"))
 }
 
-// ----- FFI: new/free -----
+// ----------------- FFI: new/free -----------------
 
 #[no_mangle]
 pub extern "C" fn seds_router_new(
@@ -176,7 +176,8 @@ pub extern "C" fn seds_router_free(r: *mut SedsRouter) {
     }
 }
 
-// ----- FFI: log -----
+// ----------------- FFI: log (bytes / f32) -----------------
+// These call the new generic Router::log::<T>() directly.
 
 #[no_mangle]
 pub extern "C" fn seds_router_log_bytes(
@@ -195,7 +196,7 @@ pub extern "C" fn seds_router_log_bytes(
     };
     let router = unsafe { &(*r).inner };
     let slice = unsafe { core::slice::from_raw_parts(data, len) };
-    ok_or_status(router.log(ty, Payload::Bytes(slice), ts))
+    ok_or_status(router.log::<u8>(ty, slice, ts))
 }
 
 #[no_mangle]
@@ -215,10 +216,10 @@ pub extern "C" fn seds_router_log_f32(
     };
     let router = unsafe { &(*r).inner };
     let slice = unsafe { core::slice::from_raw_parts(vals, n_vals) };
-    ok_or_status(router.log(ty, Payload::F32(slice), ts))
+    ok_or_status(router.log::<f32>(ty, slice, ts))
 }
 
-// ----- FFI: receive serialized -----
+// ----------------- FFI: receive serialized -----------------
 
 #[no_mangle]
 pub extern "C" fn seds_router_receive(r: *mut SedsRouter, bytes: *const u8, len: usize) -> i32 {
@@ -227,10 +228,10 @@ pub extern "C" fn seds_router_receive(r: *mut SedsRouter, bytes: *const u8, len:
     }
     let router = unsafe { &(*r).inner };
     let slice = unsafe { core::slice::from_raw_parts(bytes, len) };
-    ok_or_status(router.receive(slice)) // matches your current method name
+    ok_or_status(router.receive(slice))
 }
 
-// ----- Optional helper: decode f32 from a packet view -----
+// ----------------- Optional helper: decode f32 from a packet view -----------------
 
 #[no_mangle]
 pub extern "C" fn seds_pkt_get_f32(pkt: *const SedsPacketView, out: *mut f32, n: usize) -> i32 {
@@ -255,4 +256,75 @@ pub extern "C" fn seds_pkt_get_f32(pkt: *const SedsPacketView, out: *mut f32, n:
         }
     }
     0
+}
+
+
+use crate::router::LeBytes; // bring the trait bound into scope
+
+const SEDS_EK_UNSIGNED: u32 = 0;
+const SEDS_EK_SIGNED:   u32 = 1;
+const SEDS_EK_FLOAT:    u32 = 2;
+
+/// Read possibly-unaligned elements from `data` into a Vec<T>, then call Router::log<T>.
+#[inline]
+unsafe fn log_unaligned_slice<T: LeBytes>(
+    router: &Router,
+    ty: DataType,
+    data: *const core::ffi::c_void,
+    count: usize,
+    ts: u64,
+) -> Result<()> {
+    use core::{mem, ptr};
+    let mut tmp: alloc::vec::Vec<T> = alloc::vec::Vec::with_capacity(count);
+    let elem_size = mem::size_of::<T>();
+    let base = data as *const u8;
+    for i in 0..count {
+        let p = base.add(i * elem_size) as *const T;
+        // read without requiring alignment
+        let v = ptr::read_unaligned(p);
+        tmp.push(v);
+    }
+    router.log::<T>(ty, &tmp, ts)
+}
+
+#[no_mangle]
+pub extern "C" fn seds_router_log_typed(
+    r: *mut SedsRouter,
+    ty_u32: u32,
+    data: *const c_void,
+    count: usize,
+    elem_size: usize,     // 1,2,4,8
+    elem_kind: u32,       // 0=unsigned,1=signed,2=float
+    ts: u64,
+) -> i32 {
+    if r.is_null() || (count > 0 && data.is_null()) {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let ty = match dtype_from_u32(ty_u32) {
+        Ok(t) => t,
+        Err(_) => return status_from_err(TelemetryError::InvalidType),
+    };
+    let router = unsafe { &(*r).inner };
+
+    // dispatch on (elem_kind, elem_size)
+    let res = unsafe {
+        match (elem_kind, elem_size) {
+            (SEDS_EK_UNSIGNED, 1) => log_unaligned_slice::<u8>(router, ty, data, count, ts),
+            (SEDS_EK_UNSIGNED, 2) => log_unaligned_slice::<u16>(router, ty, data, count, ts),
+            (SEDS_EK_UNSIGNED, 4) => log_unaligned_slice::<u32>(router, ty, data, count, ts),
+            (SEDS_EK_UNSIGNED, 8) => log_unaligned_slice::<u64>(router, ty, data, count, ts),
+
+            (SEDS_EK_SIGNED,   1) => log_unaligned_slice::<i8>(router,  ty, data, count, ts),
+            (SEDS_EK_SIGNED,   2) => log_unaligned_slice::<i16>(router, ty, data, count, ts),
+            (SEDS_EK_SIGNED,   4) => log_unaligned_slice::<i32>(router, ty, data, count, ts),
+            (SEDS_EK_SIGNED,   8) => log_unaligned_slice::<i64>(router, ty, data, count, ts),
+
+            (SEDS_EK_FLOAT,    4) => log_unaligned_slice::<f32>(router, ty, data, count, ts),
+            (SEDS_EK_FLOAT,    8) => log_unaligned_slice::<f64>(router, ty, data, count, ts),
+
+            _ => return status_from_err(TelemetryError::BadArg),
+        }
+    };
+
+    ok_or_status(res)
 }

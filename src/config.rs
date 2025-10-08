@@ -91,36 +91,6 @@ pub const MESSAGE_TYPES: [MessageMeta; DataType::COUNT] = [
 
 // ----------------------Not User Editable----------------------
 #[derive(Debug, Clone, Copy)]
-pub enum ElementKind {
-    Bytes1,
-    U16,
-    U32OrF32,
-    U64OrF64,
-}
-// Optional helpers that mirror the C++ "infer element type" idea.
-
-impl DataType {
-    /// Per-type element count (from schema).
-    pub fn elements(self) -> usize {
-        MESSAGE_ELEMENTS[self as usize]
-    }
-    /// Per-type total byte size (from schema).
-    pub fn total_size(self) -> usize {
-        MESSAGE_SIZES[self as usize]
-    }
-    /// Heuristic element kind for formatting/typed views.
-    pub fn element_kind(self) -> ElementKind {
-        let elems = self.elements().max(1);
-        match self.total_size() / elems {
-            1 => ElementKind::Bytes1,
-            2 => ElementKind::U16,
-            4 => ElementKind::U32OrF32,
-            8 => ElementKind::U64OrF64,
-            _ => ElementKind::Bytes1,
-        }
-    }
-}
-#[derive(Debug, Clone, Copy)]
 pub struct MessageMeta {
     pub ty: DataType,
     pub data_size: usize,

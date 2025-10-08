@@ -92,162 +92,264 @@ pub enum TelemetryError {
     EmptyEndpoints,
     TimestampInvalid,
     MissingPayload,
+    BadArg,
     Deserialize(&'static str),
     Io(&'static str),
 }
 
 pub type Result<T> = core::result::Result<T, TelemetryError>;
 
-pub fn validate_packet(pkt: &TelemetryPacket) -> Result<()> {
-    let meta = message_meta(pkt.ty);
-    if pkt.data_size != meta.data_size {
-        return Err(TelemetryError::SizeMismatch {
-            expected: meta.data_size,
-            got: pkt.data_size,
-        });
+// -------------------- TelemetryPacket impl --------------------
+impl TelemetryPacket {
+    /// Create a packet from a raw payload (validated against `message_meta(ty)`).
+    pub fn new(
+        ty: DataType,
+        endpoints: &[DataEndpoint],
+        timestamp: u64,
+        payload: Arc<[u8]>,
+    ) -> Result<Self> {
+        let meta = message_meta(ty);
+        if endpoints.is_empty() {
+            return Err(TelemetryError::EmptyEndpoints);
+        }
+        if payload.len() != meta.data_size {
+            return Err(TelemetryError::SizeMismatch {
+                expected: meta.data_size,
+                got: payload.len(),
+            });
+        }
+        Ok(Self {
+            ty,
+            data_size: meta.data_size,
+            endpoints: Arc::<[DataEndpoint]>::from(endpoints.to_vec()),
+            timestamp,
+            payload,
+        })
     }
-    if pkt.endpoints.is_empty() {
-        return Err(TelemetryError::EmptyEndpoints);
+
+    /// Convenience: create from a slice of `u8` (copied).
+    pub fn from_u8_slice(
+        ty: DataType,
+        bytes: &[u8],
+        endpoints: &[DataEndpoint],
+        timestamp: u64,
+    ) -> Result<Self> {
+        let meta = message_meta(ty);
+        if bytes.len() != meta.data_size {
+            return Err(TelemetryError::SizeMismatch {
+                expected: meta.data_size,
+                got: bytes.len(),
+            });
+        }
+        Self::new(ty, endpoints, timestamp, Arc::<[u8]>::from(bytes.to_vec()))
     }
-    if pkt.payload.len() != pkt.data_size {
-        return Err(TelemetryError::SizeMismatch {
-            expected: pkt.data_size,
-            got: pkt.payload.len(),
-        });
+
+    /// Convenience: create from a slice of `f32` (copied, little-endian).
+    pub fn from_f32_slice(
+        ty: DataType,
+        values: &[f32],
+        endpoints: &[DataEndpoint],
+        timestamp: u64,
+    ) -> Result<Self> {
+        let meta = message_meta(ty);
+        let need = values.len() * 4;
+        if need != meta.data_size {
+            return Err(TelemetryError::SizeMismatch {
+                expected: meta.data_size,
+                got: need,
+            });
+        }
+        let mut bytes = Vec::with_capacity(need);
+        for v in values {
+            bytes.extend_from_slice(&v.to_le_bytes());
+        }
+        Self::new(ty, endpoints, timestamp, Arc::<[u8]>::from(bytes))
     }
-    Ok(())
+
+    /// Validate internal invariants (size, endpoints, etc.).
+    pub fn validate(&self) -> Result<()> {
+        let meta = message_meta(self.ty);
+        if self.data_size != meta.data_size {
+            return Err(TelemetryError::SizeMismatch {
+                expected: meta.data_size,
+                got: self.data_size,
+            });
+        }
+        if self.endpoints.is_empty() {
+            return Err(TelemetryError::EmptyEndpoints);
+        }
+        if self.payload.len() != self.data_size {
+            return Err(TelemetryError::SizeMismatch {
+                expected: self.data_size,
+                got: self.payload.len(),
+            });
+        }
+        Ok(())
+    }
+
+    fn build_endpoint_string(&self, endpoints: &mut String) {
+        for (i, ep) in self.endpoints.iter().enumerate() {
+            if i > 0 {
+                endpoints.push_str(", ");
+            }
+            endpoints.push_str(ep.as_str());
+        }
+    }
+
+    /// Header line without data payload.
+    pub fn header_string(&self) -> String {
+        // build endpoints list without std::String::join
+        let mut endpoints = String::new();
+        self.build_endpoint_string(&mut endpoints);
+        format!(
+            "Type: {}, Size: {}, Endpoints: [{}], Timestamp: {}",
+            self.ty.as_str(),
+            self.data_size,
+            endpoints,
+            self.timestamp
+        )
+    }
+
+    /// Full pretty string including decoded data portion.
+    pub fn to_string_alloc(&self) -> String {
+        const MAX_PRECISION: usize = 12;
+
+        let mut s = String::new();
+        s.push_str(&self.header_string());
+
+        if self.payload.is_empty() {
+            s.push_str(", Data: <empty>");
+            return s;
+        }
+
+        let elem_count = MESSAGE_ELEMENTS[self.ty as usize].max(1);
+        let per_elem = MESSAGE_SIZES[self.ty as usize] / elem_count;
+
+        s.push_str(", Data: ");
+
+        match per_elem {
+            4 if self.payload.len() % 4 == 0 => {
+                for (i, chunk) in self.payload.chunks_exact(4).enumerate() {
+                    let v = f32::from_le_bytes(chunk.try_into().unwrap());
+                    let _ = write!(s, "{v:.prec$}", prec = MAX_PRECISION);
+                    if i + 1 < self.payload.len() / 4 {
+                        s.push_str(", ");
+                    }
+                }
+            }
+            8 if self.payload.len() % 8 == 0 => {
+                for (i, chunk) in self.payload.chunks_exact(8).enumerate() {
+                    let v = f64::from_le_bytes(chunk.try_into().unwrap());
+                    let _ = write!(s, "{v:.prec$}", prec = MAX_PRECISION);
+                    if i + 1 < self.payload.len() / 8 {
+                        s.push_str(", ");
+                    }
+                }
+            }
+            2 if self.payload.len() % 2 == 0 => {
+                for (i, chunk) in self.payload.chunks_exact(2).enumerate() {
+                    let v = u16::from_le_bytes(chunk.try_into().unwrap());
+                    let _ = write!(s, "{v}");
+                    if i + 1 < self.payload.len() / 2 {
+                        s.push_str(", ");
+                    }
+                }
+            }
+            1 => {
+                for (i, b) in self.payload.iter().enumerate() {
+                    let _ = write!(s, "{}", *b);
+                    if i + 1 < self.payload.len() {
+                        s.push_str(", ");
+                    }
+                }
+            }
+            _ => {
+                for (i, b) in self.payload.iter().enumerate() {
+                    let _ = write!(s, "0x{:02x}", b);
+                    if i + 1 < self.payload.len() {
+                        s.push(' ');
+                    }
+                }
+            }
+        }
+
+        s
+    }
 }
 
-pub fn packet_header_string(pkt: &TelemetryPacket) -> String {
-    // build endpoints list without std::String join
-    let mut endpoints = String::new();
-    for (i, ep) in pkt.endpoints.iter().enumerate() {
-        if i > 0 {
-            endpoints.push_str(", ");
+// ---- Optional: Display so we can `format!("{pkt}")` ----
+impl core::fmt::Display for TelemetryPacket {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        // endpoints
+        {
+            let mut endpoints = String::new();
+            self.build_endpoint_string(&mut endpoints);
+            write!(
+                f,
+                "Type: {}, Size: {}, Endpoints: [{}], Timestamp: {}",
+                self.ty.as_str(),
+                self.data_size,
+                endpoints,
+                self.timestamp
+            )?;
         }
-        endpoints.push_str(ep.as_str());
-    }
-    // `format!` works in no_std with `alloc`
-    format!(
-        "Type: {}, Size: {}, Endpoints: [{}], Timestamp: {}",
-        pkt.ty.as_str(),
-        pkt.data_size,
-        endpoints,
-        pkt.timestamp
-    )
-}
 
-pub fn packet_to_string(pkt: &TelemetryPacket) -> String {
-    const MAX_PRECISION: usize = 12;
+        if self.payload.is_empty() {
+            write!(f, ", Data: <empty>")?;
+            return Ok(());
+        }
 
-    let mut s = String::new();
-    s.push_str(&packet_header_string(pkt));
+        let elem_count = MESSAGE_ELEMENTS[self.ty as usize].max(1);
+        let per_elem = MESSAGE_SIZES[self.ty as usize] / elem_count;
 
-    if pkt.payload.is_empty() {
-        s.push_str(", Data: <empty>");
-        return s;
-    }
+        write!(f, ", Data: ")?;
 
-    let elem_count = MESSAGE_ELEMENTS[pkt.ty as usize].max(1);
-    let per_elem = MESSAGE_SIZES[pkt.ty as usize] / elem_count;
-
-    s.push_str(", Data: ");
-
-    match per_elem {
-        4 if pkt.payload.len() % 4 == 0 => {
-            for (i, chunk) in pkt.payload.chunks_exact(4).enumerate() {
-                let v = f32::from_le_bytes(chunk.try_into().unwrap());
-                let _ = write!(s, "{v:.prec$}", prec = MAX_PRECISION);
-                if i + 1 < pkt.payload.len() / 4 {
-                    s.push_str(", ");
+        match per_elem {
+            4 if self.payload.len() % 4 == 0 => {
+                for (i, chunk) in self.payload.chunks_exact(4).enumerate() {
+                    let v = f32::from_le_bytes(chunk.try_into().unwrap());
+                    write!(f, "{v:.12}")?;
+                    if i + 1 < self.payload.len() / 4 {
+                        write!(f, ", ")?;
+                    }
+                }
+            }
+            8 if self.payload.len() % 8 == 0 => {
+                for (i, chunk) in self.payload.chunks_exact(8).enumerate() {
+                    let v = f64::from_le_bytes(chunk.try_into().unwrap());
+                    write!(f, "{v:.12}")?;
+                    if i + 1 < self.payload.len() / 8 {
+                        write!(f, ", ")?;
+                    }
+                }
+            }
+            2 if self.payload.len() % 2 == 0 => {
+                for (i, chunk) in self.payload.chunks_exact(2).enumerate() {
+                    let v = u16::from_le_bytes(chunk.try_into().unwrap());
+                    write!(f, "{v}")?;
+                    if i + 1 < self.payload.len() / 2 {
+                        write!(f, ", ")?;
+                    }
+                }
+            }
+            1 => {
+                for (i, b) in self.payload.iter().enumerate() {
+                    write!(f, "{}", *b)?;
+                    if i + 1 < self.payload.len() {
+                        write!(f, ", ")?;
+                    }
+                }
+            }
+            _ => {
+                for (i, b) in self.payload.iter().enumerate() {
+                    write!(f, "0x{:02x}", b)?;
+                    if i + 1 < self.payload.len() {
+                        write!(f, " ")?;
+                    }
                 }
             }
         }
-        8 if pkt.payload.len() % 8 == 0 => {
-            for (i, chunk) in pkt.payload.chunks_exact(8).enumerate() {
-                let v = f64::from_le_bytes(chunk.try_into().unwrap());
-                let _ = write!(s, "{v:.prec$}", prec = MAX_PRECISION);
-                if i + 1 < pkt.payload.len() / 8 {
-                    s.push_str(", ");
-                }
-            }
-        }
-        2 if pkt.payload.len() % 2 == 0 => {
-            for (i, chunk) in pkt.payload.chunks_exact(2).enumerate() {
-                let v = u16::from_le_bytes(chunk.try_into().unwrap());
-                let _ = write!(s, "{v}");
-                if i + 1 < pkt.payload.len() / 2 {
-                    s.push_str(", ");
-                }
-            }
-        }
-        1 => {
-            for (i, b) in pkt.payload.iter().enumerate() {
-                let _ = write!(s, "{}", *b as u8);
-                if i + 1 < pkt.payload.len() {
-                    s.push_str(", ");
-                }
-            }
-        }
-        _ => {
-            for (i, b) in pkt.payload.iter().enumerate() {
-                let _ = write!(s, "0x{:02x}", b);
-                if i + 1 < pkt.payload.len() {
-                    s.push(' ');
-                }
-            }
-        }
-    }
 
-    s
-}
-
-/// Convenience helpers to create a packet from typed slices, enforcing size.
-pub fn packet_from_f32_slice(
-    ty: DataType,
-    values: &[f32],
-    endpoints: &[DataEndpoint],
-    timestamp: u64,
-) -> Result<TelemetryPacket> {
-    let meta = message_meta(ty);
-    let need = values.len() * 4;
-    if need != meta.data_size {
-        return Err(TelemetryError::SizeMismatch {
-            expected: meta.data_size,
-            got: need,
-        });
+        Ok(())
     }
-    let mut bytes = Vec::with_capacity(need);
-    for v in values {
-        bytes.extend_from_slice(&v.to_le_bytes());
-    }
-    Ok(TelemetryPacket {
-        ty,
-        data_size: meta.data_size,
-        endpoints: Arc::<[DataEndpoint]>::from(endpoints.to_vec()),
-        timestamp,
-        payload: Arc::<[u8]>::from(bytes),
-    })
-}
-
-pub fn packet_from_u8_slice(
-    ty: DataType,
-    bytes: &[u8],
-    endpoints: &[DataEndpoint],
-    timestamp: u64,
-) -> Result<TelemetryPacket> {
-    let meta = message_meta(ty);
-    if bytes.len() != meta.data_size {
-        return Err(TelemetryError::SizeMismatch {
-            expected: meta.data_size,
-            got: bytes.len(),
-        });
-    }
-    Ok(TelemetryPacket {
-        ty,
-        data_size: meta.data_size,
-        endpoints: Arc::<[DataEndpoint]>::from(endpoints.to_vec()),
-        timestamp,
-        payload: Arc::<[u8]>::from(bytes.to_vec()),
-    })
 }

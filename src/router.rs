@@ -1,12 +1,13 @@
 // src/router.rs
 use crate::{
-    config::{DataEndpoint, DataType, message_meta},
-    serialize, validate_packet,
-    TelemetryError, TelemetryPacket, Result,
+    config::{message_meta, DataEndpoint, DataType},
+    serialize,
+    Result, TelemetryError, TelemetryPacket,
 };
 
-// <- pull from alloc so this works under both std and no_std
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
+
+// -------------------- endpoint + board config --------------------
 
 /// A local handler bound to a specific endpoint.
 pub struct EndpointHandler {
@@ -30,74 +31,58 @@ impl BoardConfig {
     }
 }
 
-/// Typed payload the caller can pass to `Router::log`.
-pub enum Payload<'a> {
-    Bytes(&'a [u8]),
-    F32(&'a [f32]),
-    F64(&'a [f64]),
-    U8(&'a [u8]),
-    U16(&'a [u16]),
-    U32(&'a [u32]),
-    U64(&'a [u64]),
+// -------------------- generic little-endian serialization --------------------
+
+/// Trait for “any type” that knows how to write itself as *little-endian* bytes.
+/// Implement this for your own message structs to use `Router::log` generically.
+pub trait LeBytes: Copy {
+    /// Number of bytes this type occupies in the encoded stream.
+    const WIDTH: usize;
+    /// Write the LE representation of `self` into `out` (length = `Self::WIDTH`).
+    fn write_le(self, out: &mut [u8]);
 }
 
-impl<'a> Payload<'a> {
-    #[inline]
-    fn size_bytes(&self) -> usize {
-        match self {
-            Self::Bytes(b) => b.len(),
-            Self::F32(s) => 4 * s.len(),
-            Self::F64(s) => 8 * s.len(),
-            Self::U8(s) => s.len(),
-            Self::U16(s) => 2 * s.len(),
-            Self::U32(s) => 4 * s.len(),
-            Self::U64(s) => 8 * s.len(),
-        }
-    }
-
-    /// Convert to little-endian bytes (no allocation for `Bytes`).
-    fn to_le_vec(&self) -> Vec<u8> {
-        match self {
-            Self::Bytes(b) => b.to_vec(),
-            Self::F32(s) => {
-                let mut v = Vec::with_capacity(4 * s.len());
-                for x in *s {
-                    v.extend_from_slice(&x.to_le_bytes());
-                }
-                v
-            }
-            Self::F64(s) => {
-                let mut v = Vec::with_capacity(8 * s.len());
-                for x in *s {
-                    v.extend_from_slice(&x.to_le_bytes());
-                }
-                v
-            }
-            Self::U8(s) => s.to_vec(),
-            Self::U16(s) => {
-                let mut v = Vec::with_capacity(2 * s.len());
-                for x in *s {
-                    v.extend_from_slice(&x.to_le_bytes());
-                }
-                v
-            }
-            Self::U32(s) => {
-                let mut v = Vec::with_capacity(4 * s.len());
-                for x in *s {
-                    v.extend_from_slice(&x.to_le_bytes());
-                }
-                v
-            }
-            Self::U64(s) => {
-                let mut v = Vec::with_capacity(8 * s.len());
-                for x in *s {
-                    v.extend_from_slice(&x.to_le_bytes());
-                }
-                v
+// Primitive impls (no_std-friendly)
+macro_rules! impl_letype_num {
+    ($t:ty, $w:expr, $to_le_bytes:ident) => {
+        impl LeBytes for $t {
+            const WIDTH: usize = $w;
+            #[inline]
+            fn write_le(self, out: &mut [u8]) {
+                out.copy_from_slice(&self.$to_le_bytes());
             }
         }
-    }
+    };
 }
+// unsigned
+impl_letype_num!(u8, 1, to_le_bytes);
+impl_letype_num!(u16, 2, to_le_bytes);
+impl_letype_num!(u32, 4, to_le_bytes);
+impl_letype_num!(u64, 8, to_le_bytes);
+// signed
+impl_letype_num!(i8, 1, to_le_bytes);
+impl_letype_num!(i16, 2, to_le_bytes);
+impl_letype_num!(i32, 4, to_le_bytes);
+impl_letype_num!(i64, 8, to_le_bytes);
+// floats
+impl_letype_num!(f32, 4, to_le_bytes);
+impl_letype_num!(f64, 8, to_le_bytes);
+
+/// Encode a slice of `T: LeBytes` to a single contiguous `Vec<u8>` (LE).
+#[inline]
+fn encode_slice_le<T: LeBytes>(data: &[T]) -> Vec<u8> {
+    let total = data.len() * T::WIDTH;
+    let mut buf = Vec::with_capacity(total);
+    // SAFETY: we immediately fill all bytes below.
+    unsafe { buf.set_len(total) };
+    for (i, v) in data.iter().copied().enumerate() {
+        let start = i * T::WIDTH;
+        v.write_le(&mut buf[start..start + T::WIDTH]);
+    }
+    buf
+}
+
+// -------------------- Router --------------------
 
 /// A small router that can serialize+transmit and/or locally dispatch packets.
 pub struct Router {
@@ -118,9 +103,8 @@ impl Router {
 
     /// Log (send) a packet: serialize once, transmit (if any remote endpoint), then deliver to matching locals.
     fn send(&self, pkt: &TelemetryPacket) -> Result<()> {
-        validate_packet(pkt)?;
+        pkt.validate()?;
 
-        // any endpoint not served locally?
         let any_remote = pkt.endpoints.iter().any(|e| !self.cfg.is_local_endpoint(*e));
 
         // Serialize exactly once.
@@ -145,7 +129,7 @@ impl Router {
     /// Accept a serialized buffer (from wire) and locally dispatch to matching endpoints.
     pub fn receive(&self, bytes: &[u8]) -> Result<()> {
         let pkt = serialize::deserialize_packet(bytes)?;
-        validate_packet(&pkt)?;
+        pkt.validate()?;
         for &dest in pkt.endpoints.iter() {
             for h in &self.cfg.handlers {
                 if h.endpoint == dest {
@@ -156,12 +140,15 @@ impl Router {
         Ok(())
     }
 
-    /// Build a packet from `ty` + `data` using default endpoints, then send.
-    pub fn log(&self, ty: DataType, data: Payload<'_>, timestamp: u64) -> Result<()> {
+    /// Build a packet from `ty` + *generic* `data` using default endpoints, then send.
+    ///
+    /// Works with **any** type `T` that implements `LeBytes` (primitives already do).
+    /// For your own structs, implement `LeBytes` (e.g., `#[repr(C)]` + manual field encoding).
+    pub fn log<T: LeBytes>(&self, ty: DataType, data: &[T], timestamp: u64) -> Result<()> {
         let meta = message_meta(ty);
 
-        // size check against schema
-        let got = data.size_bytes();
+        // Validate total byte size against schema.
+        let got = data.len() * T::WIDTH;
         if got != meta.data_size {
             return Err(TelemetryError::SizeMismatch {
                 expected: meta.data_size,
@@ -169,25 +156,26 @@ impl Router {
             });
         }
 
-        let payload = Arc::<[u8]>::from(data.to_le_vec());
-        let endpoints = Arc::<[DataEndpoint]>::from(meta.endpoints.to_vec());
+        // Encode to LE (fast path for WIDTH==1 still ends up here; cheap anyway).
+        let payload_vec = encode_slice_le(data);
 
-        let pkt = TelemetryPacket {
+        let pkt = TelemetryPacket::new(
             ty,
-            data_size: meta.data_size,
-            endpoints,
+            &meta.endpoints,
             timestamp,
-            payload,
-        };
+            Arc::<[u8]>::from(payload_vec),
+        )?;
 
         self.send(&pkt)
     }
 
-    // convenience overloads
+    // optional convenience shorthands
+    #[inline]
     pub fn log_bytes(&self, ty: DataType, bytes: &[u8], ts: u64) -> Result<()> {
-        self.log(ty, Payload::Bytes(bytes), ts)
+        self.log::<u8>(ty, bytes, ts)
     }
+    #[inline]
     pub fn log_f32(&self, ty: DataType, vals: &[f32], ts: u64) -> Result<()> {
-        self.log(ty, Payload::F32(vals), ts)
+        self.log::<f32>(ty, vals, ts)
     }
 }
