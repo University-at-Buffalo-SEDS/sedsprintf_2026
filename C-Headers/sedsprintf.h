@@ -8,7 +8,11 @@
 extern "C" {
 #endif
 
-// Keep in sync with Rust's DataType order
+// ==============================
+// Public enums / constants
+// ==============================
+
+/** \brief Telemetry data types (keep in sync with Rust DataType order). */
 typedef enum SedsDataType {
     SEDS_DT_GPS,
     SEDS_DT_IMU,
@@ -16,13 +20,13 @@ typedef enum SedsDataType {
     SEDS_DT_SYSTEM,
 } SedsDataType;
 
-// Keep in sync with Rust's DataEndpoint order
+/** \brief Telemetry endpoints (keep in sync with Rust DataEndpoint order). */
 typedef enum SedsDataEndpoint {
     SEDS_EP_SD,
     SEDS_EP_RADIO,
 } SedsDataEndpoint;
 
-// ---- Status codes (0 = OK) ----
+/** \brief Status codes returned by the C API. */
 enum {
     SEDS_OK = 0,
     SEDS_ERR = -1,
@@ -32,128 +36,207 @@ enum {
     SEDS_DESERIALIZE = -5
 };
 
-// ---- Opaque handle to the Router ----
+/** \brief Opaque Router handle. */
 typedef struct SedsRouter SedsRouter;
 
-// ---- Lightweight view of a telemetry packet (valid only during the callback) ----
+/** \brief Lightweight view of a telemetry packet (valid only during a callback). */
 typedef struct SedsPacketView {
-    uint32_t ty;              // DataType as u32
-    size_t   data_size;       // bytes
-    const uint32_t *endpoints;// array of DataEndpoint (as u32)
-    size_t   num_endpoints;
-    uint64_t timestamp;       // seconds since epoch (or your chosen unit)
-    const uint8_t *payload;   // bytes
-    size_t   payload_len;     // == data_size
+    uint32_t      ty;           /**< DataType as u32 */
+    size_t        data_size;    /**< Payload size in bytes */
+    const uint32_t *endpoints;  /**< Array of DataEndpoint (as u32) */
+    size_t        num_endpoints;
+    uint64_t      timestamp;    /**< Timestamp units as defined by your system */
+    const uint8_t *payload;     /**< Raw payload bytes */
+    size_t        payload_len;  /**< == data_size */
 } SedsPacketView;
 
-// ---- Callback types ----
+/** \brief Transmit callback: return 0 on success, non-zero on failure. */
 typedef int (*SedsTransmitFn)(const uint8_t *bytes, size_t len, void *user);
+
+/** \brief Local endpoint handler: return 0 on success, non-zero on failure. */
 typedef int (*SedsEndpointHandlerFn)(const SedsPacketView *pkt, void *user);
 
-// Handler descriptor for construction
+/** \brief Endpoint handler descriptor (used when constructing a router). */
 typedef struct SedsHandlerDesc {
-    uint32_t endpoint;             // DataEndpoint as u32
-    SedsEndpointHandlerFn handler;
-    void *user;
+    uint32_t               endpoint; /**< DataEndpoint as u32 */
+    SedsEndpointHandlerFn  handler;  /**< Callback function */
+    void                  *user;     /**< Opaque user context passed to callback */
 } SedsHandlerDesc;
 
-// ---- API ----
 
-// Create a router with optional transmit callback and a static array of handlers.
-// Returns NULL on failure.
+// ==============================
+// Router lifecycle
+// ==============================
+
+/**
+ * \brief Create a router with an optional transmit callback and an array of local handlers.
+ *
+ * \param tx         Optional transmit function (NULL if no remote transmit).
+ * \param tx_user    Opaque user pointer for \p tx.
+ * \param handlers   Array of handler descriptors (may be NULL if n_handlers==0).
+ * \param n_handlers Number of entries in \p handlers.
+ * \return           New router instance, or NULL on failure.
+ */
 SedsRouter *seds_router_new(SedsTransmitFn tx,
                             void *tx_user,
                             const SedsHandlerDesc *handlers,
                             size_t n_handlers);
 
-// Destroy a router (safe to pass NULL).
+/**
+ * \brief Destroy a router created by seds_router_new().
+ *
+ * \param r Router handle (NULL is safe and a no-op).
+ */
 void seds_router_free(SedsRouter *r);
 
-// ---------- Generic typed logging (NEW) ----------
 
+// ==============================
+// Generic typed logging
+// ==============================
+
+/** \brief Element kind used by the generic logging API. */
 typedef enum SedsElemKind {
-    SEDS_EK_UNSIGNED = 0,  // u8/u16/u32/u64/...
-    SEDS_EK_SIGNED   = 1,  // i8/i16/i32/i64/...
-    SEDS_EK_FLOAT    = 2   // f32/f64
+    SEDS_EK_UNSIGNED = 0,  /**< u8/u16/u32/u64/... */
+    SEDS_EK_SIGNED   = 1,  /**< i8/i16/i32/i64/... */
+    SEDS_EK_FLOAT    = 2   /**< f32/f64 */
 } SedsElemKind;
 
 /**
- * Log a generic typed slice. The router will encode the slice to little-endian bytes
- * based on (elem_kind, elem_size). The total byte size (count * elem_size) must
- * exactly match the schema size for `ty`.
+ * \brief Log a typed slice; the router encodes elements to little-endian bytes internally.
  *
- * elem_size must be one of {1,2,4,8}. Returns 0 on success.
+ * The total number of bytes (count * elem_size) **must** match the schema size for \p ty.
+ * Supported element sizes are 1, 2, 4, and 8 bytes.
+ *
+ * \param r           Router handle.
+ * \param ty          Data type (SedsDataType as u32).
+ * \param data        Pointer to first element (may be unaligned).
+ * \param count       Number of elements at \p data.
+ * \param elem_size   Size of each element in bytes (1,2,4,8).
+ * \param elem_kind   Signedness/float kind of the elements.
+ * \param timestamp   Timestamp value to attach to the packet.
+ * \return            0 on success; negative error code on failure (see status codes).
  */
 int seds_router_log_typed(SedsRouter *r,
-                          uint32_t ty,               // DataType
-                          const void *data,          // pointer to first element
-                          size_t count,              // number of elements
-                          size_t elem_size,          // 1,2,4,8
-                          SedsElemKind elem_kind,    // unsigned/signed/float
+                          uint32_t ty,
+                          const void *data,
+                          size_t count,
+                          size_t elem_size,
+                          SedsElemKind elem_kind,
                           uint64_t timestamp);
 
-// ---------- Convenience: legacy explicit forms (still useful) ----------
 
-// Log raw bytes (already little-endian as needed). len must match schema size.
+// ==============================
+// Convenience logging forms
+// ==============================
+
+/**
+ * \brief Log a raw byte buffer (assumed already in the required little-endian layout).
+ *
+ * \param r         Router handle.
+ * \param ty        Data type (SedsDataType as u32).
+ * \param data      Pointer to bytes.
+ * \param len       Number of bytes (must equal the schema size for \p ty).
+ * \param timestamp Timestamp to attach.
+ * \return          0 on success; negative error code on failure.
+ */
 int seds_router_log_bytes(SedsRouter *r,
                           uint32_t ty,
                           const uint8_t *data,
                           size_t len,
                           uint64_t timestamp);
 
-// Log f32 slice; n_vals*4 must match schema size.
+/**
+ * \brief Log an array of f32 values; n_vals*4 must match the schema size for \p ty.
+ *
+ * \param r         Router handle.
+ * \param ty        Data type (SedsDataType as u32).
+ * \param vals      Pointer to float elements.
+ * \param n_vals    Number of elements at \p vals.
+ * \param timestamp Timestamp to attach.
+ * \return          0 on success; negative error code on failure.
+ */
 int seds_router_log_f32(SedsRouter *r,
                         uint32_t ty,
                         const float *vals,
                         size_t n_vals,
                         uint64_t timestamp);
 
-// Receive a serialized wire buffer and locally dispatch.
+
+// ==============================
+// Wire receive / helpers
+// ==============================
+
+/**
+ * \brief Receive a serialized wire buffer and locally dispatch to matching endpoints.
+ *
+ * \param r     Router handle.
+ * \param bytes Pointer to serialized packet bytes.
+ * \param len   Length of \p bytes.
+ * \return      0 on success; negative error code on failure.
+ */
 int seds_router_receive(SedsRouter *r,
                         const uint8_t *bytes,
                         size_t len);
 
-// ---- Optional helpers for C handlers ----
-
-// Decode payload as f32 (len == n * 4); returns 0 on success.
+/**
+ * \brief Decode a packet view's payload into f32 values.
+ *
+ * \param pkt Pointer to a valid SedsPacketView (from a callback).
+ * \param out Output buffer for \p n floats.
+ * \param n   Number of floats to decode; must satisfy n*4 == pkt->payload_len.
+ * \return    0 on success; negative error code on failure.
+ */
 int seds_pkt_get_f32(const SedsPacketView *pkt, float *out, size_t n);
 
 #ifdef __cplusplus
 } // extern "C"
 #endif
 
-// =================== Header-only helpers for nicer call sites ===================
+
+// ============================================================================
+// Header-only helpers for nicer call sites
+// ============================================================================
 
 // ---------- C++ templates ----------
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// internal selector: map C++ types to (kind, size)
 #if defined(__cplusplus)
 namespace seds_detail {
 template <typename T> struct elem_traits;
-template <> struct elem_traits<uint8_t> { static constexpr SedsElemKind kind = SEDS_EK_UNSIGNED; static constexpr size_t size = 1; };
-template <> struct elem_traits<uint16_t>{ static constexpr SedsElemKind kind = SEDS_EK_UNSIGNED; static constexpr size_t size = 2; };
-template <> struct elem_traits<uint32_t>{ static constexpr SedsElemKind kind = SEDS_EK_UNSIGNED; static constexpr size_t size = 4; };
-template <> struct elem_traits<uint64_t>{ static constexpr SedsElemKind kind = SEDS_EK_UNSIGNED; static constexpr size_t size = 8; };
-template <> struct elem_traits<int8_t>  { static constexpr SedsElemKind kind = SEDS_EK_SIGNED;   static constexpr size_t size = 1; };
-template <> struct elem_traits<int16_t> { static constexpr SedsElemKind kind = SEDS_EK_SIGNED;   static constexpr size_t size = 2; };
-template <> struct elem_traits<int32_t> { static constexpr SedsElemKind kind = SEDS_EK_SIGNED;   static constexpr size_t size = 4; };
-template <> struct elem_traits<int64_t> { static constexpr SedsElemKind kind = SEDS_EK_SIGNED;   static constexpr size_t size = 8; };
-template <> struct elem_traits<float>   { static constexpr SedsElemKind kind = SEDS_EK_FLOAT;     static constexpr size_t size = 4; };
-template <> struct elem_traits<double>  { static constexpr SedsElemKind kind = SEDS_EK_FLOAT;     static constexpr size_t size = 8; };
+template <> struct elem_traits<uint8_t>  { static constexpr SedsElemKind kind = SEDS_EK_UNSIGNED; static constexpr size_t size = 1; };
+template <> struct elem_traits<uint16_t> { static constexpr SedsElemKind kind = SEDS_EK_UNSIGNED; static constexpr size_t size = 2; };
+template <> struct elem_traits<uint32_t> { static constexpr SedsElemKind kind = SEDS_EK_UNSIGNED; static constexpr size_t size = 4; };
+template <> struct elem_traits<uint64_t> { static constexpr SedsElemKind kind = SEDS_EK_UNSIGNED; static constexpr size_t size = 8; };
+template <> struct elem_traits<int8_t>   { static constexpr SedsElemKind kind = SEDS_EK_SIGNED;   static constexpr size_t size = 1; };
+template <> struct elem_traits<int16_t>  { static constexpr SedsElemKind kind = SEDS_EK_SIGNED;   static constexpr size_t size = 2; };
+template <> struct elem_traits<int32_t>  { static constexpr SedsElemKind kind = SEDS_EK_SIGNED;   static constexpr size_t size = 4; };
+template <> struct elem_traits<int64_t>  { static constexpr SedsElemKind kind = SEDS_EK_SIGNED;   static constexpr size_t size = 8; };
+template <> struct elem_traits<float>    { static constexpr SedsElemKind kind = SEDS_EK_FLOAT;     static constexpr size_t size = 4; };
+template <> struct elem_traits<double>   { static constexpr SedsElemKind kind = SEDS_EK_FLOAT;     static constexpr size_t size = 8; };
 } // namespace seds_detail
 
+/**
+ * \brief C++ convenience wrapper that deduces element kind/size from \p T.
+ *
+ * \tparam T         Element type (uint8_t/16/32/64, int8_t/16/32/64, float, double).
+ * \param router     Router handle.
+ * \param datatype   Data type (SedsDataType as u32).
+ * \param data       Pointer to first element.
+ * \param count      Number of elements.
+ * \param timestamp  Timestamp to attach.
+ * \return         0 on success; negative error code on failure.
+ */
 template <typename T>
-static inline int seds_router_log(SedsRouter *r,
-                                       uint32_t ty,
-                                       const T *data,
-                                       size_t count,
-                                       uint64_t timestamp)
+static inline int seds_router(SedsRouter *router,
+                                  uint32_t datatype,
+                                  const T *data,
+                                  size_t count,
+                                  uint64_t timestamp)
 {
-    return seds_router_log_typed(r,
-                                 ty,
+    return seds_router_log_typed(router,
+                                 datatype,
                                  (const void*)data,
                                  count,
                                  seds_detail::elem_traits<T>::size,
@@ -163,46 +246,61 @@ static inline int seds_router_log(SedsRouter *r,
 #endif // __cplusplus
 
 #ifdef __cplusplus
-extern "C" {
+} // extern "C"
 #endif
+
 
 // ---------- C11 _Generic convenience macro ----------
-// Usage: seds_router_log_auto(r, ty, ptr, count, ts)
-// This selects (kind,size) based on the pointer type.
 #if !defined(__cplusplus) && defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
-#define SEDS__KIND_SIZE(x, KIND_OUT, SIZE_OUT) do {                                 \
-    _Static_assert(sizeof(*(x))==1 || sizeof(*(x))==2 ||                            \
-                   sizeof(*(x))==4 || sizeof(*(x))==8,                              \
-                   "element size must be 1,2,4,8");                                 \
-    enum { SEDS__SIZE = sizeof(*(x)) };                                             \
-    (SIZE_OUT) = SEDS__SIZE;                                                        \
-    /* Determine kind via _Generic on the dereferenced type */                      \
-    (KIND_OUT) =                                                                    \
-        _Generic(*(x),                                                              \
-            unsigned char: SEDS_EK_UNSIGNED,                                        \
-            uint16_t:      SEDS_EK_UNSIGNED,                                        \
-            uint32_t:      SEDS_EK_UNSIGNED,                                        \
-            uint64_t:      SEDS_EK_UNSIGNED,                                        \
-            signed char:   SEDS_EK_SIGNED,                                          \
-            int16_t:       SEDS_EK_SIGNED,                                          \
-            int32_t:       SEDS_EK_SIGNED,                                          \
-            int64_t:       SEDS_EK_SIGNED,                                          \
-            float:         SEDS_EK_FLOAT,                                           \
-            double:        SEDS_EK_FLOAT,                                           \
-            default:       SEDS_EK_UNSIGNED /* sensible default if user passes custom */ \
-        );                                                                          \
+
+/**
+ * \brief Internal: infer (kind,size) from pointer expression \p x.
+ *
+ * \param x        Pointer expression to element type.
+ * \param KIND_OUT Lvalue of type SedsElemKind to receive the kind.
+ * \param SIZE_OUT Lvalue of type size_t to receive the size in bytes.
+ */
+#define SEDS__KIND_SIZE(x, KIND_OUT, SIZE_OUT) do {                                    \
+    _Static_assert(sizeof(*(x))==1 || sizeof(*(x))==2 ||                                \
+                   sizeof(*(x))==4 || sizeof(*(x))==8,                                  \
+                   "element size must be 1,2,4,8");                                     \
+    (SIZE_OUT) = (size_t)sizeof(*(x));                                                  \
+    (KIND_OUT) = _Generic(*(x),                                                         \
+        unsigned char: SEDS_EK_UNSIGNED,                                                \
+        uint16_t:      SEDS_EK_UNSIGNED,                                                \
+        uint32_t:      SEDS_EK_UNSIGNED,                                                \
+        uint64_t:      SEDS_EK_UNSIGNED,                                                \
+        signed char:   SEDS_EK_SIGNED,                                                  \
+        int16_t:       SEDS_EK_SIGNED,                                                  \
+        int32_t:       SEDS_EK_SIGNED,                                                  \
+        int64_t:       SEDS_EK_SIGNED,                                                  \
+        float:         SEDS_EK_FLOAT,                                                   \
+        double:        SEDS_EK_FLOAT,                                                   \
+        default:       SEDS_EK_UNSIGNED /* fallback for custom integer-like data */     \
+    );                                                                                  \
 } while(0)
 
-#define seds_router_log(R, TY, PTR, COUNT, TS)                                 \
-    (__extension__({                                                                \
-        size_t _esize; SedsElemKind _ekind;                                         \
-        SEDS__KIND_SIZE((PTR), _ekind, _esize);                                      \
-        seds_router_log_typed((R), (TY), (const void*)(PTR), (COUNT), _esize, _ekind, (TS)); \
+/**
+ * \brief C11 convenience wrapper that deduces element kind/size from \p ptr.
+ *
+ * \param router     SedsRouter*
+ * \param datatype   Data type (SedsDataType as u32)
+ * \param data       Pointer to first element (e.g., uint16_t*, float*, ...)
+ * \param count      Number of elements
+ * \param timestamp  Timestamp to attach
+ * \return       0 on success; negative error code on failure.
+ */
+#define seds_router_log(router, datatype, data, count, timestamp)                                     \
+    (__extension__({                                                                    \
+        const void   *_seds_data  = (const void*)(data);                                 \
+        size_t        _seds_count = (size_t)(count);                                    \
+        size_t        _seds_esize;                                                      \
+        SedsElemKind  _seds_kind;                                                       \
+        SEDS__KIND_SIZE((data), _seds_kind, _seds_esize);                                 \
+        seds_router_log_typed((router), (datatype), _seds_data, _seds_count,                        \
+                              _seds_esize, _seds_kind, (timestamp));                            \
     }))
-#endif // C11 generic
 
-#ifdef __cplusplus
-}
-#endif
+#endif // C11 generic
 
 #endif // SEDSPRINTF_C_H
