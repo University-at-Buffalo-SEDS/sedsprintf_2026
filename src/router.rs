@@ -5,8 +5,9 @@ use crate::{
 };
 
 use crate::config::DEVICE_IDENTIFIER;
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloc::format;
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
+
 
 // -------------------- endpoint + board config --------------------
 const MAX_NUMBER_OF_RETRYS: usize = 3;

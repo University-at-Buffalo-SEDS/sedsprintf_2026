@@ -172,7 +172,6 @@ fn fake_telemetry_packet_bytes() -> TelemetryPacket {
 ///
 /// We keep this as a test-local helper (no crate changes).
 
-
 /// Copy helper that mirrors the C++ behavior, but uses raw pointers so we can
 /// test the “same pointer” case without violating Rust’s borrow rules.
 ///
