@@ -1,3 +1,6 @@
+use crate::{DataEndpoint, TelemetryPacket};
+
+
 // ---------- Unit tests (run anywhere with `cargo test`) ----------
 #[cfg(test)]
 mod tests {
@@ -140,4 +143,133 @@ mod tests {
         assert_eq!(seen_ty, DataType::GpsData);
         assert_eq!(seen_vals, data);
     }
+}
+// ---- Helpers (test-local) ----
+
+/// Build a deterministic packet with a raw 3-byte payload [0x13, 0x21, 0x34],
+/// endpoints [SD_CARD, RADIO], and timestamp 1123581321.
+/// Note: we intentionally do not call `validate()` because GPS_DATA usually
+/// expects f32s (size 12). We only exercise formatting/copying.
+fn fake_telemetry_packet_bytes() -> TelemetryPacket {
+    use crate::config::{DataEndpoint, DataType};
+    use std::sync::Arc;
+
+    let payload: Arc<[u8]> = Arc::from(vec![0x13, 0x21, 0x34].into_boxed_slice());
+    let endpoints: Arc<[DataEndpoint]> =
+        Arc::from(vec![DataEndpoint::SdCard, DataEndpoint::Radio].into_boxed_slice());
+
+    TelemetryPacket {
+        ty: DataType::GpsData,
+        data_size: payload.len(), // 3
+        endpoints,
+        timestamp: 1_123_581_321, // 1123581321
+        payload,
+    }
+}
+
+/// Produce the exact string the C++ test checks:
+/// "Type: GPS_DATA, Size: 3, Endpoints: [SD_CARD, RADIO], Timestamp: 1123581321, Payload (hex): 0x13 0x21 0x34"
+///
+/// We keep this as a test-local helper (no crate changes).
+fn packet_to_hex_string_opt(pkt: Option<&TelemetryPacket>, data: Option<&[u8]>) -> String {
+    match (pkt, data) {
+        (Some(p), Some(d)) => {
+            // Use the crate's header formatter to match naming exactly.
+            let mut s = p.header_string();
+            // NOTE: we intentionally ignore `offset` here to mirror your C++ call which used 0.
+            let mut hex = String::new();
+            for b in d {
+                use core::fmt::Write as _;
+                let _ = write!(&mut hex, " 0x{:02x}", b);
+            }
+            s.push_str(", Payload (hex):");
+            if !hex.is_empty() {
+                // remove leading space
+                s.push_str(&hex);
+            }
+            s
+        }
+        _ => "ERROR: null packet or data".into(),
+    }
+}
+
+/// Copy helper that mirrors the C++ behavior, but uses raw pointers so we can
+/// test the “same pointer” case without violating Rust’s borrow rules.
+///
+/// Safety: Caller must ensure `dest` and `src` are valid for reads/writes as used.
+unsafe fn copy_telemetry_packet_raw(
+    dest: *mut TelemetryPacket,
+    src: *const TelemetryPacket,
+) -> Result<(), &'static str> {
+    if dest.is_null() || src.is_null() {
+        return Err("null packet");
+    }
+    if core::ptr::eq(dest, src as *mut TelemetryPacket) {
+        // same object → OK no-op
+        return Ok(());
+    }
+    let s = &*src;
+    let d = &mut *dest;
+    // Deep copy
+    *d = TelemetryPacket {
+        ty: s.ty,
+        data_size: s.data_size,
+        endpoints: std::sync::Arc::from((&*s.endpoints).to_vec().into_boxed_slice()),
+        timestamp: s.timestamp,
+        payload: std::sync::Arc::from((&*s.payload).to_vec().into_boxed_slice()),
+    };
+    Ok(())
+}
+
+// ---- Converted tests ----
+
+/// Port of C++: TEST(Helpers, PacketHexToString)
+#[test]
+fn helpers_packet_hex_to_string() {
+    // (1) null args → error message
+    let null_res = packet_to_hex_string_opt(None, None);
+    assert_eq!(null_res, "ERROR: null packet or data");
+
+    // (2) proper packet → exact expected string
+    let pkt = fake_telemetry_packet_bytes();
+    let got = packet_to_hex_string_opt(Some(&pkt), Some(&pkt.payload));
+
+    let expect = "Type: GPS_DATA, Size: 3, Endpoints: [SD_CARD, RADIO], Timestamp: 1123581321, Payload (hex): 0x13 0x21 0x34";
+    assert_eq!(got, expect);
+}
+
+/// Port of C++: TEST(Helpers, CopyTelemetryPacket)
+#[test]
+fn helpers_copy_telemetry_packet() {
+    // (1) null dest → error
+    let src = fake_telemetry_packet_bytes();
+    let st = unsafe { copy_telemetry_packet_raw(core::ptr::null_mut(), &src as *const _) };
+    assert!(st.is_err());
+
+    // (2) same pointer (no-op) → OK
+    let mut same = fake_telemetry_packet_bytes();
+    let same_ptr: *mut TelemetryPacket = &mut same;
+    let st = unsafe { copy_telemetry_packet_raw(same_ptr, same_ptr as *const _) };
+    assert!(st.is_ok());
+
+    // (3) distinct objects → deep copy and equal fields
+    let mut dest = TelemetryPacket {
+        ty: src.ty, // initialize minimally; it will be overwritten
+        data_size: 0,
+        endpoints: std::sync::Arc::from(Vec::<DataEndpoint>::new().into_boxed_slice()),
+        timestamp: 0,
+        payload: std::sync::Arc::from(Vec::<u8>::new().into_boxed_slice()),
+    };
+    let st = unsafe { copy_telemetry_packet_raw(&mut dest as *mut _, &src as *const _) };
+    assert!(st.is_ok());
+
+    // element-by-element compare
+    assert_eq!(dest.timestamp, src.timestamp);
+    assert_eq!(dest.ty, src.ty);
+    assert_eq!(dest.data_size, src.data_size);
+    assert_eq!(dest.endpoints.len(), src.endpoints.len());
+    for i in 0..dest.endpoints.len() {
+        assert_eq!(dest.endpoints[i], src.endpoints[i]);
+    }
+    assert_eq!(&*dest.payload, &*src.payload);
 }
