@@ -1,6 +1,5 @@
 // src/serialize.rs
 
-
 // Dear programmer:
 // When I wrote this code, only god and I knew how it worked.
 // Now, only god knows it!
@@ -9,12 +8,12 @@
 // please increase this counter as a warning for the next person:
 // total hours_wasted_here = 12
 
-
 use crate::{config::DataType, TelemetryError, TelemetryPacket};
 
 // <- pull from alloc so this works under both std and no_std
 use alloc::{sync::Arc, vec::Vec};
 use core::convert::TryInto;
+
 
 pub const TYPE_SIZE: usize = size_of::<u32>();
 pub const DATA_SIZE_SIZE: usize = size_of::<u32>();

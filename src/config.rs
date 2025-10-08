@@ -2,7 +2,6 @@
 
 use core::mem::size_of;
 
-
 //----------------------User Editable----------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -87,7 +86,6 @@ pub const MESSAGE_TYPES: [MessageMeta; DataType::COUNT] = [
     },
 ];
 // -------------------------------------------------------------
-
 
 // ----------------------Not User Editable----------------------
 #[derive(Debug, Clone, Copy)]

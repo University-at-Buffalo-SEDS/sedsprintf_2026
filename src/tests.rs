@@ -60,7 +60,7 @@ mod tests {
         let pkt =
             TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.5, 3.25], endpoints, 0)
                 .unwrap();
-        let text = pkt.to_string_alloc();
+        let text = pkt.to_string();
         assert!(text.starts_with(
             "Type: GPS_DATA, Size: 12, Endpoints: [SD_CARD, RADIO], Timestamp: 0, Data: "
         ));

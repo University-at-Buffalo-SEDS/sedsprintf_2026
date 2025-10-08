@@ -1,8 +1,7 @@
 // src/router.rs
 use crate::{
     config::{message_meta, DataEndpoint, DataType},
-    serialize,
-    Result, TelemetryError, TelemetryPacket,
+    serialize, Result, TelemetryError, TelemetryPacket,
 };
 
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
@@ -92,8 +91,8 @@ pub struct Router {
 
 impl Router {
     pub fn new<Tx>(transmit: Option<Tx>, cfg: BoardConfig) -> Self
-        where
-            Tx: Fn(&[u8]) -> Result<()> + Send + Sync + 'static,
+    where
+        Tx: Fn(&[u8]) -> Result<()> + Send + Sync + 'static,
     {
         Self {
             transmit: transmit.map(|t| Box::new(t) as _),
@@ -105,7 +104,10 @@ impl Router {
     fn send(&self, pkt: &TelemetryPacket) -> Result<()> {
         pkt.validate()?;
 
-        let any_remote = pkt.endpoints.iter().any(|e| !self.cfg.is_local_endpoint(*e));
+        let any_remote = pkt
+            .endpoints
+            .iter()
+            .any(|e| !self.cfg.is_local_endpoint(*e));
 
         // Serialize exactly once.
         let bytes = serialize::serialize_packet(pkt);

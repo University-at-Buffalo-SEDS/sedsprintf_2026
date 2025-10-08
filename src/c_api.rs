@@ -8,9 +8,10 @@ use crate::{
     DataType, Result, TelemetryError, TelemetryPacket,
 };
 
+use alloc::sync::Arc;
 use alloc::{boxed::Box, vec::Vec};
+use core::ffi::c_char;
 use core::{ffi::c_void, ptr};
-
 // ----------------- router wrapper -----------------
 
 #[repr(C)]
@@ -87,6 +88,116 @@ fn endpoint_from_u32(x: u32) -> Result<DataEndpoint> {
     DataEndpoint::try_from_u32(x).ok_or(TelemetryError::Deserialize("bad endpoint"))
 }
 
+fn view_to_packet(view: &SedsPacketView) -> core::result::Result<TelemetryPacket, ()> {
+    // ty
+    let ty = DataType::try_from_u32(view.ty).ok_or(())?;
+
+    // endpoints
+    let eps_u32 = unsafe { core::slice::from_raw_parts(view.endpoints, view.num_endpoints) };
+    let mut eps = alloc::vec::Vec::with_capacity(eps_u32.len());
+    for &e in eps_u32 {
+        eps.push(crate::config::DataEndpoint::try_from_u32(e).ok_or(())?);
+    }
+
+    // payload
+    let bytes = unsafe { core::slice::from_raw_parts(view.payload, view.payload_len) };
+
+    Ok(TelemetryPacket {
+        ty,
+        data_size: view.data_size,
+        endpoints: Arc::<[crate::config::DataEndpoint]>::from(eps),
+        timestamp: view.timestamp,
+        payload: Arc::<[u8]>::from(bytes.to_vec()),
+    })
+}
+
+unsafe fn write_str_to_buf(s: &str, buf: *mut c_char, buf_len: usize) -> i32 {
+    if buf.is_null() && buf_len != 0 {
+        return -2; // SEDS_BAD_ARG
+    }
+    let needed = s.len() + 1; // include NUL
+
+    // Query mode: tell caller required buffer size (including NUL)
+    if buf.is_null() || buf_len == 0 {
+        return needed as i32;
+    }
+
+    let ncopy = core::cmp::min(s.len(), buf_len.saturating_sub(1));
+    core::ptr::copy_nonoverlapping(s.as_ptr(), buf as *mut u8, ncopy);
+    *buf.add(ncopy) = 0;
+
+    // If too small, return required size, not success
+    if buf_len < needed {
+        return needed as i32;
+    }
+
+    0 // success
+}
+/// Returns the number of bytes (including NUL) required to store the header string.
+#[no_mangle]
+pub extern "C" fn seds_pkt_header_string_len(pkt: *const SedsPacketView) -> i32 {
+    if pkt.is_null() {
+        return -2; // SEDS_BAD_ARG
+    }
+    let view = unsafe { &*pkt };
+    let tpkt = match view_to_packet(view) {
+        Ok(p) => p,
+        Err(_) => return -2,
+    };
+    let s = tpkt.header_string();
+    (s.len() + 1) as i32
+}
+
+/// Returns the number of bytes (including NUL) required to store the full packet string.
+#[no_mangle]
+pub extern "C" fn seds_pkt_to_string_len(pkt: *const SedsPacketView) -> i32 {
+    if pkt.is_null() {
+        return -2; // SEDS_BAD_ARG
+    }
+    let view = unsafe { &*pkt };
+    let tpkt = match view_to_packet(view) {
+        Ok(p) => p,
+        Err(_) => return -2,
+    };
+    let s = tpkt.to_string();
+    (s.len() + 1) as i32
+}
+// === ABI: packet -> header string ===
+#[no_mangle]
+pub extern "C" fn seds_pkt_header_string(
+    pkt: *const SedsPacketView,
+    buf: *mut c_char,
+    buf_len: usize,
+) -> i32 {
+    if pkt.is_null() {
+        return -2; // SEDS_BAD_ARG
+    }
+    let view = unsafe { &*pkt };
+    let tpkt = match view_to_packet(view) {
+        Ok(p) => p,
+        Err(_) => return -2, // SEDS_BAD_ARG
+    };
+    let s = tpkt.header_string();
+    unsafe { write_str_to_buf(&s, buf, buf_len) }
+}
+
+#[no_mangle]
+pub extern "C" fn seds_pkt_to_string(
+    pkt: *const SedsPacketView,
+    buf: *mut c_char,
+    buf_len: usize,
+) -> i32 {
+    if pkt.is_null() {
+        return -2; // SEDS_BAD_ARG
+    }
+    let view = unsafe { &*pkt };
+    let tpkt = match view_to_packet(view) {
+        Ok(p) => p,
+        Err(_) => return -2, // SEDS_BAD_ARG
+    };
+    let s = tpkt.to_string();
+    unsafe { write_str_to_buf(&s, buf, buf_len) }
+}
 // ----------------- FFI: new/free -----------------
 
 #[no_mangle]

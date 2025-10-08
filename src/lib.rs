@@ -27,7 +27,9 @@ mod embedded_alloc {
         fn vPortFree(ptr: *mut core::ffi::c_void);
     }
 
+
     pub struct FreeRtosAlloc;
+
 
     unsafe impl GlobalAlloc for FreeRtosAlloc {
         unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
@@ -37,6 +39,7 @@ mod embedded_alloc {
             vPortFree(ptr as *mut _)
         }
     }
+
 
     #[global_allocator]
     static A: FreeRtosAlloc = FreeRtosAlloc;
@@ -53,6 +56,7 @@ mod embedded_alloc {
             cortex_m::asm::bkpt()
         }
     }
+
 
     // ensure cortex-m only compiles on embedded
     use cortex_m as _;
@@ -85,6 +89,7 @@ pub struct TelemetryPacket {
     pub payload: Arc<[u8]>,
 }
 
+
 #[derive(Debug)]
 pub enum TelemetryError {
     InvalidType,
@@ -98,7 +103,9 @@ pub enum TelemetryError {
     Io(&'static str),
 }
 
+
 pub type Result<T> = core::result::Result<T, TelemetryError>;
+
 
 // -------------------- TelemetryPacket impl --------------------
 impl TelemetryPacket {
@@ -212,7 +219,7 @@ impl TelemetryPacket {
     }
 
     /// Full pretty string including decoded data portion.
-    pub fn to_string_alloc(&self) -> String {
+    pub fn to_string(&self) -> String {
         const MAX_PRECISION: usize = 12;
 
         let mut s = String::new();
@@ -277,6 +284,7 @@ impl TelemetryPacket {
         s
     }
 }
+
 
 // ---- Optional: Display so we can `format!("{pkt}")` ----
 impl core::fmt::Display for TelemetryPacket {
