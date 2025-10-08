@@ -22,6 +22,7 @@ typedef enum SedsDataType
     SEDS_DT_IMU,
     SEDS_DT_BATTERY,
     SEDS_DT_SYSTEM,
+    SEDS_DT_BAROMETER
 } SedsDataType;
 
 /** \brief Telemetry endpoints (keep in sync with Rust DataEndpoint order). */
