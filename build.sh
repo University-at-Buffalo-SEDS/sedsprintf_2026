@@ -20,7 +20,7 @@ for arg in "$@"; do
           tests="test"
           ;;
     stm-build)
-      echo "Configuring to save temporary object files and assembly output."
+          echo "Building for STM32 target."
       BUILD_STM="ON"
       ;;
     *)
@@ -31,7 +31,6 @@ done
 
 
 if [[ "$BUILD_STM" == "ON" ]]; then
-  echo "Configuring to save temporary object files and assembly output."
   stm_build_args=(
     --no-default-features
     --target thumbv7em-none-eabihf
