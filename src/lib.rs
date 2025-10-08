@@ -27,9 +27,7 @@ mod embedded_alloc {
         fn vPortFree(ptr: *mut core::ffi::c_void);
     }
 
-
     pub struct FreeRtosAlloc;
-
 
     unsafe impl GlobalAlloc for FreeRtosAlloc {
         unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
@@ -39,7 +37,6 @@ mod embedded_alloc {
             vPortFree(ptr as *mut _)
         }
     }
-
 
     #[global_allocator]
     static A: FreeRtosAlloc = FreeRtosAlloc;
@@ -56,7 +53,6 @@ mod embedded_alloc {
             cortex_m::asm::bkpt()
         }
     }
-
 
     // ensure cortex-m only compiles on embedded
     use cortex_m as _;
@@ -89,7 +85,6 @@ pub struct TelemetryPacket {
     pub payload: Arc<[u8]>,
 }
 
-
 #[derive(Debug)]
 pub enum TelemetryError {
     InvalidType,
@@ -103,9 +98,7 @@ pub enum TelemetryError {
     Io(&'static str),
 }
 
-
 pub type Result<T> = core::result::Result<T, TelemetryError>;
-
 
 // -------------------- TelemetryPacket impl --------------------
 impl TelemetryPacket {
@@ -283,9 +276,24 @@ impl TelemetryPacket {
 
         s
     }
+
+    pub fn to_hex_string(&self) -> String {
+        let mut s = self.header_string();
+
+        // Build " 0x.. 0x.." list from the packet payload
+        let mut hex = String::new();
+        use core::fmt::Write as _;
+        for &b in self.payload.iter() {
+            let _ = write!(&mut hex, " 0x{:02x}", b);
+        }
+
+        s.push_str(", Payload (hex):");
+        if !hex.is_empty() {
+            s.push_str(&hex);
+        }
+        s
+    }
 }
-
-
 // ---- Optional: Display so we can `format!("{pkt}")` ----
 impl core::fmt::Display for TelemetryPacket {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {

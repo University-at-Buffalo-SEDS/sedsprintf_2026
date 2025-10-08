@@ -171,27 +171,7 @@ fn fake_telemetry_packet_bytes() -> TelemetryPacket {
 /// "Type: GPS_DATA, Size: 3, Endpoints: [SD_CARD, RADIO], Timestamp: 1123581321, Payload (hex): 0x13 0x21 0x34"
 ///
 /// We keep this as a test-local helper (no crate changes).
-fn packet_to_hex_string_opt(pkt: Option<&TelemetryPacket>, data: Option<&[u8]>) -> String {
-    match (pkt, data) {
-        (Some(p), Some(d)) => {
-            // Use the crate's header formatter to match naming exactly.
-            let mut s = p.header_string();
-            // NOTE: we intentionally ignore `offset` here to mirror your C++ call which used 0.
-            let mut hex = String::new();
-            for b in d {
-                use core::fmt::Write as _;
-                let _ = write!(&mut hex, " 0x{:02x}", b);
-            }
-            s.push_str(", Payload (hex):");
-            if !hex.is_empty() {
-                // remove leading space
-                s.push_str(&hex);
-            }
-            s
-        }
-        _ => "ERROR: null packet or data".into(),
-    }
-}
+
 
 /// Copy helper that mirrors the C++ behavior, but uses raw pointers so we can
 /// test the “same pointer” case without violating Rust’s borrow rules.
@@ -226,15 +206,11 @@ unsafe fn copy_telemetry_packet_raw(
 /// Port of C++: TEST(Helpers, PacketHexToString)
 #[test]
 fn helpers_packet_hex_to_string() {
-    // (1) null args → error message
-    let null_res = packet_to_hex_string_opt(None, None);
-    assert_eq!(null_res, "ERROR: null packet or data");
-
     // (2) proper packet → exact expected string
     let pkt = fake_telemetry_packet_bytes();
-    let got = packet_to_hex_string_opt(Some(&pkt), Some(&pkt.payload));
+    let got = pkt.to_string();
 
-    let expect = "Type: GPS_DATA, Size: 3, Endpoints: [SD_CARD, RADIO], Timestamp: 1123581321, Payload (hex): 0x13 0x21 0x34";
+    let expect = "Type: GPS_DATA, Size: 3, Endpoints: [SD_CARD, RADIO], Timestamp: 1123581321, Data: 0x13 0x21 0x34";
     assert_eq!(got, expect);
 }
 
