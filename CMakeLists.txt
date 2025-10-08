@@ -56,6 +56,25 @@ set_target_properties(sedsprintf_rs PROPERTIES
   INTERFACE_INCLUDE_DIRECTORIES "${RS_INCLUDE}"
 )
 add_dependencies(sedsprintf_rs sedsprintf_rs_build)
+# --- Ensure final ELF has non-exec stack even if some objs miss .note.GNU-stack
+# Create a tiny sentinel ASM source at configure time
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/noexecstack.S"
+"    .section .note.GNU-stack,\"\",%progbits\n")
+
+# Interface helper that injects the sentinel + flags into any consumer
+add_library(sedsprintf_rs_noexecstack INTERFACE)
+# Make the sentinel compile into the final consumer target (requires parent to have ASM enabled)
+target_sources(sedsprintf_rs_noexecstack INTERFACE
+  "${CMAKE_CURRENT_BINARY_DIR}/noexecstack.S"
+)
+# Prevent assembler from marking stack executable; force linker header to noexec
+target_compile_options(sedsprintf_rs_noexecstack INTERFACE -Wa,--noexecstack)
+target_link_options(sedsprintf_rs_noexecstack INTERFACE -Wl,-z,noexecstack)
+
+# When someone links sedsprintf_rs, also pull in the no-exec-stack helper
+set_property(TARGET sedsprintf_rs APPEND PROPERTY
+  INTERFACE_LINK_LIBRARIES sedsprintf_rs_noexecstack
+)
 
 # Optional niceties
 add_library(sedsprintf_rs::sedsprintf_rs ALIAS sedsprintf_rs)
