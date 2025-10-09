@@ -24,6 +24,7 @@ typedef enum SedsDataType
     SEDS_DT_BATTERY = 3,
     SEDS_DT_SYSTEM = 4,
     SEDS_DT_BAROMETER = 5,
+    SEDS_IMU_HEX_DATA = 6
 } SedsDataType;
 
 /** \brief Telemetry endpoints (keep in sync with Rust DataEndpoint order). */
@@ -41,7 +42,8 @@ typedef enum
     SEDS_BAD_ARG = -2,
     SEDS_INVALID_TYPE = -3,
     SEDS_SIZE_MISMATCH = -4,
-    SEDS_DESERIALIZE = -5
+    SEDS_DESERIALIZE = -5,
+    SEDS_HANDLER_ERROR = -6,
 } SedsResult;
 
 /** \brief Opaque Router handle. */

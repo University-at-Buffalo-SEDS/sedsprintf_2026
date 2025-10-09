@@ -70,6 +70,7 @@ fn status_from_err(e: TelemetryError) -> i32 {
         TelemetryError::InvalidType => -3,
         TelemetryError::SizeMismatch { .. } => -4,
         TelemetryError::Deserialize(_) => -5,
+        TelemetryError::HandlerError(_) => -6,
         _ => -1,
     }
 }
