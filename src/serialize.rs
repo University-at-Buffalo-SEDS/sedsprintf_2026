@@ -8,11 +8,12 @@
 // please increase this counter as a warning for the next person:
 // total hours_wasted_here = 12
 
-use crate::{config::DataType, TelemetryError, TelemetryPacket};
-
-// <- pull from alloc so this works under both std and no_std
+use crate::config::MAX_VALUE_DATA_TYPE;
+use crate::{config::DataType, DataEndpoint, TelemetryError, TelemetryPacket};
 use alloc::{sync::Arc, vec::Vec};
 use core::convert::TryInto;
+use core::mem;
+use core::mem::size_of;
 
 
 pub const TYPE_SIZE: usize = size_of::<u32>();
@@ -53,7 +54,9 @@ pub fn deserialize_packet(buf: &[u8]) -> Result<TelemetryPacket, TelemetryError>
         return Err(TelemetryError::Deserialize("short header"));
     }
 
-    let ty = DataType::try_from_u32(r.read_u32()?).ok_or(TelemetryError::InvalidType)?;
+    let ty_raw = r.read_u32()?;
+    let ty = DataType::try_from_u32(ty_raw).ok_or(TelemetryError::InvalidType)?;
+
     let dsz = r.read_u32()? as usize;
     let ts = r.read_u64()?;
     let nep = r.read_u32()? as usize;
@@ -66,8 +69,8 @@ pub fn deserialize_packet(buf: &[u8]) -> Result<TelemetryPacket, TelemetryError>
     let mut eps = Vec::with_capacity(nep);
     for _ in 0..nep {
         let e = r.read_u32()?;
-        let ep = crate::config::DataEndpoint::try_from_u32(e)
-            .ok_or(TelemetryError::Deserialize("bad endpoint"))?;
+        let ep =
+            DataEndpoint::try_from_u32(e).ok_or(TelemetryError::Deserialize("bad endpoint"))?;
         eps.push(ep);
     }
     let payload = r.read_bytes(dsz)?.to_vec();
@@ -120,22 +123,22 @@ impl<'a> ByteReader<'a> {
 // Lightweight enum conversions for deserialization.
 impl DataType {
     pub fn try_from_u32(x: u32) -> Option<Self> {
-        match x {
-            0 => Some(Self::GpsData),
-            1 => Some(Self::ImuData),
-            2 => Some(Self::BatteryStatus),
-            3 => Some(Self::SystemStatus),
-            _ => None,
+        if x <= MAX_VALUE_DATA_TYPE {
+            // Works because we asserted zero-based contiguous repr(u32)
+            Some(unsafe { mem::transmute::<u32, Self>(x) })
+        } else {
+            None
         }
     }
 }
 
-impl crate::config::DataEndpoint {
+impl DataEndpoint {
     pub fn try_from_u32(x: u32) -> Option<Self> {
-        match x {
-            0 => Some(Self::SdCard),
-            1 => Some(Self::Radio),
-            _ => None,
+        if x <= MAX_VALUE_DATA_TYPE {
+            // Works because we asserted zero-based contiguous repr(u32)
+            Some(unsafe { mem::transmute::<u32, Self>(x) })
+        } else {
+            None
         }
     }
 }

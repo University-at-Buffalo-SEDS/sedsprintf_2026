@@ -18,11 +18,12 @@ extern "C" {
 /** \brief Telemetry data types (keep in sync with Rust DataType order). */
 typedef enum SedsDataType
 {
-    SEDS_DT_GPS,
-    SEDS_DT_IMU,
-    SEDS_DT_BATTERY,
-    SEDS_DT_SYSTEM,
-    SEDS_DT_BAROMETER
+    SEDS_DT_TELEMETRY_ERROR = 0,
+    SEDS_DT_GPS = 1,
+    SEDS_DT_IMU = 2,
+    SEDS_DT_BATTERY = 3,
+    SEDS_DT_SYSTEM = 4,
+    SEDS_DT_BAROMETER = 5,
 } SedsDataType;
 
 /** \brief Telemetry endpoints (keep in sync with Rust DataEndpoint order). */

@@ -4,8 +4,9 @@ use crate::{DataEndpoint, TelemetryPacket};
 // ---------- Unit tests (run anywhere with `cargo test`) ----------
 #[cfg(test)]
 mod tests {
+    use crate::config::get_needed_message_size;
     use crate::{
-        config::{DataEndpoint, DataType, MESSAGE_ELEMENTS, MESSAGE_SIZES},
+        config::{DataEndpoint, DataType, MESSAGE_ELEMENTS},
         serialize, Result, TelemetryPacket,
     };
     use core::convert::TryInto;
@@ -15,7 +16,6 @@ mod tests {
 
     #[test]
     fn names_tables_match_enums() {
-        assert_eq!(MESSAGE_SIZES.len(), DataType::COUNT);
         assert_eq!(MESSAGE_ELEMENTS.len(), DataType::COUNT);
     }
 
@@ -96,7 +96,7 @@ mod tests {
             handler: Box::new(move |pkt: &TelemetryPacket| {
                 // sanity: element sizing must be 4 bytes (f32) for GPS_DATA
                 let elems = MESSAGE_ELEMENTS[pkt.ty as usize].max(1);
-                let per_elem = MESSAGE_SIZES[pkt.ty as usize] / elems;
+                let per_elem = get_needed_message_size(pkt.ty) / elems;
                 assert_eq!(pkt.ty, DataType::GpsData);
                 assert_eq!(per_elem, 4, "GPS_DATA expected f32 elements");
 
@@ -207,9 +207,9 @@ unsafe fn copy_telemetry_packet_raw(
 fn helpers_packet_hex_to_string() {
     // (2) proper packet → exact expected string
     let pkt = fake_telemetry_packet_bytes();
-    let got = pkt.to_string();
+    let got = pkt.to_hex_string();
 
-    let expect = "Type: GPS_DATA, Size: 3, Endpoints: [SD_CARD, RADIO], Timestamp: 1123581321, Data: 0x13 0x21 0x34";
+    let expect = "Type: GPS_DATA, Size: 3, Endpoints: [SD_CARD, RADIO], Timestamp: 1123581321, Data (hex): 0x13 0x21 0x34";
     assert_eq!(got, expect);
 }
 
@@ -252,9 +252,9 @@ fn helpers_copy_telemetry_packet() {
 #[cfg(test)]
 mod handler_failure_tests {
     use super::*;
-    use crate::config::DEVICE_IDENTIFIER;
+    use crate::config::{DEVICE_IDENTIFIER, MAX_VALUE_DATA_TYPE};
     use crate::router::EndpointHandler;
-    use crate::{message_meta, BoardConfig, DataType, Router, TelemetryError, MESSAGE_SIZES};
+    use crate::{message_meta, BoardConfig, DataType, Router, TelemetryError};
     use alloc::{sync::Arc, vec, vec::Vec};
     use core::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
@@ -265,11 +265,9 @@ mod handler_failure_tests {
     }
 
     fn pick_any_type() -> DataType {
-        for (i, sz) in MESSAGE_SIZES.iter().copied().enumerate() {
-            if sz > 0 {
-                if let Some(ty) = DataType::try_from_u32(i as u32) {
-                    return ty;
-                }
+        for i in 0..=MAX_VALUE_DATA_TYPE {
+            if let Some(ty) = DataType::try_from_u32(i) {
+                return ty;
             }
         }
         panic!("No usable DataType found for tests");
@@ -324,7 +322,15 @@ mod handler_failure_tests {
         )
         .unwrap();
 
-        router.send(&pkt).expect("router.send should not panic");
+        match router.send(&pkt) {
+            Ok(_) => panic!("Expected router.send to return Err due to handler failure"),
+            Err(e) => {
+                match e {
+                    TelemetryError::HandlerError(_) => {} // expected
+                    _ => panic!("Expected TelemetryError::HandlerError, got {:?}", e),
+                }
+            }
+        }
 
         // The capturing handler should have seen the original packet and then the error packet.
         assert!(
@@ -382,7 +388,15 @@ mod handler_failure_tests {
         )
         .unwrap();
 
-        router.send(&pkt).expect("router.send should not panic");
+        match router.send(&pkt) {
+            Ok(_) => panic!("Expected router.send to return Err due to handler failure"),
+            Err(e) => {
+                match e {
+                    TelemetryError::HandlerError(_) => {} // expected
+                    _ => panic!("Expected TelemetryError::HandlerError, got {:?}", e),
+                }
+            }
+        }
 
         assert!(
             saw_error.load(Ordering::SeqCst) >= 1,

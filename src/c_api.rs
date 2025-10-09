@@ -47,7 +47,9 @@ struct CHandler {
     cb: CEndpointHandler,
     user_addr: usize, // store pointer as integer to avoid capturing *mut c_void
 }
+
 unsafe impl Send for CHandler {}
+
 unsafe impl Sync for CHandler {}
 
 // For transmit, we only need the user address too
@@ -55,7 +57,9 @@ unsafe impl Sync for CHandler {}
 struct TxCtx {
     user_addr: usize,
 }
+
 unsafe impl Send for TxCtx {}
+
 unsafe impl Sync for TxCtx {}
 
 // ----------------- helpers -----------------
@@ -94,9 +98,9 @@ fn view_to_packet(view: &SedsPacketView) -> core::result::Result<TelemetryPacket
 
     // endpoints
     let eps_u32 = unsafe { core::slice::from_raw_parts(view.endpoints, view.num_endpoints) };
-    let mut eps = alloc::vec::Vec::with_capacity(eps_u32.len());
+    let mut eps = Vec::with_capacity(eps_u32.len());
     for &e in eps_u32 {
-        eps.push(crate::config::DataEndpoint::try_from_u32(e).ok_or(())?);
+        eps.push(DataEndpoint::try_from_u32(e).ok_or(())?);
     }
 
     // payload
@@ -105,7 +109,7 @@ fn view_to_packet(view: &SedsPacketView) -> core::result::Result<TelemetryPacket
     Ok(TelemetryPacket {
         ty,
         data_size: view.data_size,
-        endpoints: Arc::<[crate::config::DataEndpoint]>::from(eps),
+        endpoints: Arc::<[DataEndpoint]>::from(eps),
         timestamp: view.timestamp,
         payload: Arc::<[u8]>::from(bytes.to_vec()),
     })
@@ -123,7 +127,7 @@ unsafe fn write_str_to_buf(s: &str, buf: *mut c_char, buf_len: usize) -> i32 {
     }
 
     let ncopy = core::cmp::min(s.len(), buf_len.saturating_sub(1));
-    core::ptr::copy_nonoverlapping(s.as_ptr(), buf as *mut u8, ncopy);
+    ptr::copy_nonoverlapping(s.as_ptr(), buf as *mut u8, ncopy);
     *buf.add(ncopy) = 0;
 
     // If too small, return required size, not success
@@ -133,6 +137,7 @@ unsafe fn write_str_to_buf(s: &str, buf: *mut c_char, buf_len: usize) -> i32 {
 
     0 // success
 }
+
 /// Returns the number of bytes (including NUL) required to store the header string.
 #[no_mangle]
 pub extern "C" fn seds_pkt_header_string_len(pkt: *const SedsPacketView) -> i32 {
@@ -162,6 +167,7 @@ pub extern "C" fn seds_pkt_to_string_len(pkt: *const SedsPacketView) -> i32 {
     let s = tpkt.to_string();
     (s.len() + 1) as i32
 }
+
 // === ABI: packet -> header string ===
 #[no_mangle]
 pub extern "C" fn seds_pkt_header_string(
@@ -341,13 +347,14 @@ pub extern "C" fn seds_router_receive(r: *mut SedsRouter, bytes: *const u8, len:
     let slice = unsafe { core::slice::from_raw_parts(bytes, len) };
     ok_or_status(router.receive(slice))
 }
+
 // ----------------- Optional helpers: generic decode from a packet view -----------------
 /// Copy-decode `count` elements of type `T` from pkt.payload (LE) into `out` (host endianness).
 /// - Validates that `count * size_of::<T>() == pkt.payload_len`.
 /// - Works with unaligned `out`.
 unsafe fn pkt_get_into<T>(pkt: &SedsPacketView, out: *mut T, count: usize) -> i32 {
-    use core::{mem, ptr};
-    let need = match count.checked_mul(mem::size_of::<T>()) {
+    use core::ptr;
+    let need = match count.checked_mul(size_of::<T>()) {
         Some(v) => v,
         None => return status_from_err(TelemetryError::SizeMismatchError),
     };
@@ -357,17 +364,17 @@ unsafe fn pkt_get_into<T>(pkt: &SedsPacketView, out: *mut T, count: usize) -> i3
     // walk source bytes, decode LE -> host for T, write unaligned to out
     let src = pkt.payload;
     for i in 0..count {
-        let off = i * mem::size_of::<T>();
+        let off = i * size_of::<T>();
         let dst = out.add(i);
 
-        if mem::size_of::<T>() == 1 {
+        if size_of::<T>() == 1 {
             // fast path: byte copy (u8/i8)
             ptr::write_unaligned(dst as *mut u8, *src.add(off));
             continue;
         }
 
         // read up to 8 bytes (we only support 1,2,4,8)
-        match mem::size_of::<T>() {
+        match size_of::<T>() {
             2 => {
                 let b = core::slice::from_raw_parts(src.add(off), 2);
                 // T is one of u16/i16
@@ -547,7 +554,7 @@ unsafe fn pkt_get_float<T>(pkt: &SedsPacketView, out: *mut T, count: usize, widt
 #[no_mangle]
 pub extern "C" fn seds_pkt_get_typed(
     pkt: *const SedsPacketView,
-    out: *mut core::ffi::c_void,
+    out: *mut c_void,
     count: usize,
     elem_size: usize, // 1,2,4,8
     elem_kind: u32,   // 0=unsigned,1=signed,2=float
@@ -597,13 +604,13 @@ const SEDS_EK_FLOAT: u32 = 2;
 unsafe fn log_unaligned_slice<T: LeBytes>(
     router: &Router,
     ty: DataType,
-    data: *const core::ffi::c_void,
+    data: *const c_void,
     count: usize,
     ts: u64,
 ) -> Result<()> {
-    use core::{mem, ptr};
-    let mut tmp: alloc::vec::Vec<T> = alloc::vec::Vec::with_capacity(count);
-    let elem_size = mem::size_of::<T>();
+    use core::ptr;
+    let mut tmp: Vec<T> = Vec::with_capacity(count);
+    let elem_size = size_of::<T>();
     let base = data as *const u8;
     for i in 0..count {
         let p = base.add(i * elem_size) as *const T;

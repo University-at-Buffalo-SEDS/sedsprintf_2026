@@ -68,9 +68,9 @@ mod router;
 mod serialize;
 
 
-pub use config::{
-    message_meta, DataEndpoint, DataType, MessageMeta, MESSAGE_ELEMENTS, MESSAGE_SIZES,
-};
+use crate::config::MessageType;
+use crate::config::{get_info_type, MessageDataType, MESSAGE_DATA_TYPES};
+pub use config::{message_meta, DataEndpoint, DataType, MessageMeta, MESSAGE_ELEMENTS};
 pub use router::{BoardConfig, Router};
 pub use serialize::{deserialize_packet, serialize_packet, ByteReader};
 
@@ -93,6 +93,7 @@ pub enum TelemetryError {
     EmptyEndpoints,
     TimestampInvalid,
     MissingPayload,
+    HandlerError(&'static str),
     BadArg,
     Deserialize(&'static str),
     Io(&'static str),
@@ -210,19 +211,18 @@ impl TelemetryPacket {
             self.timestamp
         )
     }
-    pub fn data_as_utf8_if_error(&self) -> Option<String> {
-        if self.ty == DataType::TelemetryError {
-            // trim trailing NULs
-            let bytes = &self.payload;
-            let end = bytes
-                .iter()
-                .rposition(|&b| b != 0)
-                .map(|i| i + 1)
-                .unwrap_or(0);
-            self.trimmed_str(&bytes[..end])
-        } else {
-            None
+    pub fn data_as_utf8(&self) -> Option<String> {
+        if MESSAGE_DATA_TYPES[self.ty as usize] != MessageDataType::String {
+            return None;
         }
+        // trim trailing NULs
+        let bytes = &self.payload;
+        let end = bytes
+            .iter()
+            .rposition(|&b| b != 0)
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        self.trimmed_str(&bytes[..end])
     }
 
     fn trimmed_str(&self, bytes: &[u8]) -> Option<String> {
@@ -232,12 +232,14 @@ impl TelemetryPacket {
             Some(e) => Some(core::str::from_utf8(&bytes[..e]).unwrap_or("").to_string()),
             None => None,
         }
-
+    }
+    #[inline]
+    fn msg_ty(&self) -> MessageDataType {
+        MESSAGE_DATA_TYPES[self.ty as usize]
     }
     /// Full pretty string including decoded data portion.
     pub fn to_string(&self) -> String {
         const MAX_PRECISION: usize = 12;
-
         let mut s = String::new();
         s.push_str(&self.header_string());
 
@@ -245,20 +247,22 @@ impl TelemetryPacket {
             s.push_str(", Data: <empty>");
             return s;
         }
-        // Special case: TelemetryError as UTF-8 string
-        if let Some(err_str) = self.data_as_utf8_if_error() {
+
+        if get_info_type(self.ty) == MessageType::Error {
             s.push_str(", Error: ");
-            s.push_str(&*err_str);
-            return s;
-
+        } else {
+            s.push_str(", Data: ");
         }
-        let elem_count = MESSAGE_ELEMENTS[self.ty as usize].max(1);
-        let per_elem = MESSAGE_SIZES[self.ty as usize] / elem_count;
+        // Strings first
+        if let Some(msg) = self.data_as_utf8() {
+            s.push_str(&msg);
+            return s;
+        }
 
-        s.push_str(", Data: ");
+        // Non-string payloads
 
-        match per_elem {
-            4 if self.payload.len() % 4 == 0 => {
+        match self.msg_ty() {
+            MessageDataType::Float32 => {
                 for (i, chunk) in self.payload.chunks_exact(4).enumerate() {
                     let v = f32::from_le_bytes(chunk.try_into().unwrap());
                     let _ = write!(s, "{v:.prec$}", prec = MAX_PRECISION);
@@ -267,25 +271,16 @@ impl TelemetryPacket {
                     }
                 }
             }
-            8 if self.payload.len() % 8 == 0 => {
-                for (i, chunk) in self.payload.chunks_exact(8).enumerate() {
-                    let v = f64::from_le_bytes(chunk.try_into().unwrap());
-                    let _ = write!(s, "{v:.prec$}", prec = MAX_PRECISION);
-                    if i + 1 < self.payload.len() / 8 {
-                        s.push_str(", ");
-                    }
-                }
-            }
-            2 if self.payload.len() % 2 == 0 => {
-                for (i, chunk) in self.payload.chunks_exact(2).enumerate() {
-                    let v = u16::from_le_bytes(chunk.try_into().unwrap());
+            MessageDataType::UInt32 => {
+                for (i, chunk) in self.payload.chunks_exact(4).enumerate() {
+                    let v = u32::from_le_bytes(chunk.try_into().unwrap());
                     let _ = write!(s, "{v}");
-                    if i + 1 < self.payload.len() / 2 {
+                    if i + 1 < self.payload.len() / 4 {
                         s.push_str(", ");
                     }
                 }
             }
-            1 => {
+            MessageDataType::UInt8 => {
                 for (i, b) in self.payload.iter().enumerate() {
                     let _ = write!(s, "{}", *b);
                     if i + 1 < self.payload.len() {
@@ -293,14 +288,8 @@ impl TelemetryPacket {
                     }
                 }
             }
-            _ => {
-                for (i, b) in self.payload.iter().enumerate() {
-                    let _ = write!(s, "0x{:02x}", b);
-                    if i + 1 < self.payload.len() {
-                        s.push(' ');
-                    }
-                }
-            }
+            MessageDataType::String => s.push_str(""),
+            MessageDataType::Hex => return self.to_hex_string(),
         }
 
         s
@@ -316,86 +305,18 @@ impl TelemetryPacket {
             let _ = write!(&mut hex, " 0x{:02x}", b);
         }
 
-        s.push_str(", Payload (hex):");
+        s.push_str(", Data (hex):");
         if !hex.is_empty() {
             s.push_str(&hex);
         }
         s
     }
 }
+
 // ---- Optional: Display so we can `format!("{pkt}")` ----
 impl core::fmt::Display for TelemetryPacket {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         // endpoints
-        {
-            let mut endpoints = String::new();
-            self.build_endpoint_string(&mut endpoints);
-            write!(
-                f,
-                "Type: {}, Size: {}, Endpoints: [{}], Timestamp: {}",
-                self.ty.as_str(),
-                self.data_size,
-                endpoints,
-                self.timestamp
-            )?;
-        }
-
-        if self.payload.is_empty() {
-            write!(f, ", Data: <empty>")?;
-            return Ok(());
-        }
-
-        let elem_count = MESSAGE_ELEMENTS[self.ty as usize].max(1);
-        let per_elem = MESSAGE_SIZES[self.ty as usize] / elem_count;
-
-        write!(f, ", Data: ")?;
-
-        match per_elem {
-            4 if self.payload.len() % 4 == 0 => {
-                for (i, chunk) in self.payload.chunks_exact(4).enumerate() {
-                    let v = f32::from_le_bytes(chunk.try_into().unwrap());
-                    write!(f, "{v:.12}")?;
-                    if i + 1 < self.payload.len() / 4 {
-                        write!(f, ", ")?;
-                    }
-                }
-            }
-            8 if self.payload.len() % 8 == 0 => {
-                for (i, chunk) in self.payload.chunks_exact(8).enumerate() {
-                    let v = f64::from_le_bytes(chunk.try_into().unwrap());
-                    write!(f, "{v:.12}")?;
-                    if i + 1 < self.payload.len() / 8 {
-                        write!(f, ", ")?;
-                    }
-                }
-            }
-            2 if self.payload.len() % 2 == 0 => {
-                for (i, chunk) in self.payload.chunks_exact(2).enumerate() {
-                    let v = u16::from_le_bytes(chunk.try_into().unwrap());
-                    write!(f, "{v}")?;
-                    if i + 1 < self.payload.len() / 2 {
-                        write!(f, ", ")?;
-                    }
-                }
-            }
-            1 => {
-                for (i, b) in self.payload.iter().enumerate() {
-                    write!(f, "{}", *b)?;
-                    if i + 1 < self.payload.len() {
-                        write!(f, ", ")?;
-                    }
-                }
-            }
-            _ => {
-                for (i, b) in self.payload.iter().enumerate() {
-                    write!(f, "0x{:02x}", b)?;
-                    if i + 1 < self.payload.len() {
-                        write!(f, " ")?;
-                    }
-                }
-            }
-        }
-
-        Ok(())
+        f.write_str(&TelemetryPacket::to_string(self))
     }
 }

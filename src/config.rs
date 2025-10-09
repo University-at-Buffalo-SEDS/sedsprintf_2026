@@ -1,10 +1,10 @@
 // src/config.rs
-
 use core::mem::size_of;
 
-//----------------------User Editable----------------------
 
+//----------------------User Editable----------------------
 pub const DEVICE_IDENTIFIER: &str = "TEST_PLATFORM";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u32)]
 pub enum DataEndpoint {
@@ -12,9 +12,22 @@ pub enum DataEndpoint {
     Radio = 1,
 }
 
-impl DataEndpoint {
-    pub const ALL: &'static [Self] = &[Self::SdCard, Self::Radio];
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MessageDataType {
+    Float32,
+    UInt8,
+    UInt32,
+    String,
+    Hex,
+}
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MessageType {
+    Info,
+    Error,
+}
+
+impl DataEndpoint {
     #[inline]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -23,89 +36,118 @@ impl DataEndpoint {
         }
     }
 }
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u32)]
 pub enum DataType {
-    GpsData = 0,
-    ImuData = 1,
-    BatteryStatus = 2,
-    SystemStatus = 3,
-    BarometerData = 4,
-    TelemetryError = 5,
+    TelemetryError = 0,
+    GpsData = 1,
+    ImuData = 2,
+    BatteryStatus = 3,
+    SystemStatus = 4,
+    BarometerData = 5,
+    ImuHexData = 6,
 }
 
+pub const MAX_VALUE_DATA_TYPE: u32 = DataType::BarometerData as u32;
+
 impl DataType {
-    pub const COUNT: usize = 6;
+    pub const COUNT: usize = 7;
 
     #[inline]
     pub fn as_str(self) -> &'static str {
         match self {
+            DataType::TelemetryError => "TELEMETRY_ERROR",
             DataType::GpsData => "GPS_DATA",
             DataType::ImuData => "IMU_DATA",
             DataType::BatteryStatus => "BATTERY_STATUS",
             DataType::SystemStatus => "SYSTEM_STATUS",
             DataType::BarometerData => "BAROMETER_DATA",
-            DataType::TelemetryError => "TELEMETRY_ERROR",
+            DataType::ImuHexData => "IMU_HEX_DATA",
         }
     }
 }
 
-/// how many elements each message carries
-pub const MESSAGE_ELEMENTS: [usize; DataType::COUNT] = [3, 6, 2, 8, 1, 1];
-/// Fixed maximum length for the TelemetryError message (bytes, UTF-8).
-pub const TELEMETRY_ERROR_MAX: usize = 128;
-/// total byte size per message (mirrors the C++ `message_size[]`)
-/// GPS/IMU/BATTERY use f32 (=4 bytes each element). SYSTEM_STATUS uses u8.
-pub const MESSAGE_SIZES: [usize; DataType::COUNT] = [
-    size_of::<u32>() * MESSAGE_ELEMENTS[DataType::GpsData as usize], // 3 * f32
-    size_of::<u32>() * MESSAGE_ELEMENTS[DataType::ImuData as usize], // 6 * f32
-    size_of::<u32>() * MESSAGE_ELEMENTS[DataType::BatteryStatus as usize], // 2 * f32
-    size_of::<bool>() * MESSAGE_ELEMENTS[DataType::SystemStatus as usize], // 8 * u8
-    size_of::<u32>() * MESSAGE_ELEMENTS[DataType::SystemStatus as usize], // 8 * u8
-    TELEMETRY_ERROR_MAX, // 1 * f32
+pub const MESSAGE_DATA_TYPES: [MessageDataType; DataType::COUNT] = [
+    MessageDataType::String,
+    MessageDataType::Float32,
+    MessageDataType::Float32,
+    MessageDataType::Float32,
+    MessageDataType::UInt8,
+    MessageDataType::UInt32,
+    MessageDataType::Hex,
 ];
 
-/// Static default endpoints per type (no heap, just slices).
-pub const GPS_ENDPOINTS: &[DataEndpoint] = &[DataEndpoint::SdCard, DataEndpoint::Radio];
-pub const IMU_ENDPOINTS: &[DataEndpoint] = &[DataEndpoint::SdCard, DataEndpoint::Radio];
-pub const BATT_ENDPOINTS: &[DataEndpoint] = &[DataEndpoint::SdCard, DataEndpoint::Radio];
-pub const SYS_ENDPOINTS: &[DataEndpoint] = &[DataEndpoint::SdCard];
-pub const BAROMETER_ENDPOINTS: &[DataEndpoint] = &[DataEndpoint::SdCard, DataEndpoint::Radio];
+pub const MESSAGE_INFO_TYPES: [MessageType; DataType::COUNT] = [
+    MessageType::Error,
+    MessageType::Info,
+    MessageType::Info,
+    MessageType::Info,
+    MessageType::Info,
+    MessageType::Info,
+    MessageType::Info,
+];
 
-pub const TELEMETRY_ERROR_ENDPOINTS: &[DataEndpoint] = &[DataEndpoint::SdCard, DataEndpoint::Radio];
+pub const fn data_type_size(dt: MessageDataType) -> usize {
+    match dt {
+        MessageDataType::Float32 => size_of::<f32>(),
+        MessageDataType::UInt8 => size_of::<u8>(),
+        MessageDataType::UInt32 => size_of::<u32>(),
+        MessageDataType::String => MAX_STRING_LENGTH,
+        MessageDataType::Hex => MAX_HEX_LENGTH,
+    }
+}
+
+/// how many elements each message carries
+pub const MESSAGE_ELEMENTS: [usize; DataType::COUNT] = [
+    1, // elements int he Telemetry Error data
+    3, // elements in the GPS data (lat, lon, alt)
+    9, // elements in the IMU data (accel x,y,z; gyro x,y,z; mag x,y,z)
+    4, // elements in the Battery Status data
+    2, // elements in the System Status data (cpu load, memory usage)
+    3, // elements in the Barometer data (pressure, temperature, altitude)
+    1, // elements in the IMU Hex data (raw hex string)
+];
+/// Fixed maximum length for the TelemetryError message (bytes, UTF-8).
+pub const MAX_STRING_LENGTH: usize = 128;
+pub const MAX_HEX_LENGTH: usize = 128;
 
 /// All message types with their metadata.
-
 pub const MESSAGE_TYPES: [MessageMeta; DataType::COUNT] = [
     MessageMeta {
+        ty: DataType::TelemetryError,
+        data_size: get_needed_message_size(DataType::TelemetryError),
+        endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
+    },
+    MessageMeta {
         ty: DataType::GpsData,
-        data_size: MESSAGE_SIZES[DataType::GpsData as usize],
-        endpoints: GPS_ENDPOINTS,
+        data_size: get_needed_message_size(DataType::GpsData),
+        endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
     },
     MessageMeta {
         ty: DataType::ImuData,
-        data_size: MESSAGE_SIZES[DataType::ImuData as usize],
-        endpoints: IMU_ENDPOINTS,
+        data_size: get_needed_message_size(DataType::ImuData),
+        endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
     },
     MessageMeta {
         ty: DataType::BatteryStatus,
-        data_size: MESSAGE_SIZES[DataType::BatteryStatus as usize],
-        endpoints: BATT_ENDPOINTS,
+        data_size: get_needed_message_size(DataType::BatteryStatus),
+        endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
     },
     MessageMeta {
         ty: DataType::SystemStatus,
-        data_size: MESSAGE_SIZES[DataType::SystemStatus as usize],
-        endpoints: SYS_ENDPOINTS,
+        data_size: get_needed_message_size(DataType::SystemStatus),
+        endpoints: &[DataEndpoint::SdCard],
     },
     MessageMeta {
         ty: DataType::BarometerData,
-        data_size: MESSAGE_SIZES[DataType::BarometerData as usize],
-        endpoints: BAROMETER_ENDPOINTS,
+        data_size: get_needed_message_size(DataType::BarometerData),
+        endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
     },
     MessageMeta {
-        ty: DataType::TelemetryError,
-        data_size: MESSAGE_SIZES[DataType::TelemetryError as usize],
-        endpoints: TELEMETRY_ERROR_ENDPOINTS,
+        ty: DataType::ImuHexData,
+        data_size: get_needed_message_size(DataType::ImuHexData),
+        endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
     },
 ];
 // -------------------------------------------------------------
@@ -121,4 +163,12 @@ pub struct MessageMeta {
 #[inline]
 pub fn message_meta(ty: DataType) -> &'static MessageMeta {
     &MESSAGE_TYPES[ty as usize]
+}
+
+pub const fn get_needed_message_size(ty: DataType) -> usize {
+    data_type_size(MESSAGE_DATA_TYPES[ty as usize]) * MESSAGE_ELEMENTS[ty as usize]
+}
+
+pub const fn get_info_type(ty: DataType) -> MessageType {
+    MESSAGE_INFO_TYPES[ty as usize]
 }
