@@ -11,7 +11,7 @@ mod tests;
 
 
 // ---- core/alloc imports usable in both std and no_std ----
-use alloc::{format, string::String, sync::Arc, vec::Vec};
+use alloc::{format, string::String, string::ToString, sync::Arc, vec::Vec};
 use core::{convert::TryInto, fmt::Write};
 
 
