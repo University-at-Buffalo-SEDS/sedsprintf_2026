@@ -16,3 +16,10 @@ into strings for logging.
   ```bash
   rustup target add thumbv7em-none-eabihf
   ```
+  
+
+- WHen using this library as a submodule in a different c or c++ project, make sure to add the following to your cmakelists.txt
+  ```cmake
+  add_subdirectory(${CMAKE_SOURCE_DIR}/sedsprintf_rs)
+  target_link_libraries(${CMAKE_PROJECT_NAME} sedsprintf_rs)
+  ```
