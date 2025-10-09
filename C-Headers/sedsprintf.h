@@ -179,7 +179,7 @@ typedef enum SedsElemKind
  * \return            0 on success; negative error code on failure (see status codes).
  */
 SedsResult seds_router_log_typed(SedsRouter * r,
-                                 uint32_t ty,
+                                 SedsDataType ty,
                                  const void * data,
                                  size_t count,
                                  size_t elem_size,
@@ -202,7 +202,7 @@ SedsResult seds_router_log_typed(SedsRouter * r,
  * \return          0 on success; negative error code on failure.
  */
 SedsResult seds_router_log_bytes(SedsRouter * r,
-                                 uint32_t ty,
+                                 SedsDataType ty,
                                  const uint8_t * data,
                                  size_t len,
                                  uint64_t timestamp);
@@ -218,7 +218,7 @@ SedsResult seds_router_log_bytes(SedsRouter * r,
  * \return          0 on success; negative error code on failure.
  */
 SedsResult seds_router_log_f32(SedsRouter * r,
-                               uint32_t ty,
+                               SedsDataType ty,
                                const float * vals,
                                size_t n_vals,
                                uint64_t timestamp);
@@ -368,7 +368,7 @@ namespace seds_detail
  */
 template<typename T>
 static inline SedsResult seds_router(SedsRouter * router,
-                                     uint32_t datatype,
+                                     SedsDataType datatype,
                                      const T * data,
                                      size_t count,
                                      uint64_t timestamp)
