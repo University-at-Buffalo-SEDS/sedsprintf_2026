@@ -110,22 +110,24 @@ impl Router {
         dest: Option<DataEndpoint>,
         e: TelemetryError,
     ) -> Result<()> {
+        // Decide which local endpoints should receive the synthesized error packet
         let error_endpoints: Vec<DataEndpoint> = match dest {
-            Some(dest) => {
-                // If we know which endpoint failed, we create an error packet for all other endpoints.
-                pkt.endpoints
-                    .iter()
-                    .copied()
-                    .filter(|&ep| ep != dest)
-                    .collect()
-            }
-            None => {
-                // If we don't know which endpoint failed (e.g., transmission failure), we notify all local endpoints.
-                pkt.endpoints.iter().copied().collect()
-            }
+            Some(dest) => pkt
+                .endpoints
+                .iter()
+                .copied()
+                .filter(|&ep| ep != dest)
+                .collect(),
+            None => pkt
+                .endpoints
+                .iter()
+                .copied()
+                .filter(|&ep| self.cfg.is_local_endpoint(ep))
+                .collect(),
         };
 
-        let error_payload = match dest {
+        // Human-readable message text
+        let error_msg = match dest {
             Some(dest) => format!(
                 "Handler for endpoint {:?} failed on device {:?}: {:?}",
                 dest, DEVICE_IDENTIFIER, e
@@ -136,18 +138,28 @@ impl Router {
             ),
         };
 
+        // *** CRITICAL: fit to TelemetryError schema size (pad/truncate) ***
+        let meta = message_meta(DataType::TelemetryError);
+        let mut buf = alloc::vec::Vec::with_capacity(meta.data_size);
+        // start as all zeros
+        unsafe { buf.set_len(meta.data_size) };
+        let msg_bytes = error_msg.as_bytes();
+        let n = core::cmp::min(meta.data_size, msg_bytes.len());
+        buf[..n].copy_from_slice(&msg_bytes[..n]);
+
         let error_pkt = TelemetryPacket::new(
             DataType::TelemetryError,
             &error_endpoints,
             pkt.timestamp,
-            Arc::<[u8]>::from(error_payload.into_bytes()),
+            alloc::sync::Arc::<[u8]>::from(buf),
         )?;
-        // send the error packet
+
+        // send the error packet (this path uses the same invariant checks)
         self.send(&error_pkt)
     }
 
     /// Log (send) a packet: serialize once, transmit (if any remote endpoint), then deliver to matching locals.
-    fn send(&self, pkt: &TelemetryPacket) -> Result<()> {
+    pub fn send(&self, pkt: &TelemetryPacket) -> Result<()> {
         pkt.validate()?;
 
         let any_remote = pkt

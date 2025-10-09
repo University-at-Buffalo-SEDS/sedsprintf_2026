@@ -210,7 +210,30 @@ impl TelemetryPacket {
             self.timestamp
         )
     }
+    pub fn data_as_utf8_if_error(&self) -> Option<String> {
+        if self.ty == DataType::TelemetryError {
+            // trim trailing NULs
+            let bytes = &self.payload;
+            let end = bytes
+                .iter()
+                .rposition(|&b| b != 0)
+                .map(|i| i + 1)
+                .unwrap_or(0);
+            self.trimmed_str(&bytes[..end])
+        } else {
+            None
+        }
+    }
 
+    fn trimmed_str(&self, bytes: &[u8]) -> Option<String> {
+        // only for TelemetryError
+        let end = bytes.iter().rposition(|&b| b != 0).map(|i| i + 1);
+        match end {
+            Some(e) => Some(core::str::from_utf8(&bytes[..e]).unwrap_or("").to_string()),
+            None => None,
+        }
+
+    }
     /// Full pretty string including decoded data portion.
     pub fn to_string(&self) -> String {
         const MAX_PRECISION: usize = 12;
@@ -222,7 +245,13 @@ impl TelemetryPacket {
             s.push_str(", Data: <empty>");
             return s;
         }
+        // Special case: TelemetryError as UTF-8 string
+        if let Some(err_str) = self.data_as_utf8_if_error() {
+            s.push_str(", Error: ");
+            s.push_str(&*err_str);
+            return s;
 
+        }
         let elem_count = MESSAGE_ELEMENTS[self.ty as usize].max(1);
         let per_elem = MESSAGE_SIZES[self.ty as usize] / elem_count;
 

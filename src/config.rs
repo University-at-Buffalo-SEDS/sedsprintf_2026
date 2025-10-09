@@ -52,7 +52,8 @@ impl DataType {
 
 /// how many elements each message carries
 pub const MESSAGE_ELEMENTS: [usize; DataType::COUNT] = [3, 6, 2, 8, 1, 1];
-
+/// Fixed maximum length for the TelemetryError message (bytes, UTF-8).
+pub const TELEMETRY_ERROR_MAX: usize = 128;
 /// total byte size per message (mirrors the C++ `message_size[]`)
 /// GPS/IMU/BATTERY use f32 (=4 bytes each element). SYSTEM_STATUS uses u8.
 pub const MESSAGE_SIZES: [usize; DataType::COUNT] = [
@@ -61,7 +62,7 @@ pub const MESSAGE_SIZES: [usize; DataType::COUNT] = [
     size_of::<u32>() * MESSAGE_ELEMENTS[DataType::BatteryStatus as usize], // 2 * f32
     size_of::<bool>() * MESSAGE_ELEMENTS[DataType::SystemStatus as usize], // 8 * u8
     size_of::<u32>() * MESSAGE_ELEMENTS[DataType::SystemStatus as usize], // 8 * u8
-    size_of::<&str>() * MESSAGE_ELEMENTS[DataType::BarometerData as usize], // 1 * f32
+    TELEMETRY_ERROR_MAX, // 1 * f32
 ];
 
 /// Static default endpoints per type (no heap, just slices).

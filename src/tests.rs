@@ -162,7 +162,7 @@ fn fake_telemetry_packet_bytes() -> TelemetryPacket {
         ty: DataType::GpsData,
         data_size: payload.len(), // 3
         endpoints,
-        timestamp: 1_123_581_321, // 1123581321
+        timestamp: 1123581321, // 1123581321
         payload,
     }
 }
@@ -247,4 +247,155 @@ fn helpers_copy_telemetry_packet() {
         assert_eq!(dest.endpoints[i], src.endpoints[i]);
     }
     assert_eq!(&*dest.payload, &*src.payload);
+}
+
+#[cfg(test)]
+mod handler_failure_tests {
+    use super::*;
+    use crate::config::DEVICE_IDENTIFIER;
+    use crate::router::EndpointHandler;
+    use crate::{message_meta, BoardConfig, DataType, Router, TelemetryError, MESSAGE_SIZES};
+    use alloc::{sync::Arc, vec, vec::Vec};
+    use core::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex;
+
+
+    fn ep(idx: u32) -> DataEndpoint {
+        DataEndpoint::try_from_u32(idx).expect("Need endpoint present in enum for tests")
+    }
+
+    fn pick_any_type() -> DataType {
+        for (i, sz) in MESSAGE_SIZES.iter().copied().enumerate() {
+            if sz > 0 {
+                if let Some(ty) = DataType::try_from_u32(i as u32) {
+                    return ty;
+                }
+            }
+        }
+        panic!("No usable DataType found for tests");
+    }
+
+    fn payload_for(ty: DataType) -> Vec<u8> {
+        let meta = message_meta(ty);
+        vec![0u8; meta.data_size]
+    }
+
+    #[test]
+    fn local_handler_failure_sends_error_packet_to_other_locals() {
+        let ty = pick_any_type();
+        let ts = 42_u64;
+        let failing_ep = ep(0);
+        let other_ep = ep(1);
+
+        // Capture the packets that reach the "other_ep" handler.
+        let recv_count = Arc::new(AtomicUsize::new(0));
+        let last_payload = Arc::new(Mutex::new(String::new()));
+
+        let recv_count_c = recv_count.clone();
+        let last_payload_c = last_payload.clone();
+
+        let failing = EndpointHandler {
+            endpoint: failing_ep,
+            // No explicit return type -> infers crate::Result<()>
+            handler: Box::new(|_pkt: &TelemetryPacket| Err(TelemetryError::BadArg)),
+        };
+
+        let capturing = EndpointHandler {
+            endpoint: other_ep,
+            handler: Box::new(move |pkt: &TelemetryPacket| {
+                if pkt.ty == DataType::TelemetryError {
+                    *last_payload_c.lock().unwrap() = pkt.to_string();
+                }
+                recv_count_c.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }),
+        };
+
+        let router = Router::new::<fn(&[u8]) -> crate::Result<()>>(
+            None,
+            BoardConfig::new(vec![failing, capturing]),
+        );
+
+        let pkt = TelemetryPacket::new(
+            ty,
+            &[failing_ep, other_ep],
+            ts,
+            Arc::<[u8]>::from(payload_for(ty)),
+        )
+        .unwrap();
+
+        router.send(&pkt).expect("router.send should not panic");
+
+        // The capturing handler should have seen the original packet and then the error packet.
+        assert!(
+            recv_count.load(Ordering::SeqCst) >= 1,
+            "capturing handler should have been invoked at least once"
+        );
+
+        // Verify exact payload text produced by handle_callback_error(Some(dest), e)
+        let expected = format!(
+            "Type: TELEMETRY_ERROR, Size: 128, Endpoints: [RADIO], Timestamp: 42, Error: Handler for endpoint {:?} failed on device {:?}: {:?}",
+            failing_ep,
+            DEVICE_IDENTIFIER,
+            TelemetryError::BadArg
+        );
+        let got = last_payload.lock().unwrap().clone();
+        assert_eq!(got, expected, "mismatch in TelemetryError payload text");
+    }
+
+    #[test]
+    fn tx_failure_sends_error_packet_to_all_local_endpoints() {
+        let ty = pick_any_type();
+        let ts = 31415_u64;
+
+        // One local endpoint (to receive error), one "remote" endpoint (not in handlers)
+        let local_ep = ep(0);
+        let remote_ep = ep(1);
+
+        let saw_error = Arc::new(AtomicUsize::new(0));
+        let last_payload = Arc::new(Mutex::new(String::new()));
+        let saw_error_c = saw_error.clone();
+        let last_payload_c = last_payload.clone();
+
+        let capturing = EndpointHandler {
+            endpoint: local_ep,
+            handler: Box::new(move |pkt: &TelemetryPacket| {
+                if pkt.ty == DataType::TelemetryError {
+                    *last_payload_c.lock().unwrap() = pkt.to_string();
+                    saw_error_c.fetch_add(1, Ordering::SeqCst);
+                }
+                Ok(())
+            }),
+        };
+
+        // Explicitly annotate to your alias so type inference is trivial
+        let tx_fail = |_bytes: &[u8]| -> crate::Result<()> { Err(TelemetryError::Io("boom")) };
+
+        let router = Router::new(Some(tx_fail), BoardConfig::new(vec![capturing]));
+
+        let pkt = TelemetryPacket::new(
+            ty,
+            // include both a local and a non-local endpoint so any_remote == true
+            &[local_ep, remote_ep],
+            ts,
+            Arc::<[u8]>::from(payload_for(ty)),
+        )
+        .unwrap();
+
+        router.send(&pkt).expect("router.send should not panic");
+
+        assert!(
+            saw_error.load(Ordering::SeqCst) >= 1,
+            "local handler should have received TelemetryError after TX failures"
+        );
+
+        // Exact text from handle_callback_error(None, e)
+        let expected = format!(
+            "Type: TELEMETRY_ERROR, Size: 128, Endpoints: [SD_CARD], Timestamp: 31415, Error: TX Handler failed on device {:?}: {:?}",
+            DEVICE_IDENTIFIER,
+            TelemetryError::Io("boom")
+        );
+        let got = last_payload.lock().unwrap().clone();
+        assert_eq!(got, expected, "mismatch in TelemetryError payload text");
+    }
 }
