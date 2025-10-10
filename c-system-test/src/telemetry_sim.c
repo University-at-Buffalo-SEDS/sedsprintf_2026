@@ -1,6 +1,7 @@
 #include "telemetry_sim.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include <time.h>
 
 // ===================== BUS =====================
 
@@ -155,9 +156,9 @@ void node_rx(SimNode *n, const uint8_t *bytes, size_t len) {
 
 SedsResult node_log(SimNode *n, SedsDataType dt, const float *data, size_t data_len) {
     if (!n || !n->r || !data || data_len == 0) return SEDS_ERR;
-    const uint64_t ts = 0; // or a simulated clock
+    const uint64_t ts = time(NULL); // or a simulated clock
     n->is_originator = 1;  // allow TX
-    SedsResult r = seds_router_log(n->r, dt, data, (uint32_t)data_len, ts);
+    const SedsResult r = seds_router_log(n->r, dt, data, (uint32_t)data_len, ts);
     n->is_originator = 0;  // done
     return r;
 }

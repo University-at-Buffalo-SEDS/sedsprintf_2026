@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
 #include "telemetry_sim.h"
 #include "sedsprintf.h"
 #include <assert.h>
@@ -13,9 +12,6 @@ static void make_series(float * out, size_t n, float base)
 
 int main(void)
 {
-    // Seed randomness (optional)
-    srand((unsigned) time(NULL));
-
     // 1) Create the bus
     SimBus bus;
     bus_init(&bus);
