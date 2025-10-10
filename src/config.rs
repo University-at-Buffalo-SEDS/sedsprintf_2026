@@ -102,7 +102,7 @@ pub const fn data_type_size(dt: MessageDataType) -> usize {
 pub const MESSAGE_ELEMENTS: [usize; DataType::COUNT] = [
     1, // elements int he Telemetry Error data
     3, // elements in the GPS data (lat, lon, alt)
-    9, // elements in the IMU data (accel x,y,z; gyro x,y,z; mag x,y,z)
+    6, // elements in the IMU data (accel x,y,z; gyro x,y,z; mag x,y,z)
     4, // elements in the Battery Status data
     2, // elements in the System Status data (cpu load, memory usage)
     3, // elements in the Barometer data (pressure, temperature, altitude)

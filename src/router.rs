@@ -174,7 +174,7 @@ impl Router {
             if let Some(tx) = &self.transmit {
                 for i in 0..MAX_NUMBER_OF_RETRYS {
                     match tx(&bytes) {
-                        Ok(_) => {}
+                        Ok(_) => break,
                         Err(e) => {
                             if i == MAX_NUMBER_OF_RETRYS - 1 {
                                 // create a packet to all endpoints except the one that failed
