@@ -1,4 +1,4 @@
-#include "../include/telemetry.h"
+#include "telemetry.h"
 #include <stdio.h>
 #include <string.h>
 #include "sedsprintf.h"
