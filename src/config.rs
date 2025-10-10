@@ -5,14 +5,14 @@ use core::mem::size_of;
 //----------------------User Editable----------------------
 pub const DEVICE_IDENTIFIER: &str = "TEST_PLATFORM";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 #[repr(u32)]
 pub enum DataEndpoint {
     SdCard = 0,
     Radio = 1,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub enum MessageDataType {
     Float32,
     UInt8,
@@ -21,7 +21,7 @@ pub enum MessageDataType {
     Hex,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub enum MessageType {
     Info,
     Error,
@@ -37,7 +37,7 @@ impl DataEndpoint {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 #[repr(u32)]
 pub enum DataType {
     TelemetryError = 0,

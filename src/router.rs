@@ -85,6 +85,19 @@ fn encode_slice_le<T: LeBytes>(data: &[T]) -> Vec<u8> {
     buf
 }
 
+// Simple stdout fallback that works under std and is a no-op under no_std
+#[inline]
+fn fallback_stdout(msg: &str) {
+    #[cfg(feature = "std")]
+    {
+        println!("{}", msg);
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        let _ = msg;
+    }
+}
+
 // -------------------- Router --------------------
 
 /// A small router that can serialize+transmit and/or locally dispatch packets.
@@ -107,56 +120,70 @@ impl Router {
     fn handle_callback_error(
         &self,
         pkt: &TelemetryPacket,
-        dest: Option<DataEndpoint>,
+        dest: Option<DataEndpoint>,   // None => TX failed; Some(ep) => local handler 'ep' failed
         e: TelemetryError,
     ) -> Result<()> {
-        // Only notify LOCAL endpoints; if a local handler failed, exclude that one.
-        let error_endpoints: Vec<DataEndpoint> = pkt
-            .endpoints
-            .iter()
-            .copied()
-            .filter(|&ep| self.cfg.is_local_endpoint(ep)) // <- keep locals only
-            .filter(|&ep| dest.map(|failed| ep != failed).unwrap_or(true)) // <- exclude failing local
-            .collect();
-
-        // If nothing local to notify, bail (prevents TX recursion).
-        if error_endpoints.is_empty() {
-            return Ok(());
-        }
-
-        // Human-readable message
+        // Compose message once
         let error_msg = match dest {
             Some(failed_local) => alloc::format!(
                 "Handler for endpoint {:?} failed on device {:?}: {:?}",
-                failed_local,
-                DEVICE_IDENTIFIER,
-                e
+                failed_local, DEVICE_IDENTIFIER, e
             ),
-            None => alloc::format!(
-                "TX Handler failed on device {:?}: {:?}",
-                DEVICE_IDENTIFIER,
-                e
-            ),
+            None => alloc::format!("TX Handler failed on device {:?}: {:?}", DEVICE_IDENTIFIER, e),
         };
 
-        // Build fixed-size, zero-padded payload (pad/truncate to schema size)
+        // Gather local endpoints referenced by this packet
+        let mut locals: Vec<DataEndpoint> = pkt
+            .endpoints
+            .iter()
+            .copied()
+            .filter(|&ep| self.cfg.is_local_endpoint(ep))
+            .collect();
+        locals.sort_unstable();
+        locals.dedup();
+
+        // If a local handler failed, exclude *just* that one
+        if let Some(failed_local) = dest {
+            locals.retain(|&ep| ep != failed_local);
+        }
+
+        // --- Special handling for TX failure (dest == None) ---
+        if dest.is_none() {
+            if locals.is_empty() {
+                // No locals to notify → fallback to stdout
+                fallback_stdout(&error_msg);
+                return Ok(());
+            }
+            // else: broadcast to *all* locals (already collected)
+        } else {
+            // Local handler failure path:
+            if locals.is_empty() {
+                // Nothing else local to notify; just stop quietly.
+                return Ok(());
+            }
+        }
+
+        // Build zero-padded payload to TelemetryError schema
         let meta = message_meta(DataType::TelemetryError);
-        let mut buf = alloc::vec![0u8; meta.data_size]; // zero-initialized
+        let mut buf = alloc::vec![0u8; meta.data_size];
         let msg_bytes = error_msg.as_bytes();
         let n = core::cmp::min(buf.len(), msg_bytes.len());
         if n > 0 {
-            buf[..n].copy_from_slice(&msg_bytes[..n]); // <- actually copy the message
+            buf[..n].copy_from_slice(&msg_bytes[..n]);
         }
 
+        // Target only the chosen local endpoints
         let error_pkt = TelemetryPacket::new(
             DataType::TelemetryError,
-            &error_endpoints,
+            &locals,
             pkt.timestamp,
             alloc::sync::Arc::<[u8]>::from(buf),
         )?;
 
+        // Normal path: since endpoints are local, your send() should deliver via local handlers only.
         self.send(&error_pkt)
     }
+
 
     /// Log (send) a packet: serialize once, transmit (if any remote endpoint), then deliver to matching locals.
     pub fn send(&self, pkt: &TelemetryPacket) -> Result<()> {
