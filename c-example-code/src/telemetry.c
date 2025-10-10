@@ -17,8 +17,8 @@ SedsResult tx_send(const uint8_t *bytes, size_t len, void *user)
     return SEDS_OK;
 }
 
-//example function that recieves the data from the can bus or similar and passes the serialized packet to the router for decoding and handling.
-void rx(const uint8_t *bytes, size_t len)
+//example function that receives the data from the can bus or similar and passes the serialized packet to the router for decoding and handling.
+void rx_synchronous(const uint8_t *bytes, size_t len)
 {
     if (!g_router.r) {
         // lazy init if not yet created
@@ -26,6 +26,17 @@ void rx(const uint8_t *bytes, size_t len)
     }
     if (!bytes || len == 0) return;
     seds_router_receive_serialized(g_router.r, bytes, len);
+}
+
+
+void rx_asynchronous(const uint8_t *bytes, size_t len)
+{
+    if (!g_router.r) {
+        // lazy init if not yet created
+        if (init_telemetry_router() != SEDS_OK) return;
+    }
+    if (!bytes || len == 0) return;
+    seds_router_rx_serialized_packet_to_queue(g_router.r, bytes, len);
 }
 
 // --- Simple radio handler ---
@@ -57,7 +68,7 @@ SedsResult init_telemetry_router(void)
         tx_send,
         NULL,  // tx_user
         locals,
-        (uint32_t)(sizeof(locals) / sizeof(locals[0]))
+        sizeof(locals) / sizeof(locals[0])
     );
 
     if (!r) {
@@ -72,7 +83,7 @@ SedsResult init_telemetry_router(void)
     return SEDS_OK;
 }
 
-SedsResult log_telemetry(SedsDataType data_type, const float *data, size_t data_len)
+SedsResult log_telemetry_synchronous(SedsDataType data_type, const float *data, size_t data_len)
 {
     if (!g_router.r) {
         // lazy init if not yet created
@@ -82,9 +93,45 @@ SedsResult log_telemetry(SedsDataType data_type, const float *data, size_t data_
 
     // If you want timestamps from HAL, you can expose HAL_GetTick() here via a weak symbol or
     // pass a timestamp of 0 to use the router’s internal time policy, if supported.
-    uint64_t ts = (uint64_t)0; // replace with board tick if your C API accepts a timestamp parameter elsewhere
+    uint64_t ts = 0; // replace with board tick if your C API accepts a timestamp parameter elsewhere
 
     // If your C API uses an overload with timestamp, call that; otherwise plain log:
     // e.g., seds_router_log_ts(g_router.r, data_type, data, (uint32_t)data_len, ts);
     return seds_router_log(g_router.r, data_type, data, data_len, ts);
+}
+
+SedsResult dispatch_tx_queue(void)
+{
+    if (!g_router.r) {
+        // lazy init if not yet created
+        if (init_telemetry_router() != SEDS_OK) return SEDS_ERR;
+    }
+    return seds_router_process_send_queue(g_router.r);
+}
+
+SedsResult process_rx_queue(void)
+{
+    if (!g_router.r) {
+        // lazy init if not yet created
+        if (init_telemetry_router() != SEDS_OK) return SEDS_ERR;
+    }
+    return seds_router_process_received_queue(g_router.r);
+}
+
+
+SedsResult log_telemetry_asynchronous(SedsDataType data_type, const float *data, size_t data_len)
+{
+    if (!g_router.r) {
+        // lazy init if not yet created
+        if (init_telemetry_router() != SEDS_OK) return SEDS_ERR;
+    }
+    if (!data || data_len == 0) return SEDS_ERR;
+
+    // If you want timestamps from HAL, you can expose HAL_GetTick() here via a weak symbol or
+    // pass a timestamp of 0 to use the router’s internal time policy, if supported.
+    uint64_t ts = 0; // replace with board tick if your C API accepts a timestamp parameter elsewhere
+
+    // If your C API uses an overload with timestamp, call that; otherwise plain log:
+    // e.g., seds_router_log_ts(g_router.r, data_type, data, (uint32_t)data_len, ts);
+    return seds_router_log_queue(g_router.r, data_type, data, data_len, ts);
 }
