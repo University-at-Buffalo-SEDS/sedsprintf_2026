@@ -25,7 +25,7 @@ void rx(const uint8_t *bytes, size_t len)
         if (init_telemetry_router() != SEDS_OK) return;
     }
     if (!bytes || len == 0) return;
-    seds_router_receive(g_router.r, bytes, len);
+    seds_router_receive_serialized(g_router.r, bytes, len);
 }
 
 // --- Simple radio handler ---

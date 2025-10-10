@@ -23,12 +23,9 @@ extern "C" {
         int has_radio;
 
         int has_sdcard;
-        uint8_t is_originator;
-
         // --- NEW: simple stats for tests ---
         unsigned radio_hits;   // times RADIO handler ran
         unsigned sd_hits;      // times SD handler ran
-        uint8_t in_rx;         // true while processing RX
 
     };
 

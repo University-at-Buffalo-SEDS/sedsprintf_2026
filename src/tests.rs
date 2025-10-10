@@ -5,10 +5,7 @@ use crate::{DataEndpoint, TelemetryPacket};
 #[cfg(test)]
 mod tests {
     use crate::config::get_needed_message_size;
-    use crate::{
-        config::{DataEndpoint, DataType, MESSAGE_ELEMENTS},
-        serialize, Result, TelemetryPacket,
-    };
+    use crate::{config::{DataEndpoint, DataType, MESSAGE_ELEMENTS}, serialize, Result, Router, TelemetryPacket};
     use core::convert::TryInto;
     use std::sync::{Arc, Mutex};
     use std::vec::Vec;
@@ -143,7 +140,113 @@ mod tests {
         assert_eq!(seen_ty, DataType::GpsData);
         assert_eq!(seen_vals, data);
     }
+    /// A small “bus” that records transmitted frames.
+    struct TestBus {
+        frames: Arc<Mutex<Vec<Vec<u8>>>>,
+    }
+    impl TestBus {
+        fn new() -> (Self, impl Fn(&[u8]) -> Result<()> + Send + Sync + 'static) {
+            let frames = Arc::new(Mutex::new(Vec::<Vec<u8>>::new()));
+            let tx_frames = frames.clone();
+            let tx = move |bytes: &[u8]| -> Result<()> {
+                // capture the exact wire bytes
+                tx_frames.lock().unwrap().push(bytes.to_vec());
+                Ok(())
+            };
+            (Self { frames }, tx)
+        }
+    }
+
+    #[test]
+    fn queued_roundtrip_between_two_routers() {
+        use crate::router::EndpointHandler;
+
+        // --- Set up a TX router that only sends (no local endpoints) ---
+        let (bus, tx_fn) = TestBus::new();
+        let mut tx_router = Router::new(Some(tx_fn), Default::default());
+
+        // --- Set up an RX router with a local SD handler that decodes f32 payloads ---
+        let seen: Arc<Mutex<Option<(DataType, Vec<f32>)>>> = Arc::new(Mutex::new(None));
+        let seen_c = seen.clone();
+        let sd_handler = EndpointHandler {
+            endpoint: DataEndpoint::SdCard,
+            handler: Box::new(move |pkt: &TelemetryPacket| {
+                // Verify schema matches: GPS uses f32 elements.
+                let elems = MESSAGE_ELEMENTS[pkt.ty as usize].max(1);
+                let per_elem = get_needed_message_size(pkt.ty) / elems;
+                assert_eq!(pkt.ty, DataType::GpsData);
+                assert_eq!(per_elem, 4, "GPS_DATA expected f32 elements");
+
+                let mut vals = Vec::with_capacity(pkt.payload.len() / 4);
+                for chunk in pkt.payload.chunks_exact(4) {
+                    vals.push(f32::from_le_bytes(chunk.try_into().unwrap()));
+                }
+                *seen_c.lock().unwrap() = Some((pkt.ty, vals));
+                Ok(())
+            }),
+        };
+        fn tx_handler(_bytes: &[u8]) -> Result<()> {
+            // RX router does not transmit in this test
+            Ok(())
+        }
+        let mut rx_router = Router::new(Some(tx_handler), crate::BoardConfig::new(vec![sd_handler]));
+
+        // --- 1) Sender enqueues a packet for TX ---
+        let data = [1.0_f32, 2.0, 3.0];
+        tx_router.log_queue(DataType::GpsData, &data, 0).unwrap();
+
+        // --- 2) Flush TX queue -> pushes wire frames into TestBus ---
+        tx_router.process_send_queue().unwrap();
+
+        // --- 3) Deliver captured frames into RX router's *received queue* ---
+        let frames = bus.frames.lock().unwrap().clone();
+        assert_eq!(frames.len(), 1, "expected exactly one TX frame");
+        for frame in &frames {
+            rx_router.rx_serialized_packet_to_queue(frame).unwrap();
+        }
+
+        // --- 4) Drain RX queue -> invokes local handlers ---
+        rx_router.process_received_queue().unwrap();
+
+        // --- Assertions: handler got the right data ---
+        let (ty, vals) = seen.lock().unwrap().clone().expect("no packet delivered");
+        assert_eq!(ty, DataType::GpsData);
+        assert_eq!(vals, data);
+    }
+
+    #[test]
+    fn queued_self_delivery_via_receive_queue() {
+        // If you expect a node to handle its *own* packets, you must explicitly
+        // feed them back into its received queue (mirroring “broadcast to self”).
+        let (bus, tx_fn) = TestBus::new();
+        let mut router = Router::new(Some(tx_fn), Default::default());
+
+        // Enqueue for transmit
+        let data = [10.0_f32, 10.25, 10.5];
+        router.log_queue(DataType::GpsData, &data, 42).unwrap();
+
+        let data = [10.0_f32, 10.25, 10.5, 12.3];
+        router.log_queue(DataType::BatteryStatus, &data, 42).unwrap();
+
+        let data = [10.0_f32, 10.25, 10.5];
+        router.log_queue(DataType::GpsData, &data, 42).unwrap();
+        // Flush -> frame appears on the "bus"
+        router.process_send_queue().unwrap();
+        let frames = bus.frames.lock().unwrap().clone();
+        assert_eq!(frames.len(), 3);
+
+        // Feed back into *the same* router's received queue
+        router.rx_serialized_packet_to_queue(&frames[0]).unwrap();
+
+        // Now draining the received queue should dispatch to any matching local endpoints.
+        // (This router has no endpoints; this test just proves the queue path is exercised.)
+        router.process_received_queue().unwrap();
+    }
 }
+
+
+
+
 // ---- Helpers (test-local) ----
 
 /// Build a deterministic packet with a raw 3-byte payload [0x13, 0x21, 0x34],

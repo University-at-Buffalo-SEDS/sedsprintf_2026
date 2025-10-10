@@ -104,6 +104,8 @@ fn fallback_stdout(msg: &str) {
 pub struct Router {
     transmit: Option<Box<dyn Fn(&[u8]) -> Result<()> + Send + Sync + 'static>>,
     cfg: BoardConfig,
+    received_queue: Vec<TelemetryPacket>,
+    transmit_queue: Vec<TelemetryPacket>,
 }
 
 impl Router {
@@ -114,22 +116,30 @@ impl Router {
         Self {
             transmit: transmit.map(|t| Box::new(t) as _),
             cfg,
+            received_queue: Vec::new(),
+            transmit_queue: Vec::new(),
         }
     }
 
     fn handle_callback_error(
         &self,
         pkt: &TelemetryPacket,
-        dest: Option<DataEndpoint>,   // None => TX failed; Some(ep) => local handler 'ep' failed
+        dest: Option<DataEndpoint>, // None => TX failed; Some(ep) => local handler 'ep' failed
         e: TelemetryError,
     ) -> Result<()> {
         // Compose message once
         let error_msg = match dest {
             Some(failed_local) => alloc::format!(
                 "Handler for endpoint {:?} failed on device {:?}: {:?}",
-                failed_local, DEVICE_IDENTIFIER, e
+                failed_local,
+                DEVICE_IDENTIFIER,
+                e
             ),
-            None => alloc::format!("TX Handler failed on device {:?}: {:?}", DEVICE_IDENTIFIER, e),
+            None => alloc::format!(
+                "TX Handler failed on device {:?}: {:?}",
+                DEVICE_IDENTIFIER,
+                e
+            ),
         };
 
         // Gather local endpoints referenced by this packet
@@ -184,6 +194,38 @@ impl Router {
         self.send(&error_pkt)
     }
 
+    pub fn process_send_queue(&mut self) -> Result<()> {
+        while let Some(pkt) = self.transmit_queue.pop() {
+            self.send(&pkt)?;
+        }
+        Ok(())
+    }
+    
+    pub fn queue_tx_message(&mut self, pkt: TelemetryPacket) -> Result<()> {
+        pkt.validate()?;
+        self.transmit_queue.push(pkt);
+        Ok(())
+    }
+
+    pub fn process_received_queue(&mut self) -> Result<()> {
+        while let Some(pkt) = self.received_queue.pop() {
+            self.receive_serialized(&serialize::serialize_packet(&pkt))?;
+        }
+        Ok(())
+    }
+
+    pub fn rx_serialized_packet_to_queue(&mut self, bytes: &[u8]) -> Result<()> {
+        let pkt = serialize::deserialize_packet(bytes)?;
+        pkt.validate()?;
+        self.received_queue.push(pkt);
+        Ok(())
+    }
+
+    pub fn rx_packet_to_queue(&mut self, pkt: TelemetryPacket) -> Result<()> {
+        pkt.validate()?;
+        self.received_queue.push(pkt);
+        Ok(())
+    }
 
     /// Log (send) a packet: serialize once, transmit (if any remote endpoint), then deliver to matching locals.
     pub fn send(&self, pkt: &TelemetryPacket) -> Result<()> {
@@ -239,8 +281,12 @@ impl Router {
     }
 
     /// Accept a serialized buffer (from wire) and locally dispatch to matching endpoints.
-    pub fn receive(&self, bytes: &[u8]) -> Result<()> {
+    pub fn receive_serialized(&self, bytes: &[u8]) -> Result<()> {
         let pkt = serialize::deserialize_packet(bytes)?;
+        self.receive(&pkt)
+    }
+
+    pub fn receive(&self, pkt: &TelemetryPacket) -> Result<()> {
         pkt.validate()?;
         for &dest in pkt.endpoints.iter() {
             for h in &self.cfg.handlers {
@@ -290,6 +336,32 @@ impl Router {
         )?;
 
         self.send(&pkt)
+    }
+
+
+    pub fn log_queue<T: LeBytes>(&mut self, ty: DataType, data: &[T], timestamp: u64) -> Result<()> {
+        let meta = message_meta(ty);
+
+        // Validate total byte size against schema.
+        let got = data.len() * T::WIDTH;
+        if got != meta.data_size {
+            return Err(TelemetryError::SizeMismatch {
+                expected: meta.data_size,
+                got,
+            });
+        }
+
+        // Encode to LE (fast path for WIDTH==1 still ends up here; cheap anyway).
+        let payload_vec = encode_slice_le(data);
+
+        let pkt = TelemetryPacket::new(
+            ty,
+            &meta.endpoints,
+            timestamp,
+            Arc::<[u8]>::from(payload_vec),
+        )?;
+
+        self.queue_tx_message(pkt)
     }
 
     // optional convenience shorthands

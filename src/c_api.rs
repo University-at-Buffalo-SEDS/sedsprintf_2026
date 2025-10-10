@@ -11,7 +11,7 @@ use crate::{
 use alloc::sync::Arc;
 use alloc::{boxed::Box, vec::Vec};
 use core::ffi::c_char;
-use core::{ffi::c_void, ptr};
+use core::{ffi::c_void, ptr, slice};
 // ----------------- router wrapper -----------------
 
 #[repr(C)]
@@ -98,14 +98,14 @@ fn view_to_packet(view: &SedsPacketView) -> core::result::Result<TelemetryPacket
     let ty = DataType::try_from_u32(view.ty).ok_or(())?;
 
     // endpoints
-    let eps_u32 = unsafe { core::slice::from_raw_parts(view.endpoints, view.num_endpoints) };
+    let eps_u32 = unsafe { slice::from_raw_parts(view.endpoints, view.num_endpoints) };
     let mut eps = Vec::with_capacity(eps_u32.len());
     for &e in eps_u32 {
         eps.push(DataEndpoint::try_from_u32(e).ok_or(())?);
     }
 
     // payload
-    let bytes = unsafe { core::slice::from_raw_parts(view.payload, view.payload_len) };
+    let bytes = unsafe { slice::from_raw_parts(view.payload, view.payload_len) };
 
     Ok(TelemetryPacket {
         ty,
@@ -234,7 +234,7 @@ pub extern "C" fn seds_router_new(
     let mut v: Vec<EndpointHandler> = Vec::new();
     if n_handlers > 0 && !handlers.is_null() {
         // Safety: caller promises a valid array of length n_handlers
-        let slice = unsafe { core::slice::from_raw_parts(handlers, n_handlers) };
+        let slice = unsafe { slice::from_raw_parts(handlers, n_handlers) };
         for desc in slice {
             let endpoint = match endpoint_from_u32(desc.endpoint) {
                 Ok(e) => e,
@@ -313,7 +313,7 @@ pub extern "C" fn seds_router_log_bytes(
         Err(_) => return -3,
     };
     let router = unsafe { &(*r).inner };
-    let slice = unsafe { core::slice::from_raw_parts(data, len) };
+    let slice = unsafe { slice::from_raw_parts(data, len) };
     ok_or_status(router.log::<u8>(ty, slice, ts))
 }
 
@@ -333,20 +333,98 @@ pub extern "C" fn seds_router_log_f32(
         Err(_) => return -3,
     };
     let router = unsafe { &(*r).inner };
-    let slice = unsafe { core::slice::from_raw_parts(vals, n_vals) };
+    let slice = unsafe { slice::from_raw_parts(vals, n_vals) };
     ok_or_status(router.log::<f32>(ty, slice, ts))
 }
 
 // ----------------- FFI: receive serialized -----------------
 
 #[no_mangle]
-pub extern "C" fn seds_router_receive(r: *mut SedsRouter, bytes: *const u8, len: usize) -> i32 {
+pub extern "C" fn seds_router_receive_serialized(r: *mut SedsRouter, bytes: *const u8, len: usize) -> i32 {
     if r.is_null() || (len > 0 && bytes.is_null()) {
         return -2;
     }
     let router = unsafe { &(*r).inner };
-    let slice = unsafe { core::slice::from_raw_parts(bytes, len) };
-    ok_or_status(router.receive(slice))
+    let slice = unsafe { slice::from_raw_parts(bytes, len) };
+    ok_or_status(router.receive_serialized(slice))
+}
+
+
+#[no_mangle]
+pub extern "C" fn seds_router_receive(r: *mut SedsRouter, view: *const SedsPacketView) -> i32 {
+    if r.is_null() || view.is_null() {
+        return -2;
+    }
+    let router = unsafe { &(*r).inner };
+    let pkt = match view_to_packet(unsafe { &*view }) {
+        Ok(p) => p,
+        Err(_) => return -3, // bad view / conversion failed
+    };
+    ok_or_status(router.receive(&pkt))
+}
+
+
+#[no_mangle]
+pub extern "C" fn seds_router_process_send_queue(r: *mut SedsRouter) -> i32 {
+    if r.is_null() {
+        return -2;
+    }
+    let router = unsafe { &mut (*r).inner };
+    ok_or_status(router.process_send_queue())
+}
+
+#[no_mangle]
+pub extern "C" fn seds_router_queue_tx_message(r: *mut SedsRouter, view: *const SedsPacketView) -> i32 {
+    if r.is_null() || view.is_null() {
+        return -2;
+    }
+    let router = unsafe { &mut (*r).inner };
+    // SAFETY: checked for null above
+    let pkt = match view_to_packet(unsafe { &*view }) {
+        Ok(p) => p,
+        Err(_) => return -3, // bad view / conversion failed
+    };
+    ok_or_status(router.queue_tx_message(pkt))
+}
+
+#[no_mangle]
+pub extern "C" fn seds_router_process_received_queue(r: *mut SedsRouter) -> i32 {
+    if r.is_null() {
+        return -2;
+    }
+    let router = unsafe { &mut (*r).inner };
+    ok_or_status(router.process_received_queue())
+}
+
+#[no_mangle]
+pub extern "C" fn seds_router_rx_serialized_packet_to_queue(
+    r: *mut SedsRouter,
+    bytes: *const u8,
+    len: usize,
+) -> i32 {
+    if r.is_null() || (len > 0 && bytes.is_null()) {
+        return -2;
+    }
+    let router = unsafe { &mut (*r).inner };
+    let slice = unsafe { slice::from_raw_parts(bytes, len) };
+    ok_or_status(router.rx_serialized_packet_to_queue(slice))
+}
+
+#[no_mangle]
+pub extern "C" fn seds_router_rx_packet_to_queue(
+    r: *mut SedsRouter,
+    view: *const SedsPacketView,
+) -> i32 {
+    if r.is_null() || view.is_null() {
+        return -2;
+    }
+    let router = unsafe { &mut (*r).inner };
+    // SAFETY: checked for null above
+    let pkt = match view_to_packet(unsafe { &*view }) {
+        Ok(p) => p,
+        Err(_) => return -3, // bad view / conversion failed
+    };
+    ok_or_status(router.rx_packet_to_queue(pkt))
 }
 
 // ----------------- Optional helpers: generic decode from a packet view -----------------
@@ -377,7 +455,7 @@ unsafe fn pkt_get_into<T>(pkt: &SedsPacketView, out: *mut T, count: usize) -> i3
         // read up to 8 bytes (we only support 1,2,4,8)
         match size_of::<T>() {
             2 => {
-                let b = core::slice::from_raw_parts(src.add(off), 2);
+                let b = slice::from_raw_parts(src.add(off), 2);
                 // T is one of u16/i16
                 #[allow(trivial_casts)]
                 let val_u16 = u16::from_le_bytes([b[0], b[1]]);
@@ -385,11 +463,11 @@ unsafe fn pkt_get_into<T>(pkt: &SedsPacketView, out: *mut T, count: usize) -> i3
                 ptr::write_unaligned(dst as *mut u16, val_u16);
             }
             4 => {
-                let b = core::slice::from_raw_parts(src.add(off), 4);
+                let b = slice::from_raw_parts(src.add(off), 4);
                 ptr::write_unaligned(dst as *mut [u8; 4], [b[0], b[1], b[2], b[3]]);
             }
             8 => {
-                let b = core::slice::from_raw_parts(src.add(off), 8);
+                let b = slice::from_raw_parts(src.add(off), 8);
                 ptr::write_unaligned(
                     dst as *mut [u8; 8],
                     [b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]],
@@ -438,7 +516,7 @@ unsafe fn pkt_get_unsigned<T>(
             }
             for i in 0..count {
                 let off = i * 4;
-                let b = core::slice::from_raw_parts(pkt.payload.add(off), 4);
+                let b = slice::from_raw_parts(pkt.payload.add(off), 4);
                 let v = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
                 (out as *mut u32).add(i).write_unaligned(v);
             }
@@ -455,7 +533,7 @@ unsafe fn pkt_get_unsigned<T>(
             }
             for i in 0..count {
                 let off = i * 8;
-                let b = core::slice::from_raw_parts(pkt.payload.add(off), 8);
+                let b = slice::from_raw_parts(pkt.payload.add(off), 8);
                 let v = u64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]);
                 (out as *mut u64).add(i).write_unaligned(v);
             }
@@ -476,7 +554,7 @@ unsafe fn pkt_get_signed<T>(pkt: &SedsPacketView, out: *mut T, count: usize, wid
                 return status_from_err(TelemetryError::SizeMismatchError);
             }
             for i in 0..count {
-                let b = core::slice::from_raw_parts(pkt.payload.add(i * 2), 2);
+                let b = slice::from_raw_parts(pkt.payload.add(i * 2), 2);
                 (out as *mut i16)
                     .add(i)
                     .write_unaligned(i16::from_le_bytes([b[0], b[1]]));
@@ -489,7 +567,7 @@ unsafe fn pkt_get_signed<T>(pkt: &SedsPacketView, out: *mut T, count: usize, wid
                 return status_from_err(TelemetryError::SizeMismatchError);
             }
             for i in 0..count {
-                let b = core::slice::from_raw_parts(pkt.payload.add(i * 4), 4);
+                let b = slice::from_raw_parts(pkt.payload.add(i * 4), 4);
                 (out as *mut i32)
                     .add(i)
                     .write_unaligned(i32::from_le_bytes([b[0], b[1], b[2], b[3]]));
@@ -502,7 +580,7 @@ unsafe fn pkt_get_signed<T>(pkt: &SedsPacketView, out: *mut T, count: usize, wid
                 return status_from_err(TelemetryError::SizeMismatchError);
             }
             for i in 0..count {
-                let b = core::slice::from_raw_parts(pkt.payload.add(i * 8), 8);
+                let b = slice::from_raw_parts(pkt.payload.add(i * 8), 8);
                 (out as *mut i64)
                     .add(i)
                     .write_unaligned(i64::from_le_bytes([
@@ -524,7 +602,7 @@ unsafe fn pkt_get_float<T>(pkt: &SedsPacketView, out: *mut T, count: usize, widt
                 return status_from_err(TelemetryError::SizeMismatchError);
             }
             for i in 0..count {
-                let b = core::slice::from_raw_parts(pkt.payload.add(i * 4), 4);
+                let b = slice::from_raw_parts(pkt.payload.add(i * 4), 4);
                 (out as *mut f32)
                     .add(i)
                     .write_unaligned(f32::from_le_bytes([b[0], b[1], b[2], b[3]]));
@@ -537,7 +615,7 @@ unsafe fn pkt_get_float<T>(pkt: &SedsPacketView, out: *mut T, count: usize, widt
                 return status_from_err(TelemetryError::SizeMismatchError);
             }
             for i in 0..count {
-                let b = core::slice::from_raw_parts(pkt.payload.add(i * 8), 8);
+                let b = slice::from_raw_parts(pkt.payload.add(i * 8), 8);
                 (out as *mut f64)
                     .add(i)
                     .write_unaligned(f64::from_le_bytes([
@@ -622,6 +700,27 @@ unsafe fn log_unaligned_slice<T: LeBytes>(
     router.log::<T>(ty, &tmp, ts)
 }
 
+
+#[inline]
+unsafe fn log_queue_unaligned_slice<T: LeBytes>(
+    router: & mut Router,
+    ty: DataType,
+    data: *const c_void,
+    count: usize,
+    ts: u64,
+) -> Result<()> {
+    use core::ptr;
+    let mut tmp: Vec<T> = Vec::with_capacity(count);
+    let elem_size = size_of::<T>();
+    let base = data as *const u8;
+    for i in 0..count {
+        let p = base.add(i * elem_size) as *const T;
+        // read without requiring alignment
+        let v = ptr::read_unaligned(p);
+        tmp.push(v);
+    }
+    router.log_queue::<T>(ty, &tmp, ts)
+}
 #[no_mangle]
 pub extern "C" fn seds_router_log_typed(
     r: *mut SedsRouter,
@@ -656,6 +755,49 @@ pub extern "C" fn seds_router_log_typed(
 
             (SEDS_EK_FLOAT, 4) => log_unaligned_slice::<f32>(router, ty, data, count, ts),
             (SEDS_EK_FLOAT, 8) => log_unaligned_slice::<f64>(router, ty, data, count, ts),
+
+            _ => return status_from_err(TelemetryError::BadArg),
+        }
+    };
+
+    ok_or_status(res)
+}
+
+
+#[no_mangle]
+pub extern "C" fn seds_router_log_queue_typed(
+    r: *mut SedsRouter,
+    ty_u32: u32,
+    data: *const c_void,
+    count: usize,
+    elem_size: usize, // 1,2,4,8
+    elem_kind: u32,   // 0=unsigned,1=signed,2=float
+    ts: u64,
+) -> i32 {
+    if r.is_null() || (count > 0 && data.is_null()) {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let ty = match dtype_from_u32(ty_u32) {
+        Ok(t) => t,
+        Err(_) => return status_from_err(TelemetryError::InvalidType),
+    };
+    let router = unsafe { &mut (*r).inner };
+
+    // dispatch on (elem_kind, elem_size)
+    let res = unsafe {
+        match (elem_kind, elem_size) {
+            (SEDS_EK_UNSIGNED, 1) => log_queue_unaligned_slice::<u8>(router, ty, data, count, ts),
+            (SEDS_EK_UNSIGNED, 2) => log_queue_unaligned_slice::<u16>(router, ty, data, count, ts),
+            (SEDS_EK_UNSIGNED, 4) => log_queue_unaligned_slice::<u32>(router, ty, data, count, ts),
+            (SEDS_EK_UNSIGNED, 8) => log_queue_unaligned_slice::<u64>(router, ty, data, count, ts),
+
+            (SEDS_EK_SIGNED, 1) => log_queue_unaligned_slice::<i8>(router, ty, data, count, ts),
+            (SEDS_EK_SIGNED, 2) => log_queue_unaligned_slice::<i16>(router, ty, data, count, ts),
+            (SEDS_EK_SIGNED, 4) => log_queue_unaligned_slice::<i32>(router, ty, data, count, ts),
+            (SEDS_EK_SIGNED, 8) => log_queue_unaligned_slice::<i64>(router, ty, data, count, ts),
+
+            (SEDS_EK_FLOAT, 4) => log_queue_unaligned_slice::<f32>(router, ty, data, count, ts),
+            (SEDS_EK_FLOAT, 8) => log_queue_unaligned_slice::<f64>(router, ty, data, count, ts),
 
             _ => return status_from_err(TelemetryError::BadArg),
         }

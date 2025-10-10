@@ -30,8 +30,8 @@ typedef enum SedsDataType
 /** \brief Telemetry endpoints (keep in sync with Rust DataEndpoint order). */
 typedef enum SedsDataEndpoint
 {
-    SEDS_EP_SD,
-    SEDS_EP_RADIO,
+    SEDS_EP_SD = 0,
+    SEDS_EP_RADIO = 1,
 } SedsDataEndpoint;
 
 /** \brief Status codes returned by the C API. */
@@ -187,6 +187,29 @@ SedsResult seds_router_log_typed(SedsRouter * r,
                                  uint64_t timestamp);
 
 
+
+/**
+ * \brief Log a typed slice; the router encodes elements to little-endian bytes internally.
+ *
+ * The total number of bytes (count * elem_size) **must** match the schema size for \p ty.
+ * Supported element sizes are 1, 2, 4, and 8 bytes.
+ *
+ * \param r           Router handle.
+ * \param ty          Data type (SedsDataType as u32).
+ * \param data        Pointer to first element (may be unaligned).
+ * \param count       Number of elements at \p data.
+ * \param elem_size   Size of each element in bytes (1,2,4,8).
+ * \param elem_kind   Signedness/float kind of the elements.
+ * \param timestamp   Timestamp value to attach to the packet.
+ * \return            0 on success; negative error code on failure (see status codes).
+ */
+SedsResult seds_router_log_queue_typed(SedsRouter * r,
+                                 SedsDataType ty,
+                                 const void * data,
+                                 size_t count,
+                                 size_t elem_size,
+                                 SedsElemKind elem_kind,
+                                 uint64_t timestamp);
 // ==============================
 // Convenience logging forms
 // ==============================
@@ -229,16 +252,90 @@ SedsResult seds_router_log_f32(SedsRouter * r,
 // ==============================
 
 /**
- * \brief Receive a serialized wire buffer and locally dispatch to matching endpoints.
+ * \brief Receive a serialized wire buffer and dispatch to local endpoints.
  *
  * \param r     Router handle.
  * \param bytes Pointer to serialized packet bytes.
  * \param len   Length of \p bytes.
  * \return      0 on success; negative error code on failure.
  */
-SedsResult seds_router_receive(SedsRouter * r,
+SedsResult seds_router_receive_serialized(SedsRouter * r,
                                const uint8_t * bytes,
                                size_t len);
+
+
+
+/**
+ * \brief Receive a telemetry buffer and dispatch to local endpoints.
+ *
+ * \param r     Router handle.
+ * \param view   the SedsPacketView to dispatch.
+ * \return      0 on success; negative error code on failure.
+ */
+SedsResult seds_router_receive(SedsRouter * r,
+                               SedsPacketView * view);
+
+/**
+ * \brief Process and flush all queued transmit packets via the router's send().
+ *
+ * Pops every pending packet from the internal transmit queue and sends it.
+ *
+ * \param r Router handle.
+ * \return  0 on success; negative error code on failure.
+ */
+SedsResult seds_router_process_send_queue(SedsRouter *r);
+
+/**
+ * \brief Queue a packet for transmission.
+ *
+ * Validates \p view and pushes it into the router's transmit queue.
+ *
+ * \param r    Router handle.
+ * \param view Pointer to a packet view describing the packet to queue.
+ * \return     0 on success; negative error code on failure (e.g., bad args, validation error).
+ */
+SedsResult seds_router_queue_tx_message(SedsRouter *r,
+                                        const SedsPacketView *view);
+
+/* ---------------------- RX (receive) side helpers --------------------- */
+
+/**
+ * \brief Process and dispatch all packets currently in the received queue.
+ *
+ * For each queued packet, this internally serializes it and calls the
+ * router's receive path so endpoints are dispatched.
+ *
+ * \param r Router handle.
+ * \return  0 on success; negative error code on failure.
+ */
+SedsResult seds_router_process_received_queue(SedsRouter *r);
+
+/**
+ * \brief Push a serialized wire buffer into the router's received queue.
+ *
+ * \param r     Router handle.
+ * \param bytes Pointer to serialized packet bytes.
+ * \param len   Length of \p bytes.
+ * \return      0 on success; negative error code on failure (e.g., bad args, parse/validate error).
+ */
+SedsResult seds_router_rx_serialized_packet_to_queue(SedsRouter *r,
+                                                     const uint8_t *bytes,
+                                                     size_t len);
+
+/**
+ * \brief Push a packet (by view) into the router's received queue.
+ *
+ * Validates \p view and enqueues it for later processing via
+ * seds_router_process_received_queue().
+ *
+ * \param r    Router handle.
+ * \param view Pointer to a packet view describing the packet to queue.
+ * \return     0 on success; negative error code on failure (e.g., bad args, validation error).
+ */
+SedsResult seds_router_rx_packet_to_queue(SedsRouter *r,
+                                          const SedsPacketView *view);
+
+
 
 /**
  * \brief Decode a packet view's payload into f32 values.
@@ -383,6 +480,36 @@ static inline SedsResult seds_router(SedsRouter * router,
 }
 
 /**
+ * \brief C++ convenience wrapper that deduces element kind/size from \p T.
+ *
+ * \tparam T         Element type (uint8_t/16/32/64, int8_t/16/32/64, float, double).
+ * \param router     Router handle.
+ * \param datatype   Data type (SedsDataType as u32).
+ * \param data       Pointer to first element.
+ * \param count      Number of elements.
+ * \param timestamp  Timestamp to attach.
+ * \return           0 on success; negative error code on failure.
+ */
+template<typename T>
+static inline SedsResult seds_router_queue(SedsRouter * router,
+                                     SedsDataType datatype,
+                                     const T * data,
+                                     size_t count,
+                                     uint64_t timestamp)
+{
+    return seds_router_log_queue_typed(router,
+                                 datatype,
+                                 (const void *) data,
+                                 count,
+                                 seds_detail::elem_traits<T>::size,
+                                 seds_detail::elem_traits<T>::kind,
+                                 timestamp);
+}
+
+
+
+
+/**
  * \brief C++ convenience extractor that deduces element kind/size from \p T.
  *
  * \tparam T   Element type (uint8_t/16/32/64, int8_t/16/32/64, float, double).
@@ -447,7 +574,7 @@ static inline SedsResult seds_pkt_get(const SedsPacketView * pkt, T * out, size_
  * \param timestamp  Timestamp to attach
  * \return          0 on success; negative error code on failure.
  */
-#define seds_router_log(router, datatype, data, count, timestamp)                      \
+#define seds_router_log(router, datatype, data, count, timestamp)                       \
     (__extension__({                                                                    \
         const void   *_seds_data  = (const void*)(data);                                \
         size_t        _seds_count = (size_t)(count);                                    \
@@ -456,6 +583,28 @@ static inline SedsResult seds_pkt_get(const SedsPacketView * pkt, T * out, size_
         SEDS__KIND_SIZE((data), _seds_kind, _seds_esize);                               \
         seds_router_log_typed((router), (datatype), _seds_data, _seds_count,            \
                               _seds_esize, _seds_kind, (timestamp));                    \
+    }))
+
+
+/**
+ * \brief C11 convenience wrapper that deduces element kind/size from \p data.
+ *
+ * \param router     SedsRouter*
+ * \param datatype   Data type (SedsDataType as u32)
+ * \param data       Pointer to first element (e.g., uint16_t*, float*, ...)
+ * \param count      Number of elements
+ * \param timestamp  Timestamp to attach
+ * \return          0 on success; negative error code on failure.
+ */
+#define seds_router_log_queue(router, datatype, data, count, timestamp)                 \
+    (__extension__({                                                                    \
+        const void   *_seds_data  = (const void*)(data);                                \
+        size_t        _seds_count = (size_t)(count);                                    \
+        size_t        _seds_esize;                                                      \
+        SedsElemKind  _seds_kind;                                                       \
+        SEDS__KIND_SIZE((data), _seds_kind, _seds_esize);                               \
+        seds_router_log_queue_typed((router), (datatype), _seds_data, _seds_count,      \
+                                    _seds_esize, _seds_kind, (timestamp));              \
     }))
 
 /**

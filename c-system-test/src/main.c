@@ -1,5 +1,4 @@
 #include <stdio.h>
-#include <stdlib.h>
 #include "telemetry_sim.h"
 #include "sedsprintf.h"
 #include <assert.h>
@@ -39,10 +38,18 @@ int main(void)
     // C logs BATTERY (2 floats)
     make_series(buf, 4, 3.7f);
     assert(node_log(&powerBoard, SEDS_DT_BATTERY, buf, 4) == SEDS_OK);
-
     // B logs PRESSURE (1 float)
     make_series(buf, 3, 1013.25f);;
     assert(node_log(&flightControllerBoard, SEDS_DT_BAROMETER, buf, 3) == SEDS_OK);
+
+    seds_router_process_send_queue(flightControllerBoard.r);
+    seds_router_process_send_queue(powerBoard.r);
+    seds_router_process_send_queue(radioBoard.r);
+
+    seds_router_process_received_queue(flightControllerBoard.r);
+    seds_router_process_received_queue(powerBoard.r);
+    seds_router_process_received_queue(radioBoard.r);
+
 
 
     printf("A.radio_hits=%u, B.sd_hits=%u, C.radio_hits=%u, C.sd_hits=%u\n",

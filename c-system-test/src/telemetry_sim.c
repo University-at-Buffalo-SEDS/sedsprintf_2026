@@ -54,10 +54,6 @@ static SedsResult node_tx_send(const uint8_t *bytes, size_t len, void *user) {
     SimNode *self = (SimNode*)user;
     if (!self || !self->bus) return SEDS_ERR;
 
-    if (!self->is_originator) {
-        // Router asked a receiver to forward; ignore to prevent rebroadcast loops.
-        return SEDS_OK;
-    }
     return bus_send(self->bus, self, bytes, len);
 }
 
@@ -96,8 +92,6 @@ SedsResult node_init(SimNode *n, SimBus *bus, const char *name, int radio, int s
     n->has_sdcard = sdcard ? 1 : 0;
 
     // Reset flags/stats
-    n->is_originator = 0;
-    n->in_rx = 0;
     n->radio_hits = 0;
     n->sd_hits = 0;
 
@@ -149,16 +143,12 @@ void node_free(SimNode *n) {
 void node_rx(SimNode *n, const uint8_t *bytes, size_t len) {
     if (!n || !n->r || !bytes || !len) return;
     // Mark ingress only for debugging (not used by TX gate anymore)
-    n->in_rx = 1;
-    seds_router_receive(n->r, bytes, len);
-    n->in_rx = 0;
+    seds_router_rx_serialized_packet_to_queue(n->r, bytes, len);
 }
 
 SedsResult node_log(SimNode *n, SedsDataType dt, const float *data, size_t data_len) {
     if (!n || !n->r || !data || data_len == 0) return SEDS_ERR;
     const uint64_t ts = time(NULL); // or a simulated clock
-    n->is_originator = 1;  // allow TX
-    const SedsResult r = seds_router_log(n->r, dt, data, (uint32_t)data_len, ts);
-    n->is_originator = 0;  // done
+    const SedsResult r = seds_router_log_queue(n->r, dt, data, (uint32_t)data_len, ts);
     return r;
 }
