@@ -31,7 +31,7 @@ into strings for logging.
   git fetch sedsprintf-upstream
   git subtree add --prefix=sedsprintf_rs sedsprintf-upstream main
   
-- To update the subtree, use:
+- To update the subtree, use the following command (Note all local changes must be committed before you can update):
   ```bash
   git subtree pull --prefix=sedsprintf_rs sedsprintf-upstream main -m "Merge sedsprintf_rs upstream main"
   ```
