@@ -11,6 +11,7 @@ into strings for logging.
   get it from https://rustup.rs/
 - Cmake
 - A C++ compiler
+- A C compiler
     - The thumbv7m-none-eabi target for Rust (if you want to build for ARM Cortex-M)
       Get it with:
   ```bash
