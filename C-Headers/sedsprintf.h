@@ -187,7 +187,6 @@ SedsResult seds_router_log_typed(SedsRouter * r,
                                  uint64_t timestamp);
 
 
-
 /**
  * \brief Log a typed slice; the router encodes elements to little-endian bytes internally.
  *
@@ -204,12 +203,13 @@ SedsResult seds_router_log_typed(SedsRouter * r,
  * \return            0 on success; negative error code on failure (see status codes).
  */
 SedsResult seds_router_log_queue_typed(SedsRouter * r,
-                                 SedsDataType ty,
-                                 const void * data,
-                                 size_t count,
-                                 size_t elem_size,
-                                 SedsElemKind elem_kind,
-                                 uint64_t timestamp);
+                                       SedsDataType ty,
+                                       const void * data,
+                                       size_t count,
+                                       size_t elem_size,
+                                       SedsElemKind elem_kind,
+                                       uint64_t timestamp);
+
 // ==============================
 // Convenience logging forms
 // ==============================
@@ -260,9 +260,8 @@ SedsResult seds_router_log_f32(SedsRouter * r,
  * \return      0 on success; negative error code on failure.
  */
 SedsResult seds_router_receive_serialized(SedsRouter * r,
-                               const uint8_t * bytes,
-                               size_t len);
-
+                                          const uint8_t * bytes,
+                                          size_t len);
 
 
 /**
@@ -283,7 +282,7 @@ SedsResult seds_router_receive(SedsRouter * r,
  * \param r Router handle.
  * \return  0 on success; negative error code on failure.
  */
-SedsResult seds_router_process_send_queue(SedsRouter *r);
+SedsResult seds_router_process_send_queue(SedsRouter * r);
 
 /**
  * \brief Queue a packet for transmission.
@@ -294,8 +293,8 @@ SedsResult seds_router_process_send_queue(SedsRouter *r);
  * \param view Pointer to a packet view describing the packet to queue.
  * \return     0 on success; negative error code on failure (e.g., bad args, validation error).
  */
-SedsResult seds_router_queue_tx_message(SedsRouter *r,
-                                        const SedsPacketView *view);
+SedsResult seds_router_queue_tx_message(SedsRouter * r,
+                                        const SedsPacketView * view);
 
 /* ---------------------- RX (receive) side helpers --------------------- */
 
@@ -308,7 +307,7 @@ SedsResult seds_router_queue_tx_message(SedsRouter *r,
  * \param r Router handle.
  * \return  0 on success; negative error code on failure.
  */
-SedsResult seds_router_process_received_queue(SedsRouter *r);
+SedsResult seds_router_process_received_queue(SedsRouter * r);
 
 /**
  * \brief Push a serialized wire buffer into the router's received queue.
@@ -318,8 +317,8 @@ SedsResult seds_router_process_received_queue(SedsRouter *r);
  * \param len   Length of \p bytes.
  * \return      0 on success; negative error code on failure (e.g., bad args, parse/validate error).
  */
-SedsResult seds_router_rx_serialized_packet_to_queue(SedsRouter *r,
-                                                     const uint8_t *bytes,
+SedsResult seds_router_rx_serialized_packet_to_queue(SedsRouter * r,
+                                                     const uint8_t * bytes,
                                                      size_t len);
 
 /**
@@ -332,10 +331,81 @@ SedsResult seds_router_rx_serialized_packet_to_queue(SedsRouter *r,
  * \param view Pointer to a packet view describing the packet to queue.
  * \return     0 on success; negative error code on failure (e.g., bad args, validation error).
  */
-SedsResult seds_router_rx_packet_to_queue(SedsRouter *r,
-                                          const SedsPacketView *view);
+SedsResult seds_router_rx_packet_to_queue(SedsRouter * r,
+                                          const SedsPacketView * view);
 
 
+// ==============================
+// Monotonic clock + timeout processing (new)
+// ==============================
+
+/** Monotonic clock callback: must return milliseconds since an arbitrary epoch. */
+typedef uint64_t (* SedsNowMsFn)(void * user);
+
+/**
+ * Process TX queue until empty or until timeout_ms elapses (wall-clock via SedsNowMsFn).
+ *
+ * \param r          Router handle.
+ * \param now_ms_cb  Clock callback (must not be NULL).
+ * \param user       Opaque context passed to now_ms_cb.
+ * \param timeout_ms Timeout in milliseconds.
+ * \return           0 on success; negative error code on failure.
+ */
+SedsResult seds_router_process_tx_queue_with_timeout(
+    SedsRouter * r,
+    SedsNowMsFn now_ms_cb,
+    void * user,
+    uint32_t timeout_ms
+);
+
+/**
+ * Process RX queue until empty or until timeout_ms elapses (wall-clock via SedsNowMsFn).
+ *
+ * \param r          Router handle.
+ * \param now_ms_cb  Clock callback (must not be NULL).
+ * \param user       Opaque context passed to now_ms_cb.
+ * \param timeout_ms Timeout in milliseconds.
+ * \return           0 on success; negative error code on failure.
+ */
+SedsResult seds_router_process_rx_queue_with_timeout(
+    SedsRouter * r,
+    SedsNowMsFn now_ms_cb,
+    void * user,
+    uint32_t timeout_ms
+);
+
+/**
+ * Process all queues until empty or until timeout_ms elapses (wall-clock via SedsNowMsFn).
+ *
+ * \param r          Router handle.
+ * \param now_ms_cb  Clock callback (must not be NULL).
+ * \param user       Opaque context passed to now_ms_cb.
+ * \param timeout_ms Timeout in milliseconds.
+ * \return           0 on success; negative error code on failure.
+ */
+SedsResult seds_router_process_all_queues_with_timeout(
+    SedsRouter * r,
+    SedsNowMsFn now_ms_cb,
+    void * user,
+    uint32_t timeout_ms
+);
+
+
+// ==============================
+// Queue utilities (new)
+// ==============================
+
+/** Process both queues (TX then RX). */
+SedsResult seds_router_process_all_queues(SedsRouter * r);
+
+/** Clear both TX and RX queues. */
+SedsResult seds_router_clear_queues(SedsRouter * r);
+
+/** Clear only the RX queue. */
+SedsResult seds_router_clear_rx_queue(SedsRouter * r);
+
+/** Clear only the TX queue. */
+SedsResult seds_router_clear_tx_queue(SedsRouter * r);
 
 /**
  * \brief Decode a packet view's payload into f32 values.
@@ -492,21 +562,19 @@ static inline SedsResult seds_router(SedsRouter * router,
  */
 template<typename T>
 static inline SedsResult seds_router_queue(SedsRouter * router,
-                                     SedsDataType datatype,
-                                     const T * data,
-                                     size_t count,
-                                     uint64_t timestamp)
+                                           SedsDataType datatype,
+                                           const T * data,
+                                           size_t count,
+                                           uint64_t timestamp)
 {
     return seds_router_log_queue_typed(router,
-                                 datatype,
-                                 (const void *) data,
-                                 count,
-                                 seds_detail::elem_traits<T>::size,
-                                 seds_detail::elem_traits<T>::kind,
-                                 timestamp);
+                                       datatype,
+                                       (const void *) data,
+                                       count,
+                                       seds_detail::elem_traits<T>::size,
+                                       seds_detail::elem_traits<T>::kind,
+                                       timestamp);
 }
-
-
 
 
 /**

@@ -8,12 +8,12 @@ int main(void)
     init_telemetry_router();
     const float data[3] = {37.7749f, -122.4194f, 30.0f};
     log_telemetry_synchronous(SEDS_DT_GPS, data, 3);
-    //asyncronus code
+    //asyncronus coder
     //this would be in send routine of the data collector
     log_telemetry_asynchronous(SEDS_DT_GPS, data, 3);
     //this would be in the main loop of the program or in a freertos task.
-    dispatch_tx_queue();
-    process_rx_queue();
+    process_all_queues_timeout(0);
+    // dispatch_tx_queue_timeout(100);
 
     //this would be in the isr of the receiver
     //rx_asynchronous(received_bytes, received_length);

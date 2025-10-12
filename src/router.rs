@@ -18,6 +18,18 @@ pub struct EndpointHandler {
     pub handler: Box<dyn Fn(&TelemetryPacket) -> Result<()> + Send + Sync + 'static>,
 }
 
+pub trait Clock {
+    /// Return a monotonically increasing millisecond counter.
+    fn now_ms(&self) -> u64;
+}
+
+impl<T: Fn() -> u64> Clock for T {
+    #[inline]
+    fn now_ms(&self) -> u64 {
+        (self)()
+    }
+}
+
 /// Board configuration: which local endpoints exist and how to deliver to them.
 #[derive(Default)]
 pub struct BoardConfig {
@@ -200,7 +212,98 @@ impl Router {
         }
         Ok(())
     }
-    
+
+    pub fn process_all_queues(&mut self) -> Result<()> {
+        self.process_send_queue()?;
+        self.process_received_queue()?;
+        Ok(())
+    }
+
+    pub fn clear_queues(&mut self) {
+        self.transmit_queue.clear();
+        self.received_queue.clear();
+    }
+
+    pub fn clear_rx_queue(&mut self) {
+        self.received_queue.clear();
+    }
+
+    pub fn clear_tx_queue(&mut self) {
+        self.transmit_queue.clear();
+    }
+
+    pub fn process_tx_queue_with_timeout<C: Clock>(
+        &mut self,
+        clock: &C,
+        timeout_ms: u32,
+    ) -> Result<()> {
+        let start = clock.now_ms();
+        // Prefer pop_front if this is a queue; avoid unwrap() in no_std.
+        while let Some(pkt) = self.transmit_queue.pop() {
+            self.send(&pkt)?;
+            // wrapping_sub handles u64 rollover gracefully
+            if clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn process_rx_queue_with_timeout<C: Clock>(
+        &mut self,
+        clock: &C,
+        timeout_ms: u32,
+    ) -> Result<()> {
+        let start = clock.now_ms();
+        // Prefer pop_front if this is a queue; avoid unwrap() in no_std.
+        while let Some(pkt) = self.received_queue.pop() {
+            self.receive(&pkt)?;
+            // wrapping_sub handles u64 rollover gracefully
+            if clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn process_all_queues_with_timeout<C: Clock>(
+        &mut self,
+        clock: &C,
+        timeout_ms: u32,
+    ) -> Result<()> {
+        let drain_fully = timeout_ms == 0;
+        let start = if drain_fully { 0 } else { clock.now_ms() };
+
+        loop {
+            let mut did_any = false;
+
+            // TX first (use pop_front() if it's a FIFO)
+            if let Some(pkt) = self.transmit_queue.pop() {
+                self.send(&pkt)?;
+                did_any = true;
+            }
+
+            // Then RX
+            if let Some(pkt) = self.received_queue.pop() {
+                self.receive(&pkt)?;
+                did_any = true;
+            }
+
+            // If both queues were empty this round, we're done.
+            if !did_any {
+                break;
+            }
+
+            // If we're on a timed run, stop once we've hit the budget.
+            if !drain_fully && clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
+                break;
+            }
+        }
+
+        Ok(())
+    }
+
+
     pub fn queue_tx_message(&mut self, pkt: TelemetryPacket) -> Result<()> {
         pkt.validate()?;
         self.transmit_queue.push(pkt);
@@ -338,8 +441,12 @@ impl Router {
         self.send(&pkt)
     }
 
-
-    pub fn log_queue<T: LeBytes>(&mut self, ty: DataType, data: &[T], timestamp: u64) -> Result<()> {
+    pub fn log_queue<T: LeBytes>(
+        &mut self,
+        ty: DataType,
+        data: &[T],
+        timestamp: u64,
+    ) -> Result<()> {
         let meta = message_meta(ty);
 
         // Validate total byte size against schema.

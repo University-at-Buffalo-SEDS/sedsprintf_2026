@@ -44,6 +44,7 @@ extern "C" {
     // Handlers
     SedsResult radio_handler(const SedsPacketView *pkt, void *user);
     SedsResult sdcard_handler(const SedsPacketView *pkt, void *user);
+    uint64_t host_now_ms(void * user);
 
 #ifdef __cplusplus
 }

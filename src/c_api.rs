@@ -12,6 +12,8 @@ use alloc::sync::Arc;
 use alloc::{boxed::Box, vec::Vec};
 use core::ffi::c_char;
 use core::{ffi::c_void, ptr, slice};
+use crate::router::Clock;
+
 // ----------------- router wrapper -----------------
 
 #[repr(C)]
@@ -804,4 +806,130 @@ pub extern "C" fn seds_router_log_queue_typed(
     };
 
     ok_or_status(res)
+}
+
+
+
+// -------- Clock bridge from C --------
+type CNowMs = Option<extern "C" fn(user: *mut c_void) -> u64>;
+
+struct FfiClock {
+    cb: CNowMs,
+    user_addr: usize,
+}
+
+impl Clock for FfiClock {
+    #[inline]
+    fn now_ms(&self) -> u64 {
+        if let Some(f) = self.cb {
+            f(self.user_addr as *mut c_void)
+        } else {
+            0
+        }
+    }
+}
+
+// ----------------- FFI: queue utilities -----------------
+
+#[no_mangle]
+pub extern "C" fn seds_router_process_all_queues(r: *mut SedsRouter) -> i32 {
+    if r.is_null() {
+        return -2; // SEDS_BAD_ARG
+    }
+    let router = unsafe { &mut (*r).inner };
+    ok_or_status(router.process_all_queues())
+}
+
+#[no_mangle]
+pub extern "C" fn seds_router_clear_queues(r: *mut SedsRouter) -> i32 {
+    if r.is_null() {
+        return -2;
+    }
+    let router = unsafe { &mut (*r).inner };
+    router.clear_queues();
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn seds_router_clear_rx_queue(r: *mut SedsRouter) -> i32 {
+    if r.is_null() {
+        return -2;
+    }
+    let router = unsafe { &mut (*r).inner };
+    router.clear_rx_queue();
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn seds_router_clear_tx_queue(r: *mut SedsRouter) -> i32 {
+    if r.is_null() {
+        return -2;
+    }
+    let router = unsafe { &mut (*r).inner };
+    router.clear_tx_queue();
+    0
+}
+
+// --------- FFI: process queues with timeout (requires a clock callback) ----------
+
+/// Process TX queue until empty or timeout.
+/// `now_ms_cb`: extern "C" u64 (*)(void* user) returning monotonic milliseconds.
+#[no_mangle]
+pub extern "C" fn seds_router_process_tx_queue_with_timeout(
+    r: *mut SedsRouter,
+    now_ms_cb: CNowMs,
+    user: *mut c_void,
+    timeout_ms: u32,
+) -> i32 {
+    if r.is_null() || now_ms_cb.is_none() {
+        return -2; // bad arg
+    }
+    let router = unsafe { &mut (*r).inner };
+    let clock = FfiClock {
+        cb: now_ms_cb,
+        user_addr: user as usize,
+    };
+    ok_or_status(router.process_tx_queue_with_timeout(&clock, timeout_ms))
+}
+
+/// Process RX queue until empty or timeout.
+/// `now_ms_cb`: extern "C" u64 (*)(void* user) returning monotonic milliseconds.
+#[no_mangle]
+pub extern "C" fn seds_router_process_rx_queue_with_timeout(
+    r: *mut SedsRouter,
+    now_ms_cb: CNowMs,
+    user: *mut c_void,
+    timeout_ms: u32,
+) -> i32 {
+    if r.is_null() || now_ms_cb.is_none() {
+        return -2; // bad arg
+    }
+    let router = unsafe { &mut (*r).inner };
+    let clock = FfiClock {
+        cb: now_ms_cb,
+        user_addr: user as usize,
+    };
+    ok_or_status(router.process_rx_queue_with_timeout(&clock, timeout_ms))
+}
+
+
+
+/// Process all queues until empty or timeout.
+/// `now_ms_cb`: extern "C" u64 (*)(void* user) returning monotonic milliseconds.
+#[no_mangle]
+pub extern "C" fn seds_router_process_all_queues_with_timeout(
+    r: *mut SedsRouter,
+    now_ms_cb: CNowMs,
+    user: *mut c_void,
+    timeout_ms: u32,
+) -> i32 {
+    if r.is_null() || now_ms_cb.is_none() {
+        return -2; // bad arg
+    }
+    let router = unsafe { &mut (*r).inner };
+    let clock = FfiClock {
+        cb: now_ms_cb,
+        user_addr: user as usize,
+    };
+    ok_or_status(router.process_all_queues_with_timeout(&clock, timeout_ms))
 }

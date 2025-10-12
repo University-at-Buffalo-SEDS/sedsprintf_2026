@@ -1,12 +1,62 @@
-use crate::{DataEndpoint, TelemetryPacket};
+use crate::config::get_needed_message_size;
+use crate::router::EndpointHandler;
+use crate::{DataEndpoint, DataType, TelemetryError, TelemetryPacket, MESSAGE_ELEMENTS};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
+
+fn get_handler(rx_count_c: Arc<AtomicUsize>) -> EndpointHandler {
+    EndpointHandler {
+        endpoint: DataEndpoint::SdCard,
+        handler: Box::new(move |_pkt: &TelemetryPacket| {
+            rx_count_c.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }),
+    }
+}
+
+fn get_sd_card_handler(sd_seen_c: Arc<Mutex<Option<(DataType, Vec<f32>)>>>) -> EndpointHandler {
+    EndpointHandler {
+        endpoint: DataEndpoint::SdCard,
+        handler: Box::new(move |pkt: &TelemetryPacket| {
+            // sanity: element sizing must be 4 bytes (f32) for GPS_DATA
+            let elems = MESSAGE_ELEMENTS[pkt.ty as usize].max(1);
+            let per_elem = get_needed_message_size(pkt.ty) / elems;
+            assert_eq!(pkt.ty, DataType::GpsData);
+            assert_eq!(per_elem, 4, "GPS_DATA expected f32 elements");
+
+            // decode f32 little-endian
+            let mut vals = Vec::with_capacity(pkt.payload.len() / 4);
+            for chunk in pkt.payload.chunks_exact(4) {
+                vals.push(f32::from_le_bytes(chunk.try_into().unwrap()));
+            }
+
+            *sd_seen_c.lock().unwrap() = Some((pkt.ty, vals));
+            Ok(())
+        }),
+    }
+}
+
+fn handle_errors(result: Result<(), TelemetryError>) {
+    match result {
+        Ok(_) => panic!("Expected router.send to return Err due to handler failure"),
+        Err(e) => {
+            match e {
+                TelemetryError::HandlerError(_) => {} // expected
+                _ => panic!("Expected TelemetryError::HandlerError, got {:?}", e),
+            }
+        }
+    }
+}
 
 // ---------- Unit tests (run anywhere with `cargo test`) ----------
 #[cfg(test)]
 mod tests {
-    use crate::config::get_needed_message_size;
-    use crate::{config::{DataEndpoint, DataType, MESSAGE_ELEMENTS}, serialize, Result, Router, TelemetryPacket};
-    use core::convert::TryInto;
+    use crate::tests::get_sd_card_handler;
+    use crate::{
+        config::{DataEndpoint, DataType, MESSAGE_ELEMENTS},
+        serialize, Result, Router, TelemetryPacket,
+    };
     use std::sync::{Arc, Mutex};
     use std::vec::Vec;
 
@@ -71,7 +121,6 @@ mod tests {
 
     #[test]
     fn router_sends_and_receives() {
-        use crate::router::EndpointHandler;
         use crate::{BoardConfig, Router};
 
         // capture spaces
@@ -88,25 +137,7 @@ mod tests {
 
         // local SD handler: decode payload to f32s and record (ty, values)
         let sd_seen_c = sd_seen_decoded.clone();
-        let sd_handler = EndpointHandler {
-            endpoint: DataEndpoint::SdCard,
-            handler: Box::new(move |pkt: &TelemetryPacket| {
-                // sanity: element sizing must be 4 bytes (f32) for GPS_DATA
-                let elems = MESSAGE_ELEMENTS[pkt.ty as usize].max(1);
-                let per_elem = get_needed_message_size(pkt.ty) / elems;
-                assert_eq!(pkt.ty, DataType::GpsData);
-                assert_eq!(per_elem, 4, "GPS_DATA expected f32 elements");
-
-                // decode f32 little-endian
-                let mut vals = Vec::with_capacity(pkt.payload.len() / 4);
-                for chunk in pkt.payload.chunks_exact(4) {
-                    vals.push(f32::from_le_bytes(chunk.try_into().unwrap()));
-                }
-
-                *sd_seen_c.lock().unwrap() = Some((pkt.ty, vals));
-                Ok(())
-            }),
-        };
+        let sd_handler = get_sd_card_handler(sd_seen_c);
 
         let router = Router::new(Some(transmit), BoardConfig::new(vec![sd_handler]));
 
@@ -159,8 +190,6 @@ mod tests {
 
     #[test]
     fn queued_roundtrip_between_two_routers() {
-        use crate::router::EndpointHandler;
-
         // --- Set up a TX router that only sends (no local endpoints) ---
         let (bus, tx_fn) = TestBus::new();
         let mut tx_router = Router::new(Some(tx_fn), Default::default());
@@ -168,28 +197,13 @@ mod tests {
         // --- Set up an RX router with a local SD handler that decodes f32 payloads ---
         let seen: Arc<Mutex<Option<(DataType, Vec<f32>)>>> = Arc::new(Mutex::new(None));
         let seen_c = seen.clone();
-        let sd_handler = EndpointHandler {
-            endpoint: DataEndpoint::SdCard,
-            handler: Box::new(move |pkt: &TelemetryPacket| {
-                // Verify schema matches: GPS uses f32 elements.
-                let elems = MESSAGE_ELEMENTS[pkt.ty as usize].max(1);
-                let per_elem = get_needed_message_size(pkt.ty) / elems;
-                assert_eq!(pkt.ty, DataType::GpsData);
-                assert_eq!(per_elem, 4, "GPS_DATA expected f32 elements");
-
-                let mut vals = Vec::with_capacity(pkt.payload.len() / 4);
-                for chunk in pkt.payload.chunks_exact(4) {
-                    vals.push(f32::from_le_bytes(chunk.try_into().unwrap()));
-                }
-                *seen_c.lock().unwrap() = Some((pkt.ty, vals));
-                Ok(())
-            }),
-        };
+        let sd_handler = get_sd_card_handler(seen_c);
         fn tx_handler(_bytes: &[u8]) -> Result<()> {
             // RX router does not transmit in this test
             Ok(())
         }
-        let mut rx_router = Router::new(Some(tx_handler), crate::BoardConfig::new(vec![sd_handler]));
+        let mut rx_router =
+            Router::new(Some(tx_handler), crate::BoardConfig::new(vec![sd_handler]));
 
         // --- 1) Sender enqueues a packet for TX ---
         let data = [1.0_f32, 2.0, 3.0];
@@ -226,7 +240,9 @@ mod tests {
         router.log_queue(DataType::GpsData, &data, 42).unwrap();
 
         let data = [10.0_f32, 10.25, 10.5, 12.3];
-        router.log_queue(DataType::BatteryStatus, &data, 42).unwrap();
+        router
+            .log_queue(DataType::BatteryStatus, &data, 42)
+            .unwrap();
 
         let data = [10.0_f32, 10.25, 10.5];
         router.log_queue(DataType::GpsData, &data, 42).unwrap();
@@ -243,9 +259,6 @@ mod tests {
         router.process_received_queue().unwrap();
     }
 }
-
-
-
 
 // ---- Helpers (test-local) ----
 
@@ -425,15 +438,7 @@ mod handler_failure_tests {
         )
         .unwrap();
 
-        match router.send(&pkt) {
-            Ok(_) => panic!("Expected router.send to return Err due to handler failure"),
-            Err(e) => {
-                match e {
-                    TelemetryError::HandlerError(_) => {} // expected
-                    _ => panic!("Expected TelemetryError::HandlerError, got {:?}", e),
-                }
-            }
-        }
+        handle_errors(router.send(&pkt));
 
         // The capturing handler should have seen the original packet and then the error packet.
         assert!(
@@ -491,15 +496,7 @@ mod handler_failure_tests {
         )
         .unwrap();
 
-        match router.send(&pkt) {
-            Ok(_) => panic!("Expected router.send to return Err due to handler failure"),
-            Err(e) => {
-                match e {
-                    TelemetryError::HandlerError(_) => {} // expected
-                    _ => panic!("Expected TelemetryError::HandlerError, got {:?}", e),
-                }
-            }
-        }
+        handle_errors(router.send(&pkt));
 
         assert!(
             saw_error.load(Ordering::SeqCst) >= 1,
@@ -516,8 +513,10 @@ mod handler_failure_tests {
         assert_eq!(got, expected, "mismatch in TelemetryError payload text");
     }
 
-    use std::process::Command;
+
     use std::path::PathBuf;
+    use std::process::Command;
+
 
     #[test]
     fn run_c_system_test() {
@@ -564,5 +563,164 @@ mod handler_failure_tests {
             output.status.code()
         );
     }
+}
 
+#[cfg(test)]
+mod timeout_tests {
+    use crate::config::DataEndpoint;
+    use crate::tests::get_handler;
+    use crate::{router::Clock, BoardConfig, DataType, Result, Router, TelemetryPacket};
+    use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+
+    // ---------------- Mock clock ----------------
+    struct StepClock {
+        t: AtomicU64,
+        step: u64,
+    }
+    impl StepClock {
+        fn new(start: u64, step: u64) -> Self {
+            Self {
+                t: AtomicU64::new(start),
+                step,
+            }
+        }
+    }
+    impl Clock for StepClock {
+        #[inline]
+        fn now_ms(&self) -> u64 {
+            // returns current, then advances by step (wraps naturally in u64)
+            self.t.fetch_add(self.step, Ordering::Relaxed)
+        }
+    }
+
+    // ---------------- Helpers ----------------
+    // RX packet with *only local* endpoint to avoid auto-forward TX during receive.
+    fn mk_rx_only_local(vals: &[f32], ts: u64) -> TelemetryPacket {
+        TelemetryPacket::from_f32_slice(
+            DataType::GpsData,
+            vals,
+            &[DataEndpoint::SdCard], // <- only local
+            ts,
+        )
+            .unwrap()
+    }
+
+    // Counter for TX frames on the “bus”
+    fn tx_counter(counter: Arc<AtomicUsize>) -> impl Fn(&[u8]) -> Result<()> + Send + Sync + 'static {
+        move |bytes: &[u8]| {
+            assert!(!bytes.is_empty());
+            counter.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    /// timeout == 0 must drain both queues fully (ignore time).
+    /// Expect local handler to see TX + RX items because TX also calls local handlers.
+    #[test]
+    fn process_all_queues_timeout_zero_drains_fully() {
+        let tx_count = Arc::new(AtomicUsize::new(0));
+        let tx = tx_counter(tx_count.clone());
+
+        let rx_count = Arc::new(AtomicUsize::new(0));
+        let rx_count_c = rx_count.clone();
+        let handler = crate::router::EndpointHandler {
+            endpoint: DataEndpoint::SdCard,
+            handler: Box::new(move |_pkt: &TelemetryPacket| {
+                rx_count_c.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }),
+        };
+
+        let mut r = Router::new(Some(tx), BoardConfig::new(vec![handler]));
+
+        // Enqueue TX (3)
+        for _ in 0..3 {
+            r.log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0], 0).unwrap();
+        }
+        // Enqueue RX (2) with only-local endpoint
+        for _ in 0..2 {
+            r.rx_packet_to_queue(mk_rx_only_local(&[9.0, 8.0, 7.0], 123)).unwrap();
+        }
+
+        // timeout = 0 → drain fully
+        let clock = StepClock::new(0, 0);
+        r.process_all_queues_with_timeout(&clock, 0).unwrap();
+
+        // TX: all three frames should be sent
+        assert_eq!(tx_count.load(Ordering::SeqCst), 3, "all TX packets should be sent");
+        // RX handler was invoked for each TX (local delivery) + each RX = 3 + 2 = 5
+        assert_eq!(rx_count.load(Ordering::SeqCst), 5, "handler sees TX+RX packets");
+    }
+
+    /// Non-zero timeout should limit work. Use timeout > step so one iteration occurs,
+    /// which (by impl) can process up to one TX and one RX.
+    #[test]
+    fn process_all_queues_respects_nonzero_timeout_budget() {
+        let tx_count = Arc::new(AtomicUsize::new(0));
+        let tx = tx_counter(tx_count.clone());
+
+        let rx_count = Arc::new(AtomicUsize::new(0));
+        let rx_count_c = rx_count.clone();
+        let handler = get_handler(rx_count_c);
+
+        let mut r = Router::new(Some(tx), BoardConfig::new(vec![handler]));
+
+        // Seed work in both queues
+        for _ in 0..5 {
+            r.log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0], 0).unwrap();
+            // RX with only-local endpoint to avoid implicit re-TX during receive
+            r.rx_packet_to_queue(
+                TelemetryPacket::from_f32_slice(
+                    DataType::GpsData, &[4.0, 5.0, 6.0], &[DataEndpoint::SdCard], 1,
+                ).unwrap()
+            ).unwrap();
+        }
+
+        // Step is 10ms per call; timeout 5ms guarantees exactly one iteration
+        let clock = StepClock::new(0, 10);
+        r.process_all_queues_with_timeout(&clock, 5).unwrap();
+
+        // One iteration → at most one TX send
+        assert_eq!(tx_count.load(Ordering::SeqCst), 1, "expected exactly one TX in a single iteration");
+
+        // Handlers run for both TX local delivery and RX processing → 2 total
+        assert_eq!(rx_count.load(Ordering::SeqCst), 2, "expected one TX local + one RX handler call");
+
+        // Drain the rest to prove there was more work left
+        r.process_all_queues_with_timeout(&clock, 0).unwrap();
+        assert_eq!(tx_count.load(Ordering::SeqCst), 5);
+        assert_eq!(rx_count.load(Ordering::SeqCst), 10); // 5 (TX locals) + 5 (RX)
+    }
+
+    /// Wraparound-safe: ensure we still only do one iteration worth of work.
+    #[test]
+    fn process_all_queues_handles_u64_wraparound() {
+        let tx_count = Arc::new(AtomicUsize::new(0));
+        let tx = tx_counter(tx_count.clone());
+
+        let rx_count = Arc::new(AtomicUsize::new(0));
+        let rx_count_c = rx_count.clone();
+        let handler = get_handler(rx_count_c);
+
+        let mut r = Router::new(Some(tx), BoardConfig::new(vec![handler]));
+
+        // One TX and one RX (RX is only-local to avoid creating extra TX on receive)
+        r.log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0], 0).unwrap();
+        r.rx_packet_to_queue(mk_rx_only_local(&[4.0, 5.0, 6.0], 7)).unwrap();
+
+        // Start near wrap; step crosses the boundary
+        let start = u64::MAX - 1;
+        let clock = StepClock::new(start, 2);
+
+        // Small budget; with wrapping_sub this should allow one iteration then stop
+        r.process_all_queues_with_timeout(&clock, 1).unwrap();
+
+        // One iteration can do up to one TX and one RX
+        assert!(tx_count.load(Ordering::SeqCst) <= 1, "expected <=1 TX");
+        assert!(rx_count.load(Ordering::SeqCst) <= 2, "local handler can be invoked by TX local delivery (+1) and RX (+1)");
+        // At least something should have happened
+        assert!(tx_count.load(Ordering::SeqCst) + rx_count.load(Ordering::SeqCst) >= 1);
+    }
 }

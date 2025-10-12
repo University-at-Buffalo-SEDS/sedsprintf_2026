@@ -42,15 +42,14 @@ int main(void)
     make_series(buf, 3, 1013.25f);;
     assert(node_log(&flightControllerBoard, SEDS_DT_BAROMETER, buf, 3) == SEDS_OK);
 
-    seds_router_process_send_queue(flightControllerBoard.r);
-    seds_router_process_send_queue(powerBoard.r);
-    seds_router_process_send_queue(radioBoard.r);
-
-    seds_router_process_received_queue(flightControllerBoard.r);
-    seds_router_process_received_queue(powerBoard.r);
-    seds_router_process_received_queue(radioBoard.r);
+    seds_router_process_tx_queue_with_timeout(flightControllerBoard.r, host_now_ms, NULL, 100);
+    seds_router_process_tx_queue_with_timeout(powerBoard.r, host_now_ms, NULL, 100);
+    seds_router_process_tx_queue_with_timeout(radioBoard.r, host_now_ms, NULL, 100);
 
 
+    seds_router_process_rx_queue_with_timeout(flightControllerBoard.r, host_now_ms, NULL, 100);
+    seds_router_process_rx_queue_with_timeout(powerBoard.r, host_now_ms, NULL, 100);
+    seds_router_process_rx_queue_with_timeout(radioBoard.r, host_now_ms, NULL, 100);
 
     printf("A.radio_hits=%u, B.sd_hits=%u, C.radio_hits=%u, C.sd_hits=%u\n",
            radioBoard.radio_hits, flightControllerBoard.sd_hits, powerBoard.radio_hits, powerBoard.sd_hits);

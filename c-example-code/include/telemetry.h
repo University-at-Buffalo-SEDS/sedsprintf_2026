@@ -39,6 +39,15 @@ void rx_asynchronous(const uint8_t * bytes, size_t len);
 
 SedsResult process_rx_queue(void);
 
+
+SedsResult dispatch_tx_queue_timeout(uint32_t timeout_ms);
+
+
+SedsResult process_rx_queue_timeout(uint32_t timeout_ms);
+
+SedsResult process_all_queues_timeout(uint32_t timeout_ms);
+
+
 #ifdef __cplusplus
 }
 #endif
