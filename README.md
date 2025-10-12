@@ -18,8 +18,20 @@ into strings for logging.
   ```
   
 
-- WHen using this library as a submodule in a different c or c++ project, make sure to add the following to your cmakelists.txt
+- When using this library as a submodule in a different c or c++ project, make sure to add the following to your cmakelists.txt
   ```cmake
   add_subdirectory(${CMAKE_SOURCE_DIR}/sedsprintf_rs)
   target_link_libraries(${CMAKE_PROJECT_NAME} sedsprintf_rs)
+  ```
+  
+
+- To add this repo as a subtree to allow for modifications, use the following command:
+  ```bash
+  git remote add sedsprintf-upstream https://github.com/Rylan-Meilutis/sedsprintf_rs.git
+  git fetch sedsprintf-upstream
+  git subtree add --prefix=sedsprintf_rs sedsprintf-upstream main
+  
+- To update the subtree, use:
+  ```bash
+  git subtree pull --prefix=sedsprintf_rs sedsprintf-upstream main -m "Merge sedsprintf_rs upstream main"
   ```
