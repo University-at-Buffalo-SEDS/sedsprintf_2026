@@ -203,6 +203,7 @@ impl Router {
         let error_pkt = TelemetryPacket::new(
             DataType::TelemetryError,
             &locals,
+            DEVICE_IDENTIFIER,
             pkt.timestamp,
             alloc::sync::Arc::<[u8]>::from(buf),
         )?;
@@ -445,6 +446,7 @@ impl Router {
         let pkt = TelemetryPacket::new(
             ty,
             &meta.endpoints,
+            DEVICE_IDENTIFIER,
             timestamp,
             Arc::<[u8]>::from(payload_vec),
         )?;
@@ -475,6 +477,7 @@ impl Router {
         let pkt = TelemetryPacket::new(
             ty,
             &meta.endpoints,
+            DEVICE_IDENTIFIER,
             timestamp,
             Arc::<[u8]>::from(payload_vec),
         )?;

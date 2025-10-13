@@ -1,4 +1,4 @@
-use crate::config::{get_needed_message_size, DEVICE_IDENTIFIER};
+use crate::config::get_needed_message_size;
 use crate::router::EndpointHandler;
 use crate::{DataEndpoint, DataType, TelemetryError, TelemetryPacket, MESSAGE_ELEMENTS};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -276,8 +276,8 @@ fn fake_telemetry_packet_bytes() -> TelemetryPacket {
 
     TelemetryPacket {
         ty: DataType::GpsData,
-        sender: DEVICE_IDENTIFIER,
-        data_size: payload.len(), // 3
+        sender: "Flight Controller", // TEST_PLATFORM
+        data_size: payload.len(),    // 3
         endpoints,
         timestamp: 1123581321, // 1123581321
         payload,
@@ -327,7 +327,7 @@ fn helpers_packet_hex_to_string() {
     let pkt = fake_telemetry_packet_bytes();
     let got = pkt.to_hex_string();
 
-    let expect = "Type: GPS_DATA, Size: 3, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, RADIO], Timestamp: 1123581321, Data (hex): 0x13 0x21 0x34";
+    let expect = "Type: GPS_DATA, Size: 3, Sender: Flight Controller, Endpoints: [SD_CARD, RADIO], Timestamp: 1123581321, Data (hex): 0x13 0x21 0x34";
     assert_eq!(got, expect);
 }
 
@@ -436,6 +436,7 @@ mod handler_failure_tests {
         let pkt = TelemetryPacket::new(
             ty,
             &[failing_ep, other_ep],
+            DEVICE_IDENTIFIER,
             ts,
             Arc::<[u8]>::from(payload_for(ty)),
         )
@@ -494,6 +495,7 @@ mod handler_failure_tests {
             ty,
             // include both a local and a non-local endpoint so any_remote == true
             &[local_ep, remote_ep],
+            "router_test",
             ts,
             Arc::<[u8]>::from(payload_for(ty)),
         )
@@ -607,11 +609,13 @@ mod timeout_tests {
             &[DataEndpoint::SdCard], // <- only local
             ts,
         )
-            .unwrap()
+        .unwrap()
     }
 
     // Counter for TX frames on the “bus”
-    fn tx_counter(counter: Arc<AtomicUsize>) -> impl Fn(&[u8]) -> Result<()> + Send + Sync + 'static {
+    fn tx_counter(
+        counter: Arc<AtomicUsize>,
+    ) -> impl Fn(&[u8]) -> Result<()> + Send + Sync + 'static {
         move |bytes: &[u8]| {
             assert!(!bytes.is_empty());
             counter.fetch_add(1, Ordering::SeqCst);
@@ -640,11 +644,13 @@ mod timeout_tests {
 
         // Enqueue TX (3)
         for _ in 0..3 {
-            r.log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0], 0).unwrap();
+            r.log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0], 0)
+                .unwrap();
         }
         // Enqueue RX (2) with only-local endpoint
         for _ in 0..2 {
-            r.rx_packet_to_queue(mk_rx_only_local(&[9.0, 8.0, 7.0], 123)).unwrap();
+            r.rx_packet_to_queue(mk_rx_only_local(&[9.0, 8.0, 7.0], 123))
+                .unwrap();
         }
 
         // timeout = 0 → drain fully
@@ -652,9 +658,17 @@ mod timeout_tests {
         r.process_all_queues_with_timeout(&clock, 0).unwrap();
 
         // TX: all three frames should be sent
-        assert_eq!(tx_count.load(Ordering::SeqCst), 3, "all TX packets should be sent");
+        assert_eq!(
+            tx_count.load(Ordering::SeqCst),
+            3,
+            "all TX packets should be sent"
+        );
         // RX handler was invoked for each TX (local delivery) + each RX = 3 + 2 = 5
-        assert_eq!(rx_count.load(Ordering::SeqCst), 5, "handler sees TX+RX packets");
+        assert_eq!(
+            rx_count.load(Ordering::SeqCst),
+            5,
+            "handler sees TX+RX packets"
+        );
     }
 
     /// Non-zero timeout should limit work. Use timeout > step so one iteration occurs,
@@ -672,13 +686,19 @@ mod timeout_tests {
 
         // Seed work in both queues
         for _ in 0..5 {
-            r.log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0], 0).unwrap();
+            r.log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0], 0)
+                .unwrap();
             // RX with only-local endpoint to avoid implicit re-TX during receive
             r.rx_packet_to_queue(
                 TelemetryPacket::from_f32_slice(
-                    DataType::GpsData, &[4.0, 5.0, 6.0], &[DataEndpoint::SdCard], 1,
-                ).unwrap()
-            ).unwrap();
+                    DataType::GpsData,
+                    &[4.0, 5.0, 6.0],
+                    &[DataEndpoint::SdCard],
+                    1,
+                )
+                .unwrap(),
+            )
+            .unwrap();
         }
 
         // Step is 10ms per call; timeout 5ms guarantees exactly one iteration
@@ -686,10 +706,18 @@ mod timeout_tests {
         r.process_all_queues_with_timeout(&clock, 5).unwrap();
 
         // One iteration → at most one TX send
-        assert_eq!(tx_count.load(Ordering::SeqCst), 1, "expected exactly one TX in a single iteration");
+        assert_eq!(
+            tx_count.load(Ordering::SeqCst),
+            1,
+            "expected exactly one TX in a single iteration"
+        );
 
         // Handlers run for both TX local delivery and RX processing → 2 total
-        assert_eq!(rx_count.load(Ordering::SeqCst), 2, "expected one TX local + one RX handler call");
+        assert_eq!(
+            rx_count.load(Ordering::SeqCst),
+            2,
+            "expected one TX local + one RX handler call"
+        );
 
         // Drain the rest to prove there was more work left
         r.process_all_queues_with_timeout(&clock, 0).unwrap();
@@ -710,8 +738,10 @@ mod timeout_tests {
         let mut r = Router::new(Some(tx), BoardConfig::new(vec![handler]));
 
         // One TX and one RX (RX is only-local to avoid creating extra TX on receive)
-        r.log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0], 0).unwrap();
-        r.rx_packet_to_queue(mk_rx_only_local(&[4.0, 5.0, 6.0], 7)).unwrap();
+        r.log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0], 0)
+            .unwrap();
+        r.rx_packet_to_queue(mk_rx_only_local(&[4.0, 5.0, 6.0], 7))
+            .unwrap();
 
         // Start near wrap; step crosses the boundary
         let start = u64::MAX - 1;
@@ -722,7 +752,10 @@ mod timeout_tests {
 
         // One iteration can do up to one TX and one RX
         assert!(tx_count.load(Ordering::SeqCst) <= 1, "expected <=1 TX");
-        assert!(rx_count.load(Ordering::SeqCst) <= 2, "local handler can be invoked by TX local delivery (+1) and RX (+1)");
+        assert!(
+            rx_count.load(Ordering::SeqCst) <= 2,
+            "local handler can be invoked by TX local delivery (+1) and RX (+1)"
+        );
         // At least something should have happened
         assert!(tx_count.load(Ordering::SeqCst) + rx_count.load(Ordering::SeqCst) >= 1);
     }

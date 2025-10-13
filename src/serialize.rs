@@ -6,14 +6,15 @@
 // Therefore, if you are trying to optimize
 // this routine, and it fails (it most surely will),
 // please increase this counter as a warning for the next person:
-// total hours_wasted_here = 12
+// total hours_wasted_here = 16
 
-use crate::config::{MAX_VALUE_DATA_TYPE};
+use crate::config::MAX_VALUE_DATA_TYPE;
 use crate::{config::DataType, DataEndpoint, TelemetryError, TelemetryPacket};
-use alloc::{sync::Arc, vec::Vec, borrow::ToOwned, boxed::Box};
+use alloc::{borrow::ToOwned, boxed::Box, sync::Arc, vec::Vec};
 use core::convert::TryInto;
 use core::mem;
 use core::mem::size_of;
+
 
 pub const TYPE_SIZE: usize = size_of::<u32>();
 pub const DATA_SIZE_SIZE: usize = size_of::<u32>();
@@ -21,7 +22,6 @@ pub const TIME_SIZE: usize = size_of::<u64>();
 pub const NUM_ENDPOINTS_SIZE: usize = size_of::<u32>();
 pub const ENDPOINT_ELEM_SIZE: usize = size_of::<u32>();
 pub const SENDER_LEN_SIZE: usize = size_of::<u32>();
-
 
 #[inline]
 pub fn header_size_bytes() -> usize {
@@ -88,7 +88,6 @@ pub fn deserialize_packet(buf: &[u8]) -> Result<TelemetryPacket, TelemetryError>
         .map_err(|_| TelemetryError::Deserialize("sender not UTF-8"))?;
     // Leak to get &'static str (one leak per unique sender)
     let sender_static: &'static str = Box::leak(sender_str.to_owned().into_boxed_str());
-
 
     let payload = r.read_bytes(dsz)?.to_vec();
 

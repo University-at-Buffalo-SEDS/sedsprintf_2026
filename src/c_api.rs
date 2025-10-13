@@ -8,9 +8,9 @@ use crate::{
     DataType, Result, TelemetryError, TelemetryPacket,
 };
 
-use alloc::{boxed::Box, vec::Vec, sync::Arc, borrow::ToOwned};
-use core::{ffi::c_void,ffi::c_char, ptr, slice, str::from_utf8};
 use crate::router::Clock;
+use alloc::{borrow::ToOwned, boxed::Box, sync::Arc, vec::Vec};
+use core::{ffi::c_char, ffi::c_void, ptr, slice, str::from_utf8};
 
 // ----------------- router wrapper -----------------
 
@@ -25,7 +25,7 @@ pub struct SedsPacketView {
     pub ty: u32,
     pub data_size: usize,
     pub sender: *const c_char, // pointer
-    pub sender_len: usize,                // length
+    pub sender_len: usize,     // length
     pub endpoints: *const u32,
     pub num_endpoints: usize,
     pub timestamp: u64,
@@ -361,7 +361,11 @@ pub extern "C" fn seds_router_log_f32(
 // ----------------- FFI: receive serialized -----------------
 
 #[no_mangle]
-pub extern "C" fn seds_router_receive_serialized(r: *mut SedsRouter, bytes: *const u8, len: usize) -> i32 {
+pub extern "C" fn seds_router_receive_serialized(
+    r: *mut SedsRouter,
+    bytes: *const u8,
+    len: usize,
+) -> i32 {
     if r.is_null() || (len > 0 && bytes.is_null()) {
         return -2;
     }
@@ -369,7 +373,6 @@ pub extern "C" fn seds_router_receive_serialized(r: *mut SedsRouter, bytes: *con
     let slice = unsafe { slice::from_raw_parts(bytes, len) };
     ok_or_status(router.receive_serialized(slice))
 }
-
 
 #[no_mangle]
 pub extern "C" fn seds_router_receive(r: *mut SedsRouter, view: *const SedsPacketView) -> i32 {
@@ -384,7 +387,6 @@ pub extern "C" fn seds_router_receive(r: *mut SedsRouter, view: *const SedsPacke
     ok_or_status(router.receive(&pkt))
 }
 
-
 #[no_mangle]
 pub extern "C" fn seds_router_process_send_queue(r: *mut SedsRouter) -> i32 {
     if r.is_null() {
@@ -395,7 +397,10 @@ pub extern "C" fn seds_router_process_send_queue(r: *mut SedsRouter) -> i32 {
 }
 
 #[no_mangle]
-pub extern "C" fn seds_router_queue_tx_message(r: *mut SedsRouter, view: *const SedsPacketView) -> i32 {
+pub extern "C" fn seds_router_queue_tx_message(
+    r: *mut SedsRouter,
+    view: *const SedsPacketView,
+) -> i32 {
     if r.is_null() || view.is_null() {
         return -2;
     }
@@ -721,10 +726,9 @@ unsafe fn log_unaligned_slice<T: LeBytes>(
     router.log::<T>(ty, &tmp, ts)
 }
 
-
 #[inline]
 unsafe fn log_queue_unaligned_slice<T: LeBytes>(
-    router: & mut Router,
+    router: &mut Router,
     ty: DataType,
     data: *const c_void,
     count: usize,
@@ -784,7 +788,6 @@ pub extern "C" fn seds_router_log_typed(
     ok_or_status(res)
 }
 
-
 #[no_mangle]
 pub extern "C" fn seds_router_log_queue_typed(
     r: *mut SedsRouter,
@@ -826,8 +829,6 @@ pub extern "C" fn seds_router_log_queue_typed(
 
     ok_or_status(res)
 }
-
-
 
 // -------- Clock bridge from C --------
 type CNowMs = Option<extern "C" fn(user: *mut c_void) -> u64>;
@@ -930,8 +931,6 @@ pub extern "C" fn seds_router_process_rx_queue_with_timeout(
     };
     ok_or_status(router.process_rx_queue_with_timeout(&clock, timeout_ms))
 }
-
-
 
 /// Process all queues until empty or timeout.
 /// `now_ms_cb`: extern "C" u64 (*)(void* user) returning monotonic milliseconds.

@@ -68,8 +68,8 @@ mod router;
 mod serialize;
 
 
-use crate::config::{MessageType, DEVICE_IDENTIFIER};
 use crate::config::{get_info_type, MessageDataType, MESSAGE_DATA_TYPES};
+use crate::config::{MessageType, DEVICE_IDENTIFIER};
 pub use config::{message_meta, DataEndpoint, DataType, MessageMeta, MESSAGE_ELEMENTS};
 pub use router::{BoardConfig, Router};
 pub use serialize::{deserialize_packet, serialize_packet, ByteReader};
@@ -108,6 +108,7 @@ impl TelemetryPacket {
     pub fn new(
         ty: DataType,
         endpoints: &[DataEndpoint],
+        sender: &'static str,
         timestamp: u64,
         payload: Arc<[u8]>,
     ) -> Result<Self> {
@@ -124,7 +125,7 @@ impl TelemetryPacket {
         Ok(Self {
             ty,
             data_size: meta.data_size,
-            sender: DEVICE_IDENTIFIER,
+            sender,
             endpoints: Arc::<[DataEndpoint]>::from(endpoints.to_vec()),
             timestamp,
             payload,
@@ -145,7 +146,13 @@ impl TelemetryPacket {
                 got: bytes.len(),
             });
         }
-        Self::new(ty, endpoints, timestamp, Arc::<[u8]>::from(bytes.to_vec()))
+        Self::new(
+            ty,
+            endpoints,
+            DEVICE_IDENTIFIER,
+            timestamp,
+            Arc::<[u8]>::from(bytes.to_vec()),
+        )
     }
 
     /// Convenience: create from a slice of `f32` (copied, little-endian).
@@ -167,7 +174,13 @@ impl TelemetryPacket {
         for v in values {
             bytes.extend_from_slice(&v.to_le_bytes());
         }
-        Self::new(ty, endpoints, timestamp, Arc::<[u8]>::from(bytes))
+        Self::new(
+            ty,
+            endpoints,
+            DEVICE_IDENTIFIER,
+            timestamp,
+            Arc::<[u8]>::from(bytes),
+        )
     }
 
     /// Validate internal invariants (size, endpoints, etc.).
