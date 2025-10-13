@@ -33,9 +33,8 @@ set(RUST_PROFILE "$<IF:$<CONFIG:Debug>,debug,release>")
 set(RS_LIB_DBG "${RUST_DIR}/target/${RUST_TRIPLE}debug/libsedsprintf_rs.a")
 set(RS_LIB_REL "${RUST_DIR}/target/${RUST_TRIPLE}release/libsedsprintf_rs.a")
 set(RS_INCLUDE "${RUST_DIR}/C-Headers")
-set(RS_STAMP "${CMAKE_CURRENT_BINARY_DIR}/sedsprintf_rs.stamp")
 
-# --- Validate paths up front (catch typos immediately)
+# (keep your validation + RS_SRC collection as-is)
 if (NOT EXISTS "${RUST_DIR}/Cargo.toml")
     message(FATAL_ERROR "SEDSPRINTF_RS_DIR='${RUST_DIR}' does not contain Cargo.toml. "
             "Pass -DSEDSPRINTF_RS_DIR=/abs/path/to/sedsprintf_rs")
@@ -45,45 +44,40 @@ if (NOT EXISTS "${RS_INCLUDE}")
             "Does your crate expose C headers in C-Headers/?")
 endif ()
 
+
 # --- Track inputs
 file(GLOB_RECURSE RS_SRC CONFIGURE_DEPENDS
         "${RUST_DIR}/src/*.rs"
         "${RUST_DIR}/build.rs"
         "${RUST_DIR}/Cargo.toml"
         "${RUST_DIR}/Cargo.lock"
+        "${RUST_DIR}/C-Headers/*.h"
 )
 
-# --- Build rule (produces the .a as BYPRODUCTS)
-# Option + (optional) auto-detect
-
-
-# Build script args (list → string)
-set(RS_ARGS_LIST "")
-if (SEDSPRINTF_STM_BUILD)
-    list(APPEND RS_ARGS_LIST "stm-build")
-endif ()
-string(REPLACE ";" " " RS_ARGS_STR "${RS_ARGS_LIST}")
-
-# Human-friendly comment
-set(RS_COMMENT "Building sedsprintf_rs (${RUST_PROFILE}) for ${RUST_TRIPLE}")
-if (SEDSPRINTF_STM_BUILD)
-    set(RS_COMMENT "${RS_COMMENT} (STM32 mode)")
-endif ()
-
+# --- Build rule: make the real artifacts be the OUTPUTs
+# (Cargo.toml: [lib] crate-type = ["staticlib"])
 add_custom_command(
-        OUTPUT "${RS_STAMP}"
-        BYPRODUCTS "${RS_LIB_DBG}" "${RS_LIB_REL}"
+        OUTPUT
+        "${RS_LIB_DBG}" "${RS_LIB_REL}"
         COMMAND ${CMAKE_COMMAND} -E chdir "${RUST_DIR}" bash -lc "./build.sh ${RS_ARGS_STR}"
-        COMMAND ${CMAKE_COMMAND} -E touch "${RS_STAMP}"
+        # Optional: ensure the directories exist (helps with first build on some shells)
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${RUST_DIR}/target/${RUST_TRIPLE}debug"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${RUST_DIR}/target/${RUST_TRIPLE}release"
         DEPENDS ${RS_SRC}
-        COMMENT "${RS_COMMENT}"
+        COMMENT "Building sedsprintf_rs (${RUST_PROFILE}) for ${RUST_TRIPLE}"
+        USES_TERMINAL
         VERBATIM
 )
 
-add_custom_target(sedsprintf_rs_build DEPENDS "${RS_STAMP}")
+# A target that depends on all produced files; any missing file will trigger rebuild
+add_custom_target(sedsprintf_rs_build
+        DEPENDS
+        "${RS_LIB_DBG}" "${RS_LIB_REL}"
+)
 
-# --- Imported lib (what your main project links)
+# --- Imported lib the C/C++ links against
 add_library(sedsprintf_rs STATIC IMPORTED GLOBAL)
+
 set_target_properties(sedsprintf_rs PROPERTIES
         IMPORTED_LOCATION_DEBUG "${RS_LIB_DBG}"
         IMPORTED_LOCATION_RELEASE "${RS_LIB_REL}"
@@ -95,14 +89,7 @@ add_dependencies(sedsprintf_rs sedsprintf_rs_build)
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/noexecstack.S"
         "    .section .note.GNU-stack,\"\",%progbits\n")
 
-# Interface helper that injects the sentinel + flags into any consumer
-add_library(sedsprintf_rs_noexecstack INTERFACE)
-# Make the sentinel compile into the final consumer target (requires parent to have ASM enabled)
-target_sources(sedsprintf_rs_noexecstack INTERFACE
-        "${CMAKE_CURRENT_BINARY_DIR}/noexecstack.S"
-)
-# Prevent assembler from marking stack executable; force linker header to noexec
-
+# Prevent assembler from marking stack executable; force linker header to noexecstack
 include(CheckLinkerFlag)
 include(CheckCCompilerFlag)
 check_linker_flag(C "-Wl,-z,noexecstack" HAVE_LD_NOEXECSTACK)
@@ -114,16 +101,10 @@ endif ()
 
 # --- Make final ELF have non-exec stack where supported (Linux/*BSD)
 if (SEDSPRINTF_STM_BUILD)  # ELF platforms only
-
     # These flags are understood by GCC/Clang toolchains on ELF
     target_compile_options(sedsprintf_rs INTERFACE -Wa,--noexecstack)
     target_link_options(sedsprintf_rs INTERFACE -Wl,-z,noexecstack)
-
-    # When someone links sedsprintf_rs, also pull in the helper
-else ()
-    # macOS/Windows: nothing to do; Mach-O/PE don’t use -z,noexecstack.
 endif ()
-
 
 # Optional niceties
 add_library(sedsprintf_rs::sedsprintf_rs ALIAS sedsprintf_rs)
