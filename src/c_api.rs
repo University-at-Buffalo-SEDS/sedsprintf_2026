@@ -8,7 +8,7 @@ use crate::{
     DataType, Result, TelemetryError, TelemetryPacket,
 };
 
-use alloc::{boxed::Box, vec::Vec, sync::Arc};
+use alloc::{boxed::Box, vec::Vec, sync::Arc, borrow::ToOwned};
 use core::{ffi::c_void,ffi::c_char, ptr, slice, str::from_utf8};
 use crate::router::Clock;
 

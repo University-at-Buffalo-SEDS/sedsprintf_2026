@@ -10,11 +10,10 @@
 
 use crate::config::{MAX_VALUE_DATA_TYPE};
 use crate::{config::DataType, DataEndpoint, TelemetryError, TelemetryPacket};
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{sync::Arc, vec::Vec, borrow::ToOwned, boxed::Box};
 use core::convert::TryInto;
 use core::mem;
 use core::mem::size_of;
-
 
 pub const TYPE_SIZE: usize = size_of::<u32>();
 pub const DATA_SIZE_SIZE: usize = size_of::<u32>();
