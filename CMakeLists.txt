@@ -22,7 +22,7 @@ set(HOST_RUST_TRIPLE "")
 
 # Final Rust target triple
 if (SEDSPRINTF_STM_BUILD)
-    set(SEDSPRINTF_RS_TRIPLE "thumbv7em-none-eabihf" CACHE STRING "Rust target triple" FORCE)
+    set(SEDSPRINTF_RS_TRIPLE "thumbv7em-none-eabihf/" CACHE STRING "Rust target triple" FORCE)
 else ()
     set(SEDSPRINTF_RS_TRIPLE "${HOST_RUST_TRIPLE}" CACHE STRING "Rust target triple" FORCE)
 endif ()
@@ -30,8 +30,8 @@ set(RUST_TRIPLE "${SEDSPRINTF_RS_TRIPLE}")
 
 # --- Derived paths
 set(RUST_PROFILE "$<IF:$<CONFIG:Debug>,debug,release>")
-set(RS_LIB_DBG "${RUST_DIR}/target/${RUST_TRIPLE}/debug/libsedsprintf_rs.a")
-set(RS_LIB_REL "${RUST_DIR}/target/${RUST_TRIPLE}/release/libsedsprintf_rs.a")
+set(RS_LIB_DBG "${RUST_DIR}/target/${RUST_TRIPLE}debug/libsedsprintf_rs.a")
+set(RS_LIB_REL "${RUST_DIR}/target/${RUST_TRIPLE}release/libsedsprintf_rs.a")
 set(RS_INCLUDE "${RUST_DIR}/C-Headers")
 set(RS_STAMP "${CMAKE_CURRENT_BINARY_DIR}/sedsprintf_rs.stamp")
 
