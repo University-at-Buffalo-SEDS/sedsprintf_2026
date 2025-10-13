@@ -68,7 +68,7 @@ mod router;
 mod serialize;
 
 
-use crate::config::MessageType;
+use crate::config::{MessageType, DEVICE_IDENTIFIER};
 use crate::config::{get_info_type, MessageDataType, MESSAGE_DATA_TYPES};
 pub use config::{message_meta, DataEndpoint, DataType, MessageMeta, MESSAGE_ELEMENTS};
 pub use router::{BoardConfig, Router};
@@ -80,6 +80,7 @@ pub use serialize::{deserialize_packet, serialize_packet, ByteReader};
 pub struct TelemetryPacket {
     pub ty: DataType,
     pub data_size: usize,
+    pub sender: &'static str,
     pub endpoints: Arc<[DataEndpoint]>,
     pub timestamp: u64,
     pub payload: Arc<[u8]>,
@@ -123,6 +124,7 @@ impl TelemetryPacket {
         Ok(Self {
             ty,
             data_size: meta.data_size,
+            sender: DEVICE_IDENTIFIER,
             endpoints: Arc::<[DataEndpoint]>::from(endpoints.to_vec()),
             timestamp,
             payload,
@@ -204,9 +206,10 @@ impl TelemetryPacket {
         let mut endpoints = String::new();
         self.build_endpoint_string(&mut endpoints);
         format!(
-            "Type: {}, Size: {}, Endpoints: [{}], Timestamp: {}",
+            "Type: {}, Size: {}, Sender: {}, Endpoints: [{}], Timestamp: {}",
             self.ty.as_str(),
             self.data_size,
+            self.sender,
             endpoints,
             self.timestamp
         )

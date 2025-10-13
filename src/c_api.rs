@@ -8,10 +8,8 @@ use crate::{
     DataType, Result, TelemetryError, TelemetryPacket,
 };
 
-use alloc::sync::Arc;
-use alloc::{boxed::Box, vec::Vec};
-use core::ffi::c_char;
-use core::{ffi::c_void, ptr, slice};
+use alloc::{boxed::Box, vec::Vec, sync::Arc};
+use core::{ffi::c_void,ffi::c_char, ptr, slice, str::from_utf8};
 use crate::router::Clock;
 
 // ----------------- router wrapper -----------------
@@ -26,6 +24,8 @@ pub struct SedsRouter {
 pub struct SedsPacketView {
     pub ty: u32,
     pub data_size: usize,
+    pub sender: *const c_char, // pointer
+    pub sender_len: usize,                // length
     pub endpoints: *const u32,
     pub num_endpoints: usize,
     pub timestamp: u64,
@@ -105,13 +105,29 @@ fn view_to_packet(view: &SedsPacketView) -> core::result::Result<TelemetryPacket
     for &e in eps_u32 {
         eps.push(DataEndpoint::try_from_u32(e).ok_or(())?);
     }
-
+    let sender_static: &'static str = if view.sender.is_null() {
+        if view.sender_len == 0 {
+            // allow empty sender (or swap in DEVICE_IDENTIFIER if you prefer)
+            ""
+        } else {
+            return Err(()); // bad pointer/len combo
+        }
+    } else {
+        let sb = unsafe {
+            // reinterpret c_char* as u8*
+            slice::from_raw_parts(view.sender as *const u8, view.sender_len)
+        };
+        let s = from_utf8(sb).map_err(|_| ())?;
+        // leak to satisfy &'static str in TelemetryPacket
+        Box::leak(s.to_owned().into_boxed_str())
+    };
     // payload
     let bytes = unsafe { slice::from_raw_parts(view.payload, view.payload_len) };
 
     Ok(TelemetryPacket {
         ty,
         data_size: view.data_size,
+        sender: sender_static,
         endpoints: Arc::<[DataEndpoint]>::from(eps),
         timestamp: view.timestamp,
         payload: Arc::<[u8]>::from(bytes.to_vec()),
@@ -253,10 +269,13 @@ pub extern "C" fn seds_router_new(
                 handler: Box::new(move |pkt: &TelemetryPacket| {
                     // transient endpoints buffer (alive through the call)
                     let eps_u32: Vec<u32> = pkt.endpoints.iter().map(|e| *e as u32).collect();
+                    let sender_bytes = pkt.sender.as_bytes();
 
                     let view = SedsPacketView {
                         ty: pkt.ty as u32,
                         data_size: pkt.data_size,
+                        sender: sender_bytes.as_ptr() as *const c_char,
+                        sender_len: sender_bytes.len(),
                         endpoints: eps_u32.as_ptr(),
                         num_endpoints: eps_u32.len(),
                         timestamp: pkt.timestamp,

@@ -8,7 +8,7 @@
 // please increase this counter as a warning for the next person:
 // total hours_wasted_here = 12
 
-use crate::config::MAX_VALUE_DATA_TYPE;
+use crate::config::{MAX_VALUE_DATA_TYPE};
 use crate::{config::DataType, DataEndpoint, TelemetryError, TelemetryPacket};
 use alloc::{sync::Arc, vec::Vec};
 use core::convert::TryInto;
@@ -21,10 +21,12 @@ pub const DATA_SIZE_SIZE: usize = size_of::<u32>();
 pub const TIME_SIZE: usize = size_of::<u64>();
 pub const NUM_ENDPOINTS_SIZE: usize = size_of::<u32>();
 pub const ENDPOINT_ELEM_SIZE: usize = size_of::<u32>();
+pub const SENDER_LEN_SIZE: usize = size_of::<u32>();
+
 
 #[inline]
 pub fn header_size_bytes() -> usize {
-    TYPE_SIZE + DATA_SIZE_SIZE + TIME_SIZE + NUM_ENDPOINTS_SIZE
+    TYPE_SIZE + DATA_SIZE_SIZE + TIME_SIZE + SENDER_LEN_SIZE + NUM_ENDPOINTS_SIZE
 }
 
 #[inline]
@@ -37,12 +39,16 @@ pub fn serialize_packet(pkt: &TelemetryPacket) -> Vec<u8> {
 
     out.extend_from_slice(&(pkt.ty as u32).to_le_bytes());
     out.extend_from_slice(&(pkt.data_size as u32).to_le_bytes());
+    let sender_bytes = pkt.sender.as_bytes();
+    out.extend_from_slice(&(sender_bytes.len() as u32).to_le_bytes());
     out.extend_from_slice(&pkt.timestamp.to_le_bytes());
     out.extend_from_slice(&(pkt.endpoints.len() as u32).to_le_bytes());
 
     for ep in pkt.endpoints.iter() {
         out.extend_from_slice(&(*ep as u32).to_le_bytes());
     }
+    out.extend_from_slice(sender_bytes);
+
     out.extend_from_slice(&pkt.payload);
     out
 }
@@ -58,6 +64,9 @@ pub fn deserialize_packet(buf: &[u8]) -> Result<TelemetryPacket, TelemetryError>
     let ty = DataType::try_from_u32(ty_raw).ok_or(TelemetryError::InvalidType)?;
 
     let dsz = r.read_u32()? as usize;
+
+    let sender_len = r.read_u32()? as usize;
+
     let ts = r.read_u64()?;
     let nep = r.read_u32()? as usize;
 
@@ -73,11 +82,21 @@ pub fn deserialize_packet(buf: &[u8]) -> Result<TelemetryPacket, TelemetryError>
             DataEndpoint::try_from_u32(e).ok_or(TelemetryError::Deserialize("bad endpoint"))?;
         eps.push(ep);
     }
+
+    // NEW: read sender bytes, validate UTF-8, then leak to &'static str
+    let sender_bytes = r.read_bytes(sender_len)?;
+    let sender_str = core::str::from_utf8(sender_bytes)
+        .map_err(|_| TelemetryError::Deserialize("sender not UTF-8"))?;
+    // Leak to get &'static str (one leak per unique sender)
+    let sender_static: &'static str = Box::leak(sender_str.to_owned().into_boxed_str());
+
+
     let payload = r.read_bytes(dsz)?.to_vec();
 
     Ok(TelemetryPacket {
         ty,
         data_size: dsz,
+        sender: sender_static,
         endpoints: Arc::<[_]>::from(eps),
         timestamp: ts,
         payload: Arc::<[_]>::from(payload),

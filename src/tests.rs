@@ -1,4 +1,4 @@
-use crate::config::get_needed_message_size;
+use crate::config::{get_needed_message_size, DEVICE_IDENTIFIER};
 use crate::router::EndpointHandler;
 use crate::{DataEndpoint, DataType, TelemetryError, TelemetryPacket, MESSAGE_ELEMENTS};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -100,7 +100,7 @@ mod tests {
         let s = pkt.header_string();
         assert_eq!(
             s,
-            "Type: GPS_DATA, Size: 12, Endpoints: [SD_CARD, RADIO], Timestamp: 0"
+            "Type: GPS_DATA, Size: 12, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, RADIO], Timestamp: 0"
         );
     }
 
@@ -112,7 +112,7 @@ mod tests {
                 .unwrap();
         let text = pkt.to_string();
         assert!(text.starts_with(
-            "Type: GPS_DATA, Size: 12, Endpoints: [SD_CARD, RADIO], Timestamp: 0, Data: "
+            "Type: GPS_DATA, Size: 12, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, RADIO], Timestamp: 0, Data: "
         ));
         assert!(text.contains("1"));
         assert!(text.contains("2.5"));
@@ -276,6 +276,7 @@ fn fake_telemetry_packet_bytes() -> TelemetryPacket {
 
     TelemetryPacket {
         ty: DataType::GpsData,
+        sender: DEVICE_IDENTIFIER,
         data_size: payload.len(), // 3
         endpoints,
         timestamp: 1123581321, // 1123581321
@@ -309,6 +310,7 @@ unsafe fn copy_telemetry_packet_raw(
     *d = TelemetryPacket {
         ty: s.ty,
         data_size: s.data_size,
+        sender: s.sender,
         endpoints: std::sync::Arc::from((&*s.endpoints).to_vec().into_boxed_slice()),
         timestamp: s.timestamp,
         payload: std::sync::Arc::from((&*s.payload).to_vec().into_boxed_slice()),
@@ -325,7 +327,7 @@ fn helpers_packet_hex_to_string() {
     let pkt = fake_telemetry_packet_bytes();
     let got = pkt.to_hex_string();
 
-    let expect = "Type: GPS_DATA, Size: 3, Endpoints: [SD_CARD, RADIO], Timestamp: 1123581321, Data (hex): 0x13 0x21 0x34";
+    let expect = "Type: GPS_DATA, Size: 3, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, RADIO], Timestamp: 1123581321, Data (hex): 0x13 0x21 0x34";
     assert_eq!(got, expect);
 }
 
@@ -347,6 +349,7 @@ fn helpers_copy_telemetry_packet() {
     let mut dest = TelemetryPacket {
         ty: src.ty, // initialize minimally; it will be overwritten
         data_size: 0,
+        sender: src.sender,
         endpoints: std::sync::Arc::from(Vec::<DataEndpoint>::new().into_boxed_slice()),
         timestamp: 0,
         payload: std::sync::Arc::from(Vec::<u8>::new().into_boxed_slice()),
@@ -448,7 +451,7 @@ mod handler_failure_tests {
 
         // Verify exact payload text produced by handle_callback_error(Some(dest), e)
         let expected = format!(
-            "Type: TELEMETRY_ERROR, Size: 128, Endpoints: [RADIO], Timestamp: 42, Error: Handler for endpoint {:?} failed on device {:?}: {:?}",
+            "Type: TELEMETRY_ERROR, Size: 128, Sender: TEST_PLATFORM, Endpoints: [RADIO], Timestamp: 42, Error: Handler for endpoint {:?} failed on device {:?}: {:?}",
             failing_ep,
             DEVICE_IDENTIFIER,
             TelemetryError::BadArg
@@ -505,7 +508,7 @@ mod handler_failure_tests {
 
         // Exact text from handle_callback_error(None, e)
         let expected = format!(
-            "Type: TELEMETRY_ERROR, Size: 128, Endpoints: [SD_CARD], Timestamp: 31415, Error: TX Handler failed on device {:?}: {:?}",
+            "Type: TELEMETRY_ERROR, Size: 128, Sender: TEST_PLATFORM, Endpoints: [SD_CARD], Timestamp: 31415, Error: TX Handler failed on device {:?}: {:?}",
             DEVICE_IDENTIFIER,
             TelemetryError::Io("boom")
         );

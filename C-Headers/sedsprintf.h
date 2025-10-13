@@ -50,15 +50,21 @@ typedef enum
 typedef struct SedsRouter SedsRouter;
 
 /** \brief Lightweight view of a telemetry packet (valid only during a callback). */
+/** \brief Lightweight view of a telemetry packet (valid only during a callback). */
 typedef struct SedsPacketView
 {
-    uint32_t ty; /**< DataType as u32 */
-    size_t data_size; /**< Payload size in bytes */
-    const uint32_t * endpoints; /**< Array of DataEndpoint (as u32) */
-    size_t num_endpoints;
-    uint64_t timestamp; /**< Timestamp units as defined by your system */
-    const uint8_t * payload; /**< Raw payload bytes */
-    size_t payload_len; /**< == data_size */
+    uint32_t ty;                 /**< DataType as u32 */
+    size_t   data_size;          /**< Payload size in bytes */
+
+    /* NEW: Rust `&str` is (ptr,len). Not NUL-terminated. Lifetime = callback. */
+    const char *sender;          /**< UTF-8 bytes; may not be NUL-terminated */
+    size_t      sender_len;      /**< Number of bytes at `sender` */
+
+    const uint32_t *endpoints;   /**< Array of DataEndpoint (as u32) */
+    size_t   num_endpoints;
+    uint64_t timestamp;          /**< Timestamp units as defined by your system */
+    const uint8_t *payload;      /**< Raw payload bytes */
+    size_t   payload_len;        /**< == data_size */
 } SedsPacketView;
 
 /** \brief Transmit callback: return 0 on success, non-zero on failure. */
