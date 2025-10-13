@@ -8,6 +8,11 @@ use crate::config::DEVICE_IDENTIFIER;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
 
+enum RxQueueItem {
+    Packet(TelemetryPacket),
+    Serialized(Vec<u8>),
+}
+
 // -------------------- endpoint + board config --------------------
 /// The maximum number of retries for handlers before giving up.
 const MAX_NUMBER_OF_RETRYS: usize = 3;
@@ -26,7 +31,7 @@ pub trait Clock {
 impl<T: Fn() -> u64> Clock for T {
     #[inline]
     fn now_ms(&self) -> u64 {
-        (self)()
+        self()
     }
 }
 
@@ -116,7 +121,7 @@ fn fallback_stdout(msg: &str) {
 pub struct Router {
     transmit: Option<Box<dyn Fn(&[u8]) -> Result<()> + Send + Sync + 'static>>,
     cfg: BoardConfig,
-    received_queue: Vec<TelemetryPacket>,
+    received_queue: Vec<RxQueueItem>,
     transmit_queue: Vec<TelemetryPacket>,
 }
 
@@ -249,6 +254,13 @@ impl Router {
         Ok(())
     }
 
+    fn handle_rx_queue_item(&mut self, item: RxQueueItem) -> Result<()> {
+        match item {
+            RxQueueItem::Packet(pkt) => self.receive(&pkt),
+            RxQueueItem::Serialized(bytes) => self.receive_serialized(&bytes),
+        }
+    }
+
     pub fn process_rx_queue_with_timeout<C: Clock>(
         &mut self,
         clock: &C,
@@ -257,7 +269,7 @@ impl Router {
         let start = clock.now_ms();
         // Prefer pop_front if this is a queue; avoid unwrap() in no_std.
         while let Some(pkt) = self.received_queue.pop() {
-            self.receive(&pkt)?;
+            self.handle_rx_queue_item(pkt)?;
             // wrapping_sub handles u64 rollover gracefully
             if clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
                 break;
@@ -285,7 +297,7 @@ impl Router {
 
             // Then RX
             if let Some(pkt) = self.received_queue.pop() {
-                self.receive(&pkt)?;
+                self.handle_rx_queue_item(pkt)?;
                 did_any = true;
             }
 
@@ -303,7 +315,6 @@ impl Router {
         Ok(())
     }
 
-
     pub fn queue_tx_message(&mut self, pkt: TelemetryPacket) -> Result<()> {
         pkt.validate()?;
         self.transmit_queue.push(pkt);
@@ -312,21 +323,20 @@ impl Router {
 
     pub fn process_received_queue(&mut self) -> Result<()> {
         while let Some(pkt) = self.received_queue.pop() {
-            self.receive_serialized(&serialize::serialize_packet(&pkt))?;
+            self.handle_rx_queue_item(pkt)?;
         }
         Ok(())
     }
 
     pub fn rx_serialized_packet_to_queue(&mut self, bytes: &[u8]) -> Result<()> {
-        let pkt = serialize::deserialize_packet(bytes)?;
-        pkt.validate()?;
-        self.received_queue.push(pkt);
+        self.received_queue
+            .push(RxQueueItem::Serialized(bytes.to_vec()));
         Ok(())
     }
 
     pub fn rx_packet_to_queue(&mut self, pkt: TelemetryPacket) -> Result<()> {
         pkt.validate()?;
-        self.received_queue.push(pkt);
+        self.received_queue.push(RxQueueItem::Packet(pkt));
         Ok(())
     }
 
@@ -386,6 +396,7 @@ impl Router {
     /// Accept a serialized buffer (from wire) and locally dispatch to matching endpoints.
     pub fn receive_serialized(&self, bytes: &[u8]) -> Result<()> {
         let pkt = serialize::deserialize_packet(bytes)?;
+        pkt.validate()?;
         self.receive(&pkt)
     }
 
