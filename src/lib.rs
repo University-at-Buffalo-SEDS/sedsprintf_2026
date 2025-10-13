@@ -1,4 +1,13 @@
 // std on host/tests; no_std when the `std` feature is OFF
+
+// Dear programmer:
+// When I wrote this code, only god and I knew how it worked.
+// Now, only god knows it!
+// Therefore, if you are trying to optimize
+// this routine, and it fails (it most surely will),
+// please increase this counter as a warning for the next person:
+// total hours wasted on this project = 16
+
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
