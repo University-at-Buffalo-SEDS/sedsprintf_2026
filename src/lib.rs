@@ -54,12 +54,13 @@ mod embedded_alloc {
     // Panic handler for embedded
     use core::panic::PanicInfo;
 
-
     #[panic_handler]
     fn panic(_info: &PanicInfo) -> ! {
         // only available when the target dependency `cortex-m` is pulled in
+        cortex_m::asm::bkpt();
+        // Halt forever after that
         loop {
-            cortex_m::asm::bkpt()
+            cortex_m::asm::nop();
         }
     }
 
