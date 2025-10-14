@@ -1,10 +1,10 @@
 // src/serialize.rs
 
-use crate::config::MAX_VALUE_DATA_TYPE;
-use crate::{config::DataType, DataEndpoint, TelemetryError, TelemetryPacket};
+use crate::config::{MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE};
+use crate::repr_u32::ReprU32Enum;
+use crate::{config::DataType, impl_repr_u32_enum, DataEndpoint, TelemetryError, TelemetryPacket};
 use alloc::{borrow::ToOwned, boxed::Box, sync::Arc, vec::Vec};
 use core::convert::TryInto;
-use core::mem;
 use core::mem::size_of;
 
 
@@ -129,25 +129,29 @@ impl<'a> ByteReader<'a> {
     }
 }
 
+pub fn try_enum_from_u32<E: ReprU32Enum>(x: u32) -> Option<E> {
+    if x > E::MAX {
+        return None;
+    }
+    // SAFETY: `E` is promised to be a fieldless #[repr(u32)] enum (thus 4 bytes, Copy).
+    // We reinterpret the bits of `x` as `E`.
+    let e = unsafe { (&x as *const u32 as *const E).read() };
+    Some(e)
+}
+
+// Implement the ReprU32Enum trait for the enums using the macro.
+impl_repr_u32_enum!(DataType, MAX_VALUE_DATA_TYPE);
+impl_repr_u32_enum!(DataEndpoint, MAX_VALUE_DATA_ENDPOINT);
+
 // Lightweight enum conversions for deserialization.
 impl DataType {
     pub fn try_from_u32(x: u32) -> Option<Self> {
-        if x <= MAX_VALUE_DATA_TYPE {
-            // Works because we asserted zero-based contiguous repr(u32)
-            Some(unsafe { mem::transmute::<u32, Self>(x) })
-        } else {
-            None
-        }
+        try_enum_from_u32(x)
     }
 }
 
 impl DataEndpoint {
     pub fn try_from_u32(x: u32) -> Option<Self> {
-        if x <= MAX_VALUE_DATA_TYPE {
-            // Works because we asserted zero-based contiguous repr(u32)
-            Some(unsafe { mem::transmute::<u32, Self>(x) })
-        } else {
-            None
-        }
+        try_enum_from_u32(x)
     }
 }

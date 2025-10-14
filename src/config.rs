@@ -12,6 +12,8 @@ pub enum DataEndpoint {
     Radio = 1,
 }
 
+pub const MAX_VALUE_DATA_ENDPOINT: u32 = DataEndpoint::Radio as u32;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub enum MessageDataType {
     Float32,

@@ -54,7 +54,6 @@ impl BoardConfig {
 // -------------------- generic little-endian serialization --------------------
 
 /// Trait for “any type” that knows how to write itself as *little-endian* bytes.
-/// Implement this for your own message structs to use `Router::log` generically.
 pub trait LeBytes: Copy {
     /// Number of bytes this type occupies in the encoded stream.
     const WIDTH: usize;

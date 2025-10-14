@@ -6,7 +6,7 @@
 // Therefore, if you are trying to optimize
 // this routine, and it fails (it most surely will),
 // please increase this counter as a warning for the next person:
-// total hours wasted on this project = 16
+// total hours wasted on this project = 24
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -54,6 +54,7 @@ mod embedded_alloc {
     // Panic handler for embedded
     use core::panic::PanicInfo;
 
+
     #[panic_handler]
     fn panic(_info: &PanicInfo) -> ! {
         // only available when the target dependency `cortex-m` is pulled in
@@ -71,9 +72,10 @@ mod embedded_alloc {
 // For HOST builds (std is ON), the system allocator is used automatically.
 // No custom panic handler needed.
 
-// ---------- Your portable core logic ----------
+// ---------- Portable core logic ----------
 mod c_api;
 mod config;
+mod repr_u32;
 mod router;
 mod serialize;
 
