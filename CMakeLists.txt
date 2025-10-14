@@ -19,10 +19,11 @@ if (CMAKE_C_COMPILER MATCHES "arm-none-eabi"
 endif ()
 # Derive a host Rust triple
 set(HOST_RUST_TRIPLE "")
-
+set(RS_ARGS_STR "")
 # Final Rust target triple
 if (SEDSPRINTF_STM_BUILD)
     set(SEDSPRINTF_RS_TRIPLE "thumbv7em-none-eabihf/" CACHE STRING "Rust target triple" FORCE)
+    set(RS_ARGS_STR "${RS_ARGS_STR} stm-build")
 else ()
     set(SEDSPRINTF_RS_TRIPLE "${HOST_RUST_TRIPLE}" CACHE STRING "Rust target triple" FORCE)
 endif ()
@@ -33,6 +34,10 @@ set(RUST_PROFILE "$<IF:$<CONFIG:Debug>,debug,release>")
 set(RS_LIB_DBG "${RUST_DIR}/target/${RUST_TRIPLE}debug/libsedsprintf_rs.a")
 set(RS_LIB_REL "${RUST_DIR}/target/${RUST_TRIPLE}release/libsedsprintf_rs.a")
 set(RS_INCLUDE "${RUST_DIR}/C-Headers")
+
+if(RUST_PROFILE STREQUAL "release")
+    set(RS_ARGS_STR "${RS_ARGS_STR} release")
+endif()
 
 # (keep your validation + RS_SRC collection as-is)
 if (NOT EXISTS "${RUST_DIR}/Cargo.toml")
@@ -61,8 +66,6 @@ add_custom_command(
         "${RS_LIB_DBG}" "${RS_LIB_REL}"
         COMMAND ${CMAKE_COMMAND} -E chdir "${RUST_DIR}" bash -lc "./build.sh ${RS_ARGS_STR}"
         # Optional: ensure the directories exist (helps with first build on some shells)
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${RUST_DIR}/target/${RUST_TRIPLE}debug"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${RUST_DIR}/target/${RUST_TRIPLE}release"
         DEPENDS ${RS_SRC}
         COMMENT "Building sedsprintf_rs (${RUST_PROFILE}) for ${RUST_TRIPLE}"
         USES_TERMINAL
