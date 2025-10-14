@@ -371,7 +371,7 @@ fn helpers_copy_telemetry_packet() {
 #[cfg(test)]
 mod handler_failure_tests {
     use super::*;
-    use crate::config::{DEVICE_IDENTIFIER, MAX_VALUE_DATA_TYPE};
+    use crate::config::{DEVICE_IDENTIFIER, MAX_STRING_LENGTH, MAX_VALUE_DATA_TYPE};
     use crate::router::EndpointHandler;
     use crate::{message_meta, BoardConfig, DataType, Router, TelemetryError};
     use alloc::{sync::Arc, vec, vec::Vec};
@@ -452,7 +452,8 @@ mod handler_failure_tests {
 
         // Verify exact payload text produced by handle_callback_error(Some(dest), e)
         let expected = format!(
-            "Type: TELEMETRY_ERROR, Size: 128, Sender: TEST_PLATFORM, Endpoints: [RADIO], Timestamp: 42, Error: Handler for endpoint {:?} failed on device {:?}: {:?}",
+            "Type: TELEMETRY_ERROR, Size: {:?}, Sender: TEST_PLATFORM, Endpoints: [RADIO], Timestamp: 42, Error: Handler for endpoint {:?} failed on device {:?}: {:?}",
+            MAX_STRING_LENGTH,
             failing_ep,
             DEVICE_IDENTIFIER,
             TelemetryError::BadArg
@@ -510,7 +511,8 @@ mod handler_failure_tests {
 
         // Exact text from handle_callback_error(None, e)
         let expected = format!(
-            "Type: TELEMETRY_ERROR, Size: 128, Sender: TEST_PLATFORM, Endpoints: [SD_CARD], Timestamp: 31415, Error: TX Handler failed on device {:?}: {:?}",
+            "Type: TELEMETRY_ERROR, Size: {:?}, Sender: TEST_PLATFORM, Endpoints: [SD_CARD], Timestamp: 31415, Error: TX Handler failed on device {:?}: {:?}",
+            MAX_STRING_LENGTH,
             DEVICE_IDENTIFIER,
             TelemetryError::Io("boom")
         );

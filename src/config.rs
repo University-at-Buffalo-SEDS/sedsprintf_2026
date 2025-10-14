@@ -111,8 +111,8 @@ pub const MESSAGE_ELEMENTS: [usize; DataType::COUNT] = [
     1, // elements in the IMU Hex data (raw hex string)
 ];
 /// Fixed maximum length for the TelemetryError message (bytes, UTF-8).
-pub const MAX_STRING_LENGTH: usize = 128;
-pub const MAX_HEX_LENGTH: usize = 128;
+pub const MAX_STRING_LENGTH: usize = 1024;
+pub const MAX_HEX_LENGTH: usize = 1024;
 
 /// All message types with their metadata.
 pub const MESSAGE_TYPES: [MessageMeta; DataType::COUNT] = [
