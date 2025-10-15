@@ -15,6 +15,7 @@ pub enum DataEndpoint {
 pub const MAX_VALUE_DATA_ENDPOINT: u32 = DataEndpoint::Radio as u32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[allow(dead_code)]
 pub enum MessageDataType {
     Float32,
     UInt8,
@@ -24,6 +25,7 @@ pub enum MessageDataType {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[allow(dead_code)]
 pub enum MessageType {
     Info,
     Error,
@@ -48,13 +50,12 @@ pub enum DataType {
     BatteryStatus = 3,
     SystemStatus = 4,
     BarometerData = 5,
-    ImuHexData = 6,
 }
 
 pub const MAX_VALUE_DATA_TYPE: u32 = DataType::BarometerData as u32;
 
 impl DataType {
-    pub const COUNT: usize = 7;
+    pub const COUNT: usize = 6;
 
     #[inline]
     pub fn as_str(self) -> &'static str {
@@ -65,7 +66,6 @@ impl DataType {
             DataType::BatteryStatus => "BATTERY_STATUS",
             DataType::SystemStatus => "SYSTEM_STATUS",
             DataType::BarometerData => "BAROMETER_DATA",
-            DataType::ImuHexData => "IMU_HEX_DATA",
         }
     }
 }
@@ -77,12 +77,10 @@ pub const MESSAGE_DATA_TYPES: [MessageDataType; DataType::COUNT] = [
     MessageDataType::Float32,
     MessageDataType::UInt8,
     MessageDataType::UInt32,
-    MessageDataType::Hex,
 ];
 
 pub const MESSAGE_INFO_TYPES: [MessageType; DataType::COUNT] = [
     MessageType::Error,
-    MessageType::Info,
     MessageType::Info,
     MessageType::Info,
     MessageType::Info,
@@ -108,7 +106,6 @@ pub const MESSAGE_ELEMENTS: [usize; DataType::COUNT] = [
     4, // elements in the Battery Status data
     2, // elements in the System Status data (cpu load, memory usage)
     3, // elements in the Barometer data (pressure, temperature, altitude)
-    1, // elements in the IMU Hex data (raw hex string)
 ];
 /// Fixed maximum length for the TelemetryError message (bytes, UTF-8).
 pub const MAX_STRING_LENGTH: usize = 1024;
@@ -144,11 +141,6 @@ pub const MESSAGE_TYPES: [MessageMeta; DataType::COUNT] = [
     MessageMeta {
         ty: DataType::BarometerData,
         data_size: get_needed_message_size(DataType::BarometerData),
-        endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
-    },
-    MessageMeta {
-        ty: DataType::ImuHexData,
-        data_size: get_needed_message_size(DataType::ImuHexData),
         endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
     },
 ];
