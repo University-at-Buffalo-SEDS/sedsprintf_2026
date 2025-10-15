@@ -12,6 +12,13 @@ extern "C" {
 #endif
 
 // ==============================
+// Note: Besides the macros, everything in this file is designed to match the rust api to allow for easy
+// mapping into c code it does not contain any state or complex logic nor does it contain any live data.
+// Any changes to the rust api needs to be reflected here as well.
+// ==============================
+
+
+// ==============================
 // Public enums / constants
 // ==============================
 
@@ -49,7 +56,6 @@ typedef enum
 /** \brief Opaque Router handle. */
 typedef struct SedsRouter SedsRouter;
 
-/** \brief Lightweight view of a telemetry packet (valid only during a callback). */
 /** \brief Lightweight view of a telemetry packet (valid only during a callback). */
 typedef struct SedsPacketView
 {
