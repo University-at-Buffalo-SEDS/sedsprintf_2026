@@ -1,13 +1,10 @@
 cmake_minimum_required(VERSION 3.22)
 project(sedsprintf_rs_cmake NONE)
 
-# --- Where is the Rust crate root? (has Cargo.toml and C-Headers/)
-# If this file lives in sedsprintf_rs/cmake/, the default is one directory up.
 set(SEDSPRINTF_RS_DIR_DEFAULT "${CMAKE_CURRENT_LIST_DIR}/")
 set(SEDSPRINTF_RS_DIR "${SEDSPRINTF_RS_DIR_DEFAULT}" CACHE PATH "Path to sedsprintf_rs crate root")
 get_filename_component(RUST_DIR "${SEDSPRINTF_RS_DIR}" REALPATH)
 
-# --- Target triple (override if needed)
 # --- Decide whether we're building for STM32 (embedded) or host
 option(SEDSPRINTF_STM_BUILD "Build sedsprintf_rs for STM32 (thumbv7em)" OFF)
 set(SEDSPRINTF_STM_BUILD OFF)
@@ -39,7 +36,6 @@ if(RUST_PROFILE STREQUAL "release")
     set(RS_ARGS_STR "${RS_ARGS_STR} release")
 endif()
 
-# (keep your validation + RS_SRC collection as-is)
 if (NOT EXISTS "${RUST_DIR}/Cargo.toml")
     message(FATAL_ERROR "SEDSPRINTF_RS_DIR='${RUST_DIR}' does not contain Cargo.toml. "
             "Pass -DSEDSPRINTF_RS_DIR=/abs/path/to/sedsprintf_rs")
@@ -49,8 +45,7 @@ if (NOT EXISTS "${RS_INCLUDE}")
             "Does your crate expose C headers in C-Headers/?")
 endif ()
 
-
-# --- Track inputs
+# --- Track inputs ---
 file(GLOB_RECURSE RS_SRC CONFIGURE_DEPENDS
         "${RUST_DIR}/src/*.rs"
         "${RUST_DIR}/build.rs"
@@ -60,7 +55,6 @@ file(GLOB_RECURSE RS_SRC CONFIGURE_DEPENDS
 )
 
 # --- Build rule: make the real artifacts be the OUTPUTs
-# (Cargo.toml: [lib] crate-type = ["staticlib"])
 add_custom_command(
         OUTPUT
         "${RS_LIB_DBG}" "${RS_LIB_REL}"
@@ -88,9 +82,6 @@ set_target_properties(sedsprintf_rs PROPERTIES
 )
 add_dependencies(sedsprintf_rs sedsprintf_rs_build)
 # --- Ensure final ELF has non-exec stack even if some objs miss .note.GNU-stack
-# Create a tiny sentinel ASM source at configure time
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/noexecstack.S"
-        "    .section .note.GNU-stack,\"\",%progbits\n")
 
 # Prevent assembler from marking stack executable; force linker header to noexecstack
 include(CheckLinkerFlag)
@@ -98,12 +89,8 @@ include(CheckCCompilerFlag)
 check_linker_flag(C "-Wl,-z,noexecstack" HAVE_LD_NOEXECSTACK)
 check_c_compiler_flag("-Wa,--noexecstack" HAVE_AS_NOEXECSTACK)
 
-if (HAVE_LD_NOEXECSTACK AND HAVE_AS_NOEXECSTACK)
-    # (same INTERFACE target as above)
-endif ()
-
 # --- Make final ELF have non-exec stack where supported (Linux/*BSD)
-if (SEDSPRINTF_STM_BUILD)  # ELF platforms only
+if (SEDSPRINTF_STM_BUILD)
     # These flags are understood by GCC/Clang toolchains on ELF
     target_compile_options(sedsprintf_rs INTERFACE -Wa,--noexecstack)
     target_link_options(sedsprintf_rs INTERFACE -Wl,-z,noexecstack)
