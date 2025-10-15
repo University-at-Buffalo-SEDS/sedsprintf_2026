@@ -6,6 +6,7 @@
 
 #ifdef __cplusplus
 extern "C" {
+
 #endif
 
 // ==============================
@@ -23,32 +24,35 @@ extern "C" {
 typedef enum SedsDataType
 {
     SEDS_DT_TELEMETRY_ERROR = 0,
-    SEDS_DT_GPS             = 1,
-    SEDS_DT_IMU             = 2,
-    SEDS_DT_BATTERY         = 3,
-    SEDS_DT_SYSTEM          = 4,
-    SEDS_DT_BAROMETER       = 5,
-    SEDS_IMU_HEX_DATA       = 6
+    SEDS_DT_GPS = 1,
+    SEDS_DT_IMU = 2,
+    SEDS_DT_BATTERY = 3,
+    SEDS_DT_SYSTEM = 4,
+    SEDS_DT_BAROMETER = 5,
+    SEDS_IMU_HEX_DATA = 6
 } SedsDataType;
 
 /** \brief Telemetry endpoints (keep in sync with Rust DataEndpoint order). */
 typedef enum SedsDataEndpoint
 {
-    SEDS_EP_SD    = 0,
+    SEDS_EP_SD = 0,
     SEDS_EP_RADIO = 1,
 } SedsDataEndpoint;
 
 /** \brief Status codes returned by the C API. */
 typedef enum
 {
-    SEDS_OK            =  0,
-    SEDS_ERR           = -1,
-    SEDS_BAD_ARG       = -2,
-    SEDS_INVALID_TYPE  = -3,
+    SEDS_OK = 0,
+    SEDS_ERR = -1,
+    SEDS_BAD_ARG = -2,
+    SEDS_INVALID_TYPE = -3,
     SEDS_SIZE_MISMATCH = -4,
-    SEDS_DESERIALIZE   = -5,
+    SEDS_DESERIALIZE = -5,
     SEDS_HANDLER_ERROR = -6,
 } SedsResult;
+
+/** Monotonic clock callback: must return milliseconds since an arbitrary epoch. */
+typedef uint64_t (* SedsNowMsFn)(void * user);
 
 /** \brief Opaque Router handle. */
 typedef struct SedsRouter SedsRouter;
@@ -56,18 +60,18 @@ typedef struct SedsRouter SedsRouter;
 /** \brief Lightweight view of a telemetry packet (valid only during a callback). */
 typedef struct SedsPacketView
 {
-    uint32_t ty;             /**< DataType as u32 */
-    size_t   data_size;      /**< Payload size in bytes */
+    uint32_t ty; /**< DataType as u32 */
+    size_t data_size; /**< Payload size in bytes */
 
     /* Rust `&str` is (ptr,len). Not NUL-terminated. Lifetime = callback. */
-    const char * sender;     /**< UTF-8 bytes; may not be NUL-terminated */
-    size_t       sender_len; /**< Number of bytes at `sender` */
+    const char * sender; /**< UTF-8 bytes; may not be NUL-terminated */
+    size_t sender_len; /**< Number of bytes at `sender` */
 
     const uint32_t * endpoints; /**< Array of DataEndpoint (as u32) */
-    size_t           num_endpoints;
-    uint64_t         timestamp;  /**< Timestamp units as defined by your system */
-    const uint8_t  * payload;    /**< Raw payload bytes */
-    size_t           payload_len;/**< == data_size */
+    size_t num_endpoints;
+    uint64_t timestamp; /**< Timestamp units as defined by your system */
+    const uint8_t * payload; /**< Raw payload bytes */
+    size_t payload_len; /**< == data_size */
 } SedsPacketView;
 
 /** \brief Transmit callback: return 0 on success, non-zero on failure. */
@@ -79,9 +83,9 @@ typedef SedsResult (* SedsEndpointHandlerFn)(const SedsPacketView * pkt, void * 
 /** \brief Endpoint handler descriptor (used when constructing a router). */
 typedef struct SedsLocalEndpointDesc
 {
-    uint32_t              endpoint; /**< DataEndpoint as u32 */
-    SedsEndpointHandlerFn handler;  /**< Callback function */
-    void                * user;     /**< Opaque user context passed to callback */
+    uint32_t endpoint; /**< DataEndpoint as u32 */
+    SedsEndpointHandlerFn handler; /**< Callback function */
+    void * user; /**< Opaque user context passed to callback */
 } SedsLocalEndpointDesc;
 
 /**
@@ -89,14 +93,14 @@ typedef struct SedsLocalEndpointDesc
  * \param pkt Pointer to a valid SedsPacketView.
  * \return Required number of bytes (>=1) or negative on error.
  */
-SedsResult seds_pkt_header_string_len(const SedsPacketView * pkt);
+int32_t seds_pkt_header_string_len(const SedsPacketView * pkt);
 
 /**
  * \brief Get required buffer length for seds_pkt_to_string() (includes NUL).
  * \param pkt Pointer to a valid SedsPacketView.
  * \return Required number of bytes (>=1) or negative on error.
  */
-SedsResult seds_pkt_to_string_len(const SedsPacketView * pkt);
+int32_t seds_pkt_to_string_len(const SedsPacketView * pkt);
 
 // ==============================
 // Packet -> string formatting
@@ -111,7 +115,7 @@ SedsResult seds_pkt_to_string_len(const SedsPacketView * pkt);
  *
  * \return Required length including NUL (>=1), or a negative error code.
  */
-SedsResult seds_pkt_header_string(const SedsPacketView * pkt, char * buf, size_t buf_len);
+int32_t seds_pkt_header_string(const SedsPacketView * pkt, char * buf, size_t buf_len);
 
 /**
  * \brief Write the full packet (header + formatted payload) as text.
@@ -120,7 +124,7 @@ SedsResult seds_pkt_header_string(const SedsPacketView * pkt, char * buf, size_t
  *
  * \return Required length including NUL (>=1), or a negative error code.
  */
-SedsResult seds_pkt_to_string(const SedsPacketView * pkt, char * buf, size_t buf_len);
+int32_t seds_pkt_to_string(const SedsPacketView * pkt, char * buf, size_t buf_len);
 
 
 // ==============================
@@ -132,12 +136,14 @@ SedsResult seds_pkt_to_string(const SedsPacketView * pkt, char * buf, size_t buf
  *
  * \param tx         Optional transmit function (NULL if no remote transmit).
  * \param tx_user    Opaque user pointer for \p tx.
+ * \param now_ms_cb
  * \param handlers   Array of handler descriptors (may be NULL if n_handlers==0).
  * \param n_handlers Number of entries in \p handlers.
  * \return           New router instance, or NULL on failure.
  */
 SedsRouter * seds_router_new(SedsTransmitFn tx,
                              void * tx_user,
+                             SedsNowMsFn now_ms_cb,
                              const SedsLocalEndpointDesc * handlers,
                              size_t n_handlers);
 
@@ -157,8 +163,8 @@ void seds_router_free(SedsRouter * r);
 typedef enum SedsElemKind
 {
     SEDS_EK_UNSIGNED = 0, /**< u8/u16/u32/u64/... */
-    SEDS_EK_SIGNED   = 1, /**< i8/i16/i32/i64/... */
-    SEDS_EK_FLOAT    = 2  /**< f32/f64 */
+    SEDS_EK_SIGNED = 1, /**< i8/i16/i32/i64/... */
+    SEDS_EK_FLOAT = 2 /**< f32/f64 */
 } SedsElemKind;
 
 /**
@@ -236,28 +242,18 @@ SedsResult seds_router_rx_packet_to_queue(SedsRouter * r,
 // ==============================
 // Monotonic clock + timeout processing
 // ==============================
-
-/** Monotonic clock callback: must return milliseconds since an arbitrary epoch. */
-typedef uint64_t (* SedsNowMsFn)(void * user);
-
 SedsResult seds_router_process_tx_queue_with_timeout(
     SedsRouter * r,
-    SedsNowMsFn now_ms_cb,
-    void * user,
     uint32_t timeout_ms
 );
 
 SedsResult seds_router_process_rx_queue_with_timeout(
     SedsRouter * r,
-    SedsNowMsFn now_ms_cb,
-    void * user,
     uint32_t timeout_ms
 );
 
 SedsResult seds_router_process_all_queues_with_timeout(
     SedsRouter * r,
-    SedsNowMsFn now_ms_cb,
-    void * user,
     uint32_t timeout_ms
 );
 
@@ -267,8 +263,11 @@ SedsResult seds_router_process_all_queues_with_timeout(
 // ==============================
 
 SedsResult seds_router_process_all_queues(SedsRouter * r);
+
 SedsResult seds_router_clear_queues(SedsRouter * r);
+
 SedsResult seds_router_clear_rx_queue(SedsRouter * r);
+
 SedsResult seds_router_clear_tx_queue(SedsRouter * r);
 
 // ==============================
@@ -293,21 +292,74 @@ SedsResult seds_pkt_get_typed(const SedsPacketView * pkt,
 // ============================================================================
 #if defined(__cplusplus)
 
-namespace seds_detail {
-    template <typename T> struct elem_traits;
+namespace seds_detail
+{
+    template < typename
+    T >
+    struct elem_traits;
 
-    template<> struct elem_traits<uint8_t>  { static constexpr SedsElemKind kind = SEDS_EK_UNSIGNED; static constexpr size_t size = 1; };
-    template<> struct elem_traits<uint16_t> { static constexpr SedsElemKind kind = SEDS_EK_UNSIGNED; static constexpr size_t size = 2; };
-    template<> struct elem_traits<uint32_t> { static constexpr SedsElemKind kind = SEDS_EK_UNSIGNED; static constexpr size_t size = 4; };
-    template<> struct elem_traits<uint64_t> { static constexpr SedsElemKind kind = SEDS_EK_UNSIGNED; static constexpr size_t size = 8; };
+    template<>
+    struct elem_traits<uint8_t>
+    {
+        static constexpr SedsElemKind kind = SEDS_EK_UNSIGNED;
+        static constexpr size_t size = 1;
+    };
+    template<>
+    struct elem_traits<uint16_t>
+    {
+        static constexpr SedsElemKind kind = SEDS_EK_UNSIGNED;
+        static constexpr size_t size = 2;
+    };
+    template<>
+    struct elem_traits<uint32_t>
+    {
+        static constexpr SedsElemKind kind = SEDS_EK_UNSIGNED;
+        static constexpr size_t size = 4;
+    };
+    template<>
+    struct elem_traits<uint64_t>
+    {
+        static constexpr SedsElemKind kind = SEDS_EK_UNSIGNED;
+        static constexpr size_t size = 8;
+    };
 
-    template<> struct elem_traits<int8_t>   { static constexpr SedsElemKind kind = SEDS_EK_SIGNED;   static constexpr size_t size = 1; };
-    template<> struct elem_traits<int16_t>  { static constexpr SedsElemKind kind = SEDS_EK_SIGNED;   static constexpr size_t size = 2; };
-    template<> struct elem_traits<int32_t>  { static constexpr SedsElemKind kind = SEDS_EK_SIGNED;   static constexpr size_t size = 4; };
-    template<> struct elem_traits<int64_t>  { static constexpr SedsElemKind kind = SEDS_EK_SIGNED;   static constexpr size_t size = 8; };
+    template<>
+    struct elem_traits<int8_t>
+    {
+        static constexpr SedsElemKind kind = SEDS_EK_SIGNED;
+        static constexpr size_t size = 1;
+    };
+    template<>
+    struct elem_traits<int16_t>
+    {
+        static constexpr SedsElemKind kind = SEDS_EK_SIGNED;
+        static constexpr size_t size = 2;
+    };
+    template<>
+    struct elem_traits<int32_t>
+    {
+        static constexpr SedsElemKind kind = SEDS_EK_SIGNED;
+        static constexpr size_t size = 4;
+    };
+    template<>
+    struct elem_traits<int64_t>
+    {
+        static constexpr SedsElemKind kind = SEDS_EK_SIGNED;
+        static constexpr size_t size = 8;
+    };
 
-    template<> struct elem_traits<float>    { static constexpr SedsElemKind kind = SEDS_EK_FLOAT;    static constexpr size_t size = 4; };
-    template<> struct elem_traits<double>   { static constexpr SedsElemKind kind = SEDS_EK_FLOAT;    static constexpr size_t size = 8; };
+    template<>
+    struct elem_traits<float>
+    {
+        static constexpr SedsElemKind kind = SEDS_EK_FLOAT;
+        static constexpr size_t size = 4;
+    };
+    template<>
+    struct elem_traits<double>
+    {
+        static constexpr SedsElemKind kind = SEDS_EK_FLOAT;
+        static constexpr size_t size = 8;
+    };
 }
 
 /**

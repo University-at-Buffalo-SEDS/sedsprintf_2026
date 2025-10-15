@@ -112,7 +112,10 @@ pub enum TelemetryError {
     Io(&'static str),
 }
 
-pub type Result<T> = core::result::Result<T, TelemetryError>;
+pub type TelemetryResult<T> = Result<T, TelemetryError>;
+
+pub type Result<T, E> = core::result::Result<T, E>;
+
 
 // -------------------- TelemetryPacket impl --------------------
 impl TelemetryPacket {
@@ -123,7 +126,7 @@ impl TelemetryPacket {
         sender: &'static str,
         timestamp: u64,
         payload: Arc<[u8]>,
-    ) -> Result<Self> {
+    ) -> TelemetryResult<Self> {
         let meta = message_meta(ty);
         if endpoints.is_empty() {
             return Err(TelemetryError::EmptyEndpoints);
@@ -150,7 +153,7 @@ impl TelemetryPacket {
         bytes: &[u8],
         endpoints: &[DataEndpoint],
         timestamp: u64,
-    ) -> Result<Self> {
+    ) -> TelemetryResult<Self> {
         let meta = message_meta(ty);
         if bytes.len() != meta.data_size {
             return Err(TelemetryError::SizeMismatch {
@@ -173,7 +176,7 @@ impl TelemetryPacket {
         values: &[f32],
         endpoints: &[DataEndpoint],
         timestamp: u64,
-    ) -> Result<Self> {
+    ) -> TelemetryResult<Self> {
         let meta = message_meta(ty);
         let need = values.len() * 4;
         if need != meta.data_size {
@@ -196,7 +199,7 @@ impl TelemetryPacket {
     }
 
     /// Validate internal invariants (size, endpoints, etc.).
-    pub fn validate(&self) -> Result<()> {
+    pub fn validate(&self) -> TelemetryResult<()> {
         let meta = message_meta(self.ty);
         if self.data_size != meta.data_size {
             return Err(TelemetryError::SizeMismatch {

@@ -1,7 +1,7 @@
 // src/router.rs
 use crate::{
     config::{message_meta, DataEndpoint, DataType},
-    serialize, Result, TelemetryError, TelemetryPacket,
+    serialize, TelemetryError, TelemetryPacket, TelemetryResult,
 };
 
 use crate::config::DEVICE_IDENTIFIER;
@@ -20,7 +20,7 @@ const MAX_NUMBER_OF_RETRYS: usize = 3;
 /// A local handler bound to a specific endpoint.
 pub struct EndpointHandler {
     pub endpoint: DataEndpoint,
-    pub handler: Box<dyn Fn(&TelemetryPacket) -> Result<()> + Send + Sync + 'static>,
+    pub handler: Box<dyn Fn(&TelemetryPacket) -> TelemetryResult<()> + Send + Sync + 'static>,
 }
 
 pub trait Clock {
@@ -118,22 +118,24 @@ fn fallback_stdout(msg: &str) {
 
 /// A small router that can serialize+transmit and/or locally dispatch packets.
 pub struct Router {
-    transmit: Option<Box<dyn Fn(&[u8]) -> Result<()> + Send + Sync + 'static>>,
+    transmit: Option<Box<dyn Fn(&[u8]) -> TelemetryResult<()> + Send + Sync + 'static>>,
     cfg: BoardConfig,
     received_queue: Vec<RxQueueItem>,
     transmit_queue: Vec<TelemetryPacket>,
+    clock: Box<dyn Clock + Send + Sync>,
 }
 
 impl Router {
-    pub fn new<Tx>(transmit: Option<Tx>, cfg: BoardConfig) -> Self
+    pub fn new<Tx>(transmit: Option<Tx>, cfg: BoardConfig, clock: Box<dyn Clock + Send + Sync>) -> Self
     where
-        Tx: Fn(&[u8]) -> Result<()> + Send + Sync + 'static,
+        Tx: Fn(&[u8]) -> TelemetryResult<()> + Send + Sync + 'static,
     {
         Self {
             transmit: transmit.map(|t| Box::new(t) as _),
             cfg,
             received_queue: Vec::new(),
             transmit_queue: Vec::new(),
+            clock
         }
     }
 
@@ -142,7 +144,7 @@ impl Router {
         pkt: &TelemetryPacket,
         dest: Option<DataEndpoint>, // None => TX failed; Some(ep) => local handler 'ep' failed
         e: TelemetryError,
-    ) -> Result<()> {
+    ) -> TelemetryResult<()> {
         // Compose message once
         let error_msg = match dest {
             Some(failed_local) => alloc::format!(
@@ -203,7 +205,7 @@ impl Router {
             DataType::TelemetryError,
             &locals,
             DEVICE_IDENTIFIER,
-            pkt.timestamp,
+            self.clock.now_ms(),
             alloc::sync::Arc::<[u8]>::from(buf),
         )?;
 
@@ -211,14 +213,14 @@ impl Router {
         self.send(&error_pkt)
     }
 
-    pub fn process_send_queue(&mut self) -> Result<()> {
+    pub fn process_send_queue(&mut self) -> TelemetryResult<()> {
         while let Some(pkt) = self.transmit_queue.pop() {
             self.send(&pkt)?;
         }
         Ok(())
     }
 
-    pub fn process_all_queues(&mut self) -> Result<()> {
+    pub fn process_all_queues(&mut self) -> TelemetryResult<()> {
         self.process_send_queue()?;
         self.process_received_queue()?;
         Ok(())
@@ -237,54 +239,51 @@ impl Router {
         self.transmit_queue.clear();
     }
 
-    pub fn process_tx_queue_with_timeout<C: Clock>(
+    pub fn process_tx_queue_with_timeout(
         &mut self,
-        clock: &C,
         timeout_ms: u32,
-    ) -> Result<()> {
-        let start = clock.now_ms();
+    ) -> TelemetryResult<()> {
+        let start = self.clock.now_ms();
         // Prefer pop_front if this is a queue; avoid unwrap() in no_std.
         while let Some(pkt) = self.transmit_queue.pop() {
             self.send(&pkt)?;
             // wrapping_sub handles u64 rollover gracefully
-            if clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
+            if self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
                 break;
             }
         }
         Ok(())
     }
 
-    fn handle_rx_queue_item(&mut self, item: RxQueueItem) -> Result<()> {
+    fn handle_rx_queue_item(&mut self, item: RxQueueItem) -> TelemetryResult<()> {
         match item {
             RxQueueItem::Packet(pkt) => self.receive(&pkt),
             RxQueueItem::Serialized(bytes) => self.receive_serialized(&bytes),
         }
     }
 
-    pub fn process_rx_queue_with_timeout<C: Clock>(
+    pub fn process_rx_queue_with_timeout(
         &mut self,
-        clock: &C,
         timeout_ms: u32,
-    ) -> Result<()> {
-        let start = clock.now_ms();
+    ) -> TelemetryResult<()> {
+        let start = self.clock.now_ms();
         // Prefer pop_front if this is a queue; avoid unwrap() in no_std.
         while let Some(pkt) = self.received_queue.pop() {
             self.handle_rx_queue_item(pkt)?;
             // wrapping_sub handles u64 rollover gracefully
-            if clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
+            if self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
                 break;
             }
         }
         Ok(())
     }
 
-    pub fn process_all_queues_with_timeout<C: Clock>(
+    pub fn process_all_queues_with_timeout(
         &mut self,
-        clock: &C,
         timeout_ms: u32,
-    ) -> Result<()> {
+    ) -> TelemetryResult<()> {
         let drain_fully = timeout_ms == 0;
-        let start = if drain_fully { 0 } else { clock.now_ms() };
+        let start = if drain_fully { 0 } else { self.clock.now_ms() };
 
         loop {
             let mut did_any = false;
@@ -307,7 +306,7 @@ impl Router {
             }
 
             // If we're on a timed run, stop once we've hit the budget.
-            if !drain_fully && clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
+            if !drain_fully && self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
                 break;
             }
         }
@@ -315,33 +314,33 @@ impl Router {
         Ok(())
     }
 
-    pub fn queue_tx_message(&mut self, pkt: TelemetryPacket) -> Result<()> {
+    pub fn queue_tx_message(&mut self, pkt: TelemetryPacket) -> TelemetryResult<()> {
         pkt.validate()?;
         self.transmit_queue.push(pkt);
         Ok(())
     }
 
-    pub fn process_received_queue(&mut self) -> Result<()> {
+    pub fn process_received_queue(&mut self) -> TelemetryResult<()> {
         while let Some(pkt) = self.received_queue.pop() {
             self.handle_rx_queue_item(pkt)?;
         }
         Ok(())
     }
 
-    pub fn rx_serialized_packet_to_queue(&mut self, bytes: &[u8]) -> Result<()> {
+    pub fn rx_serialized_packet_to_queue(&mut self, bytes: &[u8]) -> TelemetryResult<()> {
         self.received_queue
             .push(RxQueueItem::Serialized(bytes.to_vec()));
         Ok(())
     }
 
-    pub fn rx_packet_to_queue(&mut self, pkt: TelemetryPacket) -> Result<()> {
+    pub fn rx_packet_to_queue(&mut self, pkt: TelemetryPacket) -> TelemetryResult<()> {
         pkt.validate()?;
         self.received_queue.push(RxQueueItem::Packet(pkt));
         Ok(())
     }
 
     /// Log (send) a packet: serialize once, transmit (if any remote endpoint), then deliver to matching locals.
-    pub fn send(&self, pkt: &TelemetryPacket) -> Result<()> {
+    pub fn send(&self, pkt: &TelemetryPacket) -> TelemetryResult<()> {
         pkt.validate()?;
 
         let send_remote = pkt
@@ -394,13 +393,13 @@ impl Router {
     }
 
     /// Accept a serialized buffer (from wire) and locally dispatch to matching endpoints.
-    pub fn receive_serialized(&self, bytes: &[u8]) -> Result<()> {
+    pub fn receive_serialized(&self, bytes: &[u8]) -> TelemetryResult<()> {
         let pkt = serialize::deserialize_packet(bytes)?;
         pkt.validate()?;
         self.receive(&pkt)
     }
 
-    pub fn receive(&self, pkt: &TelemetryPacket) -> Result<()> {
+    pub fn receive(&self, pkt: &TelemetryPacket) -> TelemetryResult<()> {
         pkt.validate()?;
         for &dest in pkt.endpoints.iter() {
             for h in &self.cfg.handlers {
@@ -427,7 +426,7 @@ impl Router {
     ///
     /// Works with **any** type `T` that implements `LeBytes` (primitives already do).
     /// For your own structs, implement `LeBytes` (e.g., `#[repr(C)]` + manual field encoding).
-    pub fn log<T: LeBytes>(&self, ty: DataType, data: &[T], timestamp: u64) -> Result<()> {
+    pub fn log<T: LeBytes>(&self, ty: DataType, data: &[T], timestamp: u64) -> TelemetryResult<()> {
         let meta = message_meta(ty);
 
         // Validate total byte size against schema.
@@ -458,7 +457,7 @@ impl Router {
         ty: DataType,
         data: &[T],
         timestamp: u64,
-    ) -> Result<()> {
+    ) -> TelemetryResult<()> {
         let meta = message_meta(ty);
 
         // Validate total byte size against schema.
@@ -486,11 +485,11 @@ impl Router {
 
     // optional convenience shorthands
     #[inline]
-    pub fn log_bytes(&self, ty: DataType, bytes: &[u8], ts: u64) -> Result<()> {
+    pub fn log_bytes(&self, ty: DataType, bytes: &[u8], ts: u64) -> TelemetryResult<()> {
         self.log::<u8>(ty, bytes, ts)
     }
     #[inline]
-    pub fn log_f32(&self, ty: DataType, vals: &[f32], ts: u64) -> Result<()> {
+    pub fn log_f32(&self, ty: DataType, vals: &[f32], ts: u64) -> TelemetryResult<()> {
         self.log::<f32>(ty, vals, ts)
     }
 }

@@ -21,7 +21,7 @@ void bus_free(SimBus *bus) {
 size_t bus_register(SimBus *bus, SimNode *n) {
     if (bus->count == bus->cap) {
         size_t newcap = bus->cap ? bus->cap * 2 : 4;
-        SimNode **tmp = (SimNode**)realloc(bus->nodes, newcap * sizeof(*tmp));
+        SimNode **tmp = realloc(bus->nodes, newcap * sizeof(*tmp));
         if (!tmp) {
             fprintf(stderr, "bus_register: OOM\n");
             return (size_t)-1;
@@ -118,6 +118,7 @@ SedsResult node_init(SimNode *n, SimBus *bus, const char *name, int radio, int s
     n->r = seds_router_new(
         node_tx_send,
         n,                  // tx_user
+        host_now_ms,
         (num ? locals : NULL),
         num
     );

@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 
+
 fn get_handler(rx_count_c: Arc<AtomicUsize>) -> EndpointHandler {
     EndpointHandler {
         endpoint: DataEndpoint::SdCard,
@@ -55,10 +56,11 @@ mod tests {
     use crate::tests::get_sd_card_handler;
     use crate::{
         config::{DataEndpoint, DataType, MESSAGE_ELEMENTS},
-        serialize, Result, Router, TelemetryPacket,
+        serialize, TelemetryResult, Router, TelemetryPacket,
     };
     use std::sync::{Arc, Mutex};
     use std::vec::Vec;
+    use crate::tests::timeout_tests::StepClock;
 
 
     #[test]
@@ -129,7 +131,7 @@ mod tests {
 
         // transmitter: record the deserialized packet we "sent"
         let tx_seen_c = tx_seen.clone();
-        let transmit = move |bytes: &[u8]| -> Result<()> {
+        let transmit = move |bytes: &[u8]| -> TelemetryResult<()> {
             let pkt = serialize::deserialize_packet(bytes)?;
             *tx_seen_c.lock().unwrap() = Some(pkt);
             Ok(())
@@ -138,8 +140,9 @@ mod tests {
         // local SD handler: decode payload to f32s and record (ty, values)
         let sd_seen_c = sd_seen_decoded.clone();
         let sd_handler = get_sd_card_handler(sd_seen_c);
+        let box_clock = StepClock::new_default_box();
 
-        let router = Router::new(Some(transmit), BoardConfig::new(vec![sd_handler]));
+        let router = Router::new(Some(transmit), BoardConfig::new(vec![sd_handler]), box_clock);
 
         // send GPS_DATA (3 * f32) using Router::log (uses default endpoints from schema)
         let data = [1.0_f32, 2.0, 3.0];
@@ -176,10 +179,10 @@ mod tests {
         frames: Arc<Mutex<Vec<Vec<u8>>>>,
     }
     impl TestBus {
-        fn new() -> (Self, impl Fn(&[u8]) -> Result<()> + Send + Sync + 'static) {
+        fn new() -> (Self, impl Fn(&[u8]) -> TelemetryResult<()> + Send + Sync + 'static) {
             let frames = Arc::new(Mutex::new(Vec::<Vec<u8>>::new()));
             let tx_frames = frames.clone();
-            let tx = move |bytes: &[u8]| -> Result<()> {
+            let tx = move |bytes: &[u8]| -> TelemetryResult<()> {
                 // capture the exact wire bytes
                 tx_frames.lock().unwrap().push(bytes.to_vec());
                 Ok(())
@@ -192,18 +195,22 @@ mod tests {
     fn queued_roundtrip_between_two_routers() {
         // --- Set up a TX router that only sends (no local endpoints) ---
         let (bus, tx_fn) = TestBus::new();
-        let mut tx_router = Router::new(Some(tx_fn), Default::default());
+        let box_clock_tx = StepClock::new_default_box();
+        let box_clock_rx = StepClock::new_default_box();
+
+        let mut tx_router = Router::new(Some(tx_fn), Default::default(), box_clock_tx);
 
         // --- Set up an RX router with a local SD handler that decodes f32 payloads ---
         let seen: Arc<Mutex<Option<(DataType, Vec<f32>)>>> = Arc::new(Mutex::new(None));
         let seen_c = seen.clone();
         let sd_handler = get_sd_card_handler(seen_c);
-        fn tx_handler(_bytes: &[u8]) -> Result<()> {
+        fn tx_handler(_bytes: &[u8]) -> TelemetryResult<()> {
             // RX router does not transmit in this test
             Ok(())
         }
+
         let mut rx_router =
-            Router::new(Some(tx_handler), crate::BoardConfig::new(vec![sd_handler]));
+            Router::new(Some(tx_handler), crate::BoardConfig::new(vec![sd_handler]), box_clock_rx);
 
         // --- 1) Sender enqueues a packet for TX ---
         let data = [1.0_f32, 2.0, 3.0];
@@ -233,7 +240,9 @@ mod tests {
         // If you expect a node to handle its *own* packets, you must explicitly
         // feed them back into its received queue (mirroring “broadcast to self”).
         let (bus, tx_fn) = TestBus::new();
-        let mut router = Router::new(Some(tx_fn), Default::default());
+        let box_clock = StepClock::new_default_box();
+
+        let mut router = Router::new(Some(tx_fn), Default::default(), box_clock);
 
         // Enqueue for transmit
         let data = [10.0_f32, 10.25, 10.5];
@@ -427,10 +436,12 @@ mod handler_failure_tests {
                 Ok(())
             }),
         };
+        let box_clock = StepClock::new_default_box();
 
-        let router = Router::new::<fn(&[u8]) -> crate::Result<()>>(
+        let router = Router::new::<fn(&[u8]) -> crate::TelemetryResult<()>>(
             None,
             BoardConfig::new(vec![failing, capturing]),
+            box_clock,
         );
 
         let pkt = TelemetryPacket::new(
@@ -452,7 +463,7 @@ mod handler_failure_tests {
 
         // Verify exact payload text produced by handle_callback_error(Some(dest), e)
         let expected = format!(
-            "Type: TELEMETRY_ERROR, Size: {:?}, Sender: TEST_PLATFORM, Endpoints: [RADIO], Timestamp: 42, Error: Handler for endpoint {:?} failed on device {:?}: {:?}",
+            "Type: TELEMETRY_ERROR, Size: {:?}, Sender: TEST_PLATFORM, Endpoints: [RADIO], Timestamp: 0, Error: Handler for endpoint {:?} failed on device {:?}: {:?}",
             MAX_STRING_LENGTH,
             failing_ep,
             DEVICE_IDENTIFIER,
@@ -488,9 +499,10 @@ mod handler_failure_tests {
         };
 
         // Explicitly annotate to your alias so type inference is trivial
-        let tx_fail = |_bytes: &[u8]| -> crate::Result<()> { Err(TelemetryError::Io("boom")) };
+        let tx_fail = |_bytes: &[u8]| -> crate::TelemetryResult<()> { Err(TelemetryError::Io("boom")) };
+        let box_clock = StepClock::new_default_box();
 
-        let router = Router::new(Some(tx_fail), BoardConfig::new(vec![capturing]));
+        let router = Router::new(Some(tx_fail), BoardConfig::new(vec![capturing]), box_clock);
 
         let pkt = TelemetryPacket::new(
             ty,
@@ -511,7 +523,7 @@ mod handler_failure_tests {
 
         // Exact text from handle_callback_error(None, e)
         let expected = format!(
-            "Type: TELEMETRY_ERROR, Size: {:?}, Sender: TEST_PLATFORM, Endpoints: [SD_CARD], Timestamp: 31415, Error: TX Handler failed on device {:?}: {:?}",
+            "Type: TELEMETRY_ERROR, Size: {:?}, Sender: TEST_PLATFORM, Endpoints: [SD_CARD], Timestamp: 0, Error: TX Handler failed on device {:?}: {:?}",
             MAX_STRING_LENGTH,
             DEVICE_IDENTIFIER,
             TelemetryError::Io("boom")
@@ -523,6 +535,7 @@ mod handler_failure_tests {
 
     use std::path::PathBuf;
     use std::process::Command;
+    use crate::tests::timeout_tests::StepClock;
 
 
     #[test]
@@ -576,18 +589,25 @@ mod handler_failure_tests {
 mod timeout_tests {
     use crate::config::DataEndpoint;
     use crate::tests::get_handler;
-    use crate::{router::Clock, BoardConfig, DataType, Result, Router, TelemetryPacket};
+    use crate::{router::Clock, BoardConfig, DataType, TelemetryResult, Router, TelemetryPacket};
     use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     use std::sync::Arc;
 
 
     // ---------------- Mock clock ----------------
-    struct StepClock {
+    pub(crate) struct StepClock {
         t: AtomicU64,
         step: u64,
     }
     impl StepClock {
-        fn new(start: u64, step: u64) -> Self {
+
+        pub fn new_box(start: u64, step: u64) -> Box<dyn Clock + Send + Sync> {
+            Box::new(StepClock::new(start, step))
+        }
+        pub fn new_default_box() -> Box<dyn Clock + Send + Sync> {
+            Box::new(StepClock::new(0, 0))
+        }
+        pub fn new(start: u64, step: u64) -> Self {
             Self {
                 t: AtomicU64::new(start),
                 step,
@@ -601,6 +621,9 @@ mod timeout_tests {
             self.t.fetch_add(self.step, Ordering::Relaxed)
         }
     }
+
+
+
 
     // ---------------- Helpers ----------------
     // RX packet with *only local* endpoint to avoid auto-forward TX during receive.
@@ -617,7 +640,7 @@ mod timeout_tests {
     // Counter for TX frames on the “bus”
     fn tx_counter(
         counter: Arc<AtomicUsize>,
-    ) -> impl Fn(&[u8]) -> Result<()> + Send + Sync + 'static {
+    ) -> impl Fn(&[u8]) -> TelemetryResult<()> + Send + Sync + 'static {
         move |bytes: &[u8]| {
             assert!(!bytes.is_empty());
             counter.fetch_add(1, Ordering::SeqCst);
@@ -642,7 +665,9 @@ mod timeout_tests {
             }),
         };
 
-        let mut r = Router::new(Some(tx), BoardConfig::new(vec![handler]));
+        let box_clock = StepClock::new_default_box();
+
+        let mut r = Router::new(Some(tx), BoardConfig::new(vec![handler]), box_clock);
 
         // Enqueue TX (3)
         for _ in 0..3 {
@@ -656,8 +681,7 @@ mod timeout_tests {
         }
 
         // timeout = 0 → drain fully
-        let clock = StepClock::new(0, 0);
-        r.process_all_queues_with_timeout(&clock, 0).unwrap();
+        r.process_all_queues_with_timeout(0).unwrap();
 
         // TX: all three frames should be sent
         assert_eq!(
@@ -683,8 +707,9 @@ mod timeout_tests {
         let rx_count = Arc::new(AtomicUsize::new(0));
         let rx_count_c = rx_count.clone();
         let handler = get_handler(rx_count_c);
+        let clock = StepClock::new_box(0, 10);
 
-        let mut r = Router::new(Some(tx), BoardConfig::new(vec![handler]));
+        let mut r = Router::new(Some(tx), BoardConfig::new(vec![handler]), clock);
 
         // Seed work in both queues
         for _ in 0..5 {
@@ -704,8 +729,7 @@ mod timeout_tests {
         }
 
         // Step is 10ms per call; timeout 5ms guarantees exactly one iteration
-        let clock = StepClock::new(0, 10);
-        r.process_all_queues_with_timeout(&clock, 5).unwrap();
+        r.process_all_queues_with_timeout(5).unwrap();
 
         // One iteration → at most one TX send
         assert_eq!(
@@ -722,7 +746,7 @@ mod timeout_tests {
         );
 
         // Drain the rest to prove there was more work left
-        r.process_all_queues_with_timeout(&clock, 0).unwrap();
+        r.process_all_queues_with_timeout(0).unwrap();
         assert_eq!(tx_count.load(Ordering::SeqCst), 5);
         assert_eq!(rx_count.load(Ordering::SeqCst), 10); // 5 (TX locals) + 5 (RX)
     }
@@ -736,8 +760,9 @@ mod timeout_tests {
         let rx_count = Arc::new(AtomicUsize::new(0));
         let rx_count_c = rx_count.clone();
         let handler = get_handler(rx_count_c);
-
-        let mut r = Router::new(Some(tx), BoardConfig::new(vec![handler]));
+        let start = u64::MAX - 1;
+        let clock = StepClock::new_box(start, 2);
+        let mut r = Router::new(Some(tx), BoardConfig::new(vec![handler]), clock);
 
         // One TX and one RX (RX is only-local to avoid creating extra TX on receive)
         r.log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0], 0)
@@ -746,11 +771,10 @@ mod timeout_tests {
             .unwrap();
 
         // Start near wrap; step crosses the boundary
-        let start = u64::MAX - 1;
-        let clock = StepClock::new(start, 2);
+
 
         // Small budget; with wrapping_sub this should allow one iteration then stop
-        r.process_all_queues_with_timeout(&clock, 1).unwrap();
+        r.process_all_queues_with_timeout(1).unwrap();
 
         // One iteration can do up to one TX and one RX
         assert!(tx_count.load(Ordering::SeqCst) <= 1, "expected <=1 TX");

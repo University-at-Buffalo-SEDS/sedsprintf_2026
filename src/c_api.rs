@@ -5,7 +5,7 @@
 use crate::{
     config::DataEndpoint,
     router::{BoardConfig, EndpointHandler, Router},
-    DataType, Result, TelemetryError, TelemetryPacket,
+    DataType, TelemetryResult, TelemetryError, TelemetryPacket,
 };
 
 use crate::router::Clock;
@@ -101,7 +101,7 @@ fn status_from_result_code(e: SedsResult) -> i32 {
 }
 
 #[inline]
-fn ok_or_status(r: Result<()>) -> i32 {
+fn ok_or_status(r: TelemetryResult<()>) -> i32 {
     match r {
         Ok(()) => status_from_result_code(SedsResult::SedsOk),
         Err(e) => status_from_err(e),
@@ -109,16 +109,16 @@ fn ok_or_status(r: Result<()>) -> i32 {
 }
 
 #[inline]
-fn dtype_from_u32(x: u32) -> Result<DataType> {
+fn dtype_from_u32(x: u32) -> TelemetryResult<DataType> {
     DataType::try_from_u32(x).ok_or(TelemetryError::InvalidType)
 }
 
 #[inline]
-fn endpoint_from_u32(x: u32) -> Result<DataEndpoint> {
+fn endpoint_from_u32(x: u32) -> TelemetryResult<DataEndpoint> {
     DataEndpoint::try_from_u32(x).ok_or(TelemetryError::Deserialize("bad endpoint"))
 }
 
-fn view_to_packet(view: &SedsPacketView) -> core::result::Result<TelemetryPacket, ()> {
+fn view_to_packet(view: &SedsPacketView) -> Result<TelemetryPacket, ()> {
     // ty
     let ty = DataType::try_from_u32(view.ty).ok_or(())?;
 
@@ -252,6 +252,7 @@ pub extern "C" fn seds_pkt_to_string(
 pub extern "C" fn seds_router_new(
     tx: CTransmit,
     tx_user: *mut c_void,
+    now_ms_cb: CNowMs,
     handlers: *const SedsHandlerDesc,
     n_handlers: usize,
 ) -> *mut SedsRouter {
@@ -259,9 +260,10 @@ pub extern "C" fn seds_router_new(
     let tx_ctx = TxCtx {
         user_addr: tx_user as usize,
     };
+
     let transmit = tx.map(move |f| {
         let ctx = tx_ctx;
-        move |bytes: &[u8]| -> Result<()> {
+        move |bytes: &[u8]| -> TelemetryResult<()> {
             let code = f(bytes.as_ptr(), bytes.len(), ctx.user_addr as *mut c_void);
             if code == status_from_result_code(SedsResult::SedsOk) {
                 Ok(())
@@ -322,9 +324,15 @@ pub extern "C" fn seds_router_new(
             v.push(eh);
         }
     }
+    let clock = FfiClock {
+        cb: now_ms_cb,
+        user_addr: tx_user as usize,
+    };
 
+    //make a new box clock
+    let box_clock = Box::new(clock);
     let cfg = BoardConfig::new(v);
-    let router = Router::new(transmit, cfg);
+    let router = Router::new(transmit, cfg, box_clock);
     Box::into_raw(Box::new(SedsRouter { inner: router }))
 }
 
@@ -735,7 +743,7 @@ unsafe fn log_unaligned_slice<T: LeBytes>(
     data: *const c_void,
     count: usize,
     ts: u64,
-) -> Result<()> {
+) -> TelemetryResult<()> {
     use core::ptr;
     let mut tmp: Vec<T> = Vec::with_capacity(count);
     let elem_size = size_of::<T>();
@@ -756,7 +764,7 @@ unsafe fn log_queue_unaligned_slice<T: LeBytes>(
     data: *const c_void,
     count: usize,
     ts: u64,
-) -> Result<()> {
+) -> TelemetryResult<()> {
     use core::ptr;
     let mut tmp: Vec<T> = Vec::with_capacity(count);
     let elem_size = size_of::<T>();
@@ -920,19 +928,14 @@ pub extern "C" fn seds_router_clear_tx_queue(r: *mut SedsRouter) -> i32 {
 #[no_mangle]
 pub extern "C" fn seds_router_process_tx_queue_with_timeout(
     r: *mut SedsRouter,
-    now_ms_cb: CNowMs,
-    user: *mut c_void,
     timeout_ms: u32,
 ) -> i32 {
-    if r.is_null() || now_ms_cb.is_none() {
+    if r.is_null(){
         return status_from_err(TelemetryError::BadArg); // bad arg
     }
     let router = unsafe { &mut (*r).inner };
-    let clock = FfiClock {
-        cb: now_ms_cb,
-        user_addr: user as usize,
-    };
-    ok_or_status(router.process_tx_queue_with_timeout(&clock, timeout_ms))
+
+    ok_or_status(router.process_tx_queue_with_timeout(timeout_ms))
 }
 
 /// Process RX queue until empty or timeout.
@@ -940,19 +943,14 @@ pub extern "C" fn seds_router_process_tx_queue_with_timeout(
 #[no_mangle]
 pub extern "C" fn seds_router_process_rx_queue_with_timeout(
     r: *mut SedsRouter,
-    now_ms_cb: CNowMs,
-    user: *mut c_void,
     timeout_ms: u32,
 ) -> i32 {
-    if r.is_null() || now_ms_cb.is_none() {
+    if r.is_null() {
         return status_from_err(TelemetryError::BadArg); // bad arg
     }
     let router = unsafe { &mut (*r).inner };
-    let clock = FfiClock {
-        cb: now_ms_cb,
-        user_addr: user as usize,
-    };
-    ok_or_status(router.process_rx_queue_with_timeout(&clock, timeout_ms))
+
+    ok_or_status(router.process_rx_queue_with_timeout(timeout_ms))
 }
 
 /// Process all queues until empty or timeout.
@@ -960,17 +958,12 @@ pub extern "C" fn seds_router_process_rx_queue_with_timeout(
 #[no_mangle]
 pub extern "C" fn seds_router_process_all_queues_with_timeout(
     r: *mut SedsRouter,
-    now_ms_cb: CNowMs,
-    user: *mut c_void,
     timeout_ms: u32,
 ) -> i32 {
-    if r.is_null() || now_ms_cb.is_none() {
+    if r.is_null() {
         return status_from_err(TelemetryError::BadArg); // bad arg
     }
     let router = unsafe { &mut (*r).inner };
-    let clock = FfiClock {
-        cb: now_ms_cb,
-        user_addr: user as usize,
-    };
-    ok_or_status(router.process_all_queues_with_timeout(&clock, timeout_ms))
+
+    ok_or_status(router.process_all_queues_with_timeout(timeout_ms))
 }
