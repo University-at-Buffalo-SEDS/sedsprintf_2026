@@ -330,23 +330,53 @@ impl TelemetryPacket {
         let mut s = self.header_string();
 
         let mut hex = String::with_capacity(self.payload.len().saturating_mul(5));
-
-        // If payload length is a multiple of 4 → format each f32 as 4 bytes (LE)
-        if data_type_size(self.msg_ty()) % 4 == 0 && !self.payload.is_empty() {
-            for chunk in self.payload.chunks_exact(4) {
-                let val = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
-                let bytes = val.to_le_bytes();
-                for b in bytes {
-                    let _ = write!(&mut hex, " 0x{:02x}", b);
+        if !self.payload.is_empty() {
+            match self.msg_ty() {
+                // If payload length is a multiple of 4 → format each f32 as 4 bytes (LE)
+                MessageDataType::Float32 => {
+                    for chunk in self
+                        .payload
+                        .chunks_exact(data_type_size(MessageDataType::Float32))
+                    {
+                        let val = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                        let bytes = val.to_le_bytes();
+                        for b in bytes {
+                            let _ = write!(&mut hex, " 0x{:02x}", b);
+                        }
+                    }
                 }
-            }
-        } else {
-            // Fallback: print raw bytes
-            for &b in self.payload.iter() {
-                let _ = write!(&mut hex, " 0x{:02x}", b);
-            }
+                MessageDataType::UInt32 => {
+                    for chunk in self
+                        .payload
+                        .chunks_exact(data_type_size(MessageDataType::Float32))
+                    {
+                        let val = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                        let bytes = val.to_le_bytes();
+                        for b in bytes {
+                            let _ = write!(&mut hex, " 0x{:02x}", b);
+                        }
+                    }
+                }
+                MessageDataType::UInt8 => {
+                    for chunk in self
+                        .payload
+                        .chunks_exact(data_type_size(MessageDataType::Float32))
+                    {
+                        let val = u8::from_le_bytes([chunk[0]]);
+                        let bytes = val.to_le_bytes();
+                        for b in bytes {
+                            let _ = write!(&mut hex, " 0x{:02x}", b);
+                        }
+                    }
+                }
+                _ => {
+                    // Fallback: print raw bytes
+                    for &b in self.payload.iter() {
+                        let _ = write!(&mut hex, " 0x{:02x}", b);
+                    }
+                }
+            };
         }
-
         s.push_str(", Data (hex):");
         if !hex.is_empty() {
             s.push_str(&hex);
