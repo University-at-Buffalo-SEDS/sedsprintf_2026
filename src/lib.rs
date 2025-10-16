@@ -11,6 +11,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
+extern crate core;
 #[cfg(feature = "std")]
 extern crate std;
 
@@ -80,7 +81,7 @@ mod router;
 mod serialize;
 
 
-use crate::config::{get_info_type, MessageDataType, MESSAGE_DATA_TYPES};
+use crate::config::{data_type_size, get_info_type, MessageDataType, MESSAGE_DATA_TYPES};
 use crate::config::{MessageType, DEVICE_IDENTIFIER};
 pub use config::{message_meta, DataEndpoint, DataType, MessageMeta, MESSAGE_ELEMENTS};
 pub use router::{BoardConfig, Router};
@@ -115,7 +116,6 @@ pub enum TelemetryError {
 pub type TelemetryResult<T> = Result<T, TelemetryError>;
 
 pub type Result<T, E> = core::result::Result<T, E>;
-
 
 // -------------------- TelemetryPacket impl --------------------
 impl TelemetryPacket {
@@ -329,11 +329,22 @@ impl TelemetryPacket {
     pub fn to_hex_string(&self) -> String {
         let mut s = self.header_string();
 
-        // Build " 0x.. 0x.." list from the packet payload
-        let mut hex = String::new();
-        use core::fmt::Write as _;
-        for &b in self.payload.iter() {
-            let _ = write!(&mut hex, " 0x{:02x}", b);
+        let mut hex = String::with_capacity(self.payload.len().saturating_mul(5));
+
+        // If payload length is a multiple of 4 → format each f32 as 4 bytes (LE)
+        if data_type_size(self.msg_ty()) % 4 == 0 && !self.payload.is_empty() {
+            for chunk in self.payload.chunks_exact(4) {
+                let val = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                let bytes = val.to_le_bytes();
+                for b in bytes {
+                    let _ = write!(&mut hex, " 0x{:02x}", b);
+                }
+            }
+        } else {
+            // Fallback: print raw bytes
+            for &b in self.payload.iter() {
+                let _ = write!(&mut hex, " 0x{:02x}", b);
+            }
         }
 
         s.push_str(", Data (hex):");

@@ -277,20 +277,11 @@ mod tests {
 /// expects f32s (size 12). We only exercise formatting/copying.
 fn fake_telemetry_packet_bytes() -> TelemetryPacket {
     use crate::config::{DataEndpoint, DataType};
-    use std::sync::Arc;
 
-    let payload: Arc<[u8]> = Arc::from(vec![0x13, 0x21, 0x34].into_boxed_slice());
-    let endpoints: Arc<[DataEndpoint]> =
-        Arc::from(vec![DataEndpoint::SdCard, DataEndpoint::Radio].into_boxed_slice());
+    let payload= [0x13 as f32, 0x21 as f32, 0x34 as f32]; // f32 values
+    let endpoints= [DataEndpoint::SdCard, DataEndpoint::Radio];
 
-    TelemetryPacket {
-        ty: DataType::GpsData,
-        sender: "Flight Controller", // TEST_PLATFORM
-        data_size: payload.len(),    // 3
-        endpoints,
-        timestamp: 1123581321, // 1123581321
-        payload,
-    }
+    TelemetryPacket::from_f32_slice(DataType::GpsData, &payload, &endpoints, 1123581321).unwrap()
 }
 
 /// Produce the exact string the C++ test checks:
@@ -336,7 +327,7 @@ fn helpers_packet_hex_to_string() {
     let pkt = fake_telemetry_packet_bytes();
     let got = pkt.to_hex_string();
 
-    let expect = "Type: GPS_DATA, Size: 3, Sender: Flight Controller, Endpoints: [SD_CARD, RADIO], Timestamp: 1123581321, Data (hex): 0x13 0x21 0x34";
+    let expect = "Type: GPS_DATA, Size: 12, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, RADIO], Timestamp: 1123581321, Data (hex): 0x00 0x00 0x98 0x41 0x00 0x00 0x04 0x42 0x00 0x00 0x50 0x42";
     assert_eq!(got, expect);
 }
 
