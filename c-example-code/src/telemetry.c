@@ -44,7 +44,6 @@ SedsResult tx_send(const uint8_t * bytes, size_t len, void * user)
     (void) user;
     (void) bytes;
     (void) len;
-    // TODO: wire to HAL CAN/FDCAN (we can drop in the code when you're ready)
     return SEDS_OK;
 }
 
