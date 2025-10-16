@@ -489,7 +489,6 @@ mod handler_failure_tests {
             }),
         };
 
-        // Explicitly annotate to your alias so type inference is trivial
         let tx_fail = |_bytes: &[u8]| -> crate::TelemetryResult<()> { Err(TelemetryError::Io("boom")) };
         let box_clock = StepClock::new_default_box();
 
@@ -531,7 +530,6 @@ mod handler_failure_tests {
 
     #[test]
     fn run_c_system_test() {
-        // Path to your C system test folder
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("c-system-test");
 
         let status = Command::new("cmake")

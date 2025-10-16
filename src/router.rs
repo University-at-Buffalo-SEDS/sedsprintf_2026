@@ -209,7 +209,6 @@ impl Router {
             alloc::sync::Arc::<[u8]>::from(buf),
         )?;
 
-        // Normal path: since endpoints are local, your send() should deliver via local handlers only.
         self.send(&error_pkt)
     }
 
@@ -425,7 +424,6 @@ impl Router {
     /// Build a packet from `ty` + *generic* `data` using default endpoints, then send.
     ///
     /// Works with **any** type `T` that implements `LeBytes` (primitives already do).
-    /// For your own structs, implement `LeBytes` (e.g., `#[repr(C)]` + manual field encoding).
     pub fn log<T: LeBytes>(&self, ty: DataType, data: &[T], timestamp: u64) -> TelemetryResult<()> {
         let meta = message_meta(ty);
 
