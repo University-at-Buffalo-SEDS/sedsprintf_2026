@@ -102,7 +102,7 @@ mod tests {
         let s = pkt.header_string();
         assert_eq!(
             s,
-            "Type: GPS_DATA, Size: 12, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, RADIO], Timestamp: 0"
+            "Type: GPS_DATA, Size: 12, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, RADIO], Timestamp: 0 (0s 000ms)"
         );
     }
 
@@ -114,7 +114,7 @@ mod tests {
                 .unwrap();
         let text = pkt.to_string();
         assert!(text.starts_with(
-            "Type: GPS_DATA, Size: 12, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, RADIO], Timestamp: 0, Data: "
+            "Type: GPS_DATA, Size: 12, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, RADIO], Timestamp: 0 (0s 000ms), Data: "
         ));
         assert!(text.contains("1"));
         assert!(text.contains("2.5"));
@@ -327,7 +327,7 @@ fn helpers_packet_hex_to_string() {
     let pkt = fake_telemetry_packet_bytes();
     let got = pkt.to_hex_string();
 
-    let expect = "Type: GPS_DATA, Size: 12, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, RADIO], Timestamp: 1123581321, Data (hex): 0x00 0x00 0x98 0x41 0x00 0x00 0x04 0x42 0x00 0x00 0x50 0x42";
+    let expect = "Type: GPS_DATA, Size: 12, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, RADIO], Timestamp: 1123581321 (312h 06m 21s 321ms), Data (hex): 0x00 0x00 0x98 0x41 0x00 0x00 0x04 0x42 0x00 0x00 0x50 0x42";
     assert_eq!(got, expect);
 }
 
@@ -454,7 +454,7 @@ mod handler_failure_tests {
 
         // Verify exact payload text produced by handle_callback_error(Some(dest), e)
         let expected = format!(
-            "Type: TELEMETRY_ERROR, Size: {:?}, Sender: TEST_PLATFORM, Endpoints: [RADIO], Timestamp: 0, Error: Handler for endpoint {:?} failed on device {:?}: {:?}",
+            "Type: TELEMETRY_ERROR, Size: {:?}, Sender: TEST_PLATFORM, Endpoints: [RADIO], Timestamp: 0 (0s 000ms), Error: Handler for endpoint {:?} failed on device {:?}: {:?}",
             MAX_STRING_LENGTH,
             failing_ep,
             DEVICE_IDENTIFIER,
@@ -513,7 +513,7 @@ mod handler_failure_tests {
 
         // Exact text from handle_callback_error(None, e)
         let expected = format!(
-            "Type: TELEMETRY_ERROR, Size: {:?}, Sender: TEST_PLATFORM, Endpoints: [SD_CARD], Timestamp: 0, Error: TX Handler failed on device {:?}: {:?}",
+            "Type: TELEMETRY_ERROR, Size: {:?}, Sender: TEST_PLATFORM, Endpoints: [SD_CARD], Timestamp: 0 (0s 000ms), Error: TX Handler failed on device {:?}: {:?}",
             MAX_STRING_LENGTH,
             DEVICE_IDENTIFIER,
             TelemetryError::Io("boom")
