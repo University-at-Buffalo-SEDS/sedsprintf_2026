@@ -3,6 +3,7 @@
 #include "sedsprintf.h"
 #include <assert.h>
 #include <stdio.h>
+#include <unistd.h>
 // Helper to generate some demo float samples
 static void make_series(float * out, size_t n, float base)
 {
@@ -34,7 +35,6 @@ int main(void)
     // B logs IMU (6 floats)
     make_series(buf, 6, 0.5f);
     assert(node_log(&flightControllerBoard, SEDS_DT_IMU, buf, 6) == SEDS_OK);
-
     // C logs BATTERY (2 floats)
     make_series(buf, 4, 3.7f);
     assert(node_log(&powerBoard, SEDS_DT_BATTERY, buf, 4) == SEDS_OK);

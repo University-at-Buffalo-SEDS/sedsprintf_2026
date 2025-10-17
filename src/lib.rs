@@ -233,15 +233,33 @@ impl TelemetryPacket {
         // build endpoints list without std::String::join
         let mut endpoints = String::new();
         self.build_endpoint_string(&mut endpoints);
+
+        // Convert timestamp (ms since boot) into readable format
+        let total_ms = self.timestamp;
+        let hours = total_ms / 3_600_000;
+        let minutes = (total_ms % 3_600_000) / 60_000;
+        let seconds = (total_ms % 60_000) / 1_000;
+        let milliseconds = total_ms % 1_000;
+
+        let human_time = if hours > 0 {
+            format!("{hours}h {minutes:02}m {seconds:02}s {milliseconds:03}ms")
+        } else if minutes > 0 {
+            format!("{minutes}m {seconds:02}s {milliseconds:03}ms")
+        } else {
+            format!("{seconds}s {milliseconds:03}ms")
+        };
+
         format!(
-            "Type: {}, Size: {}, Sender: {}, Endpoints: [{}], Timestamp: {}",
+            "Type: {}, Size: {}, Sender: {}, Endpoints: [{}], Timestamp: {} ({})",
             self.ty.as_str(),
             self.data_size,
             self.sender,
             endpoints,
-            self.timestamp
+            self.timestamp,
+            human_time
         )
     }
+
     pub fn data_as_utf8(&self) -> Option<String> {
         if MESSAGE_DATA_TYPES[self.ty as usize] != MessageDataType::String {
             return None;

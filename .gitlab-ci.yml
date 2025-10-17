@@ -1,0 +1,19 @@
+# GitLab CI Pipeline Configuration
+stages:
+  - test
+
+build-bullseye-arm32:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  stage: test
+  image:
+    name: registry.gitlab.rylanswebsite.com/rylan-meilutis/rust-docker-builder:latest
+  script:
+    - chmod +x build.sh && ./build.sh test
+
+sast:
+  stage: test
+include:
+  - template: Security/SAST.gitlab-ci.yml
+  - template: Security/Secret-Detection.gitlab-ci.yml
+
