@@ -2,12 +2,12 @@
 stages:
   - test
 
-build-bullseye-arm32:
+rust-tests:
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
   stage: test
   image:
-    name: registry.gitlab.rylanswebsite.com/rylan-meilutis/rust-docker-builder:latest
+    name: registry.gitlab.rylanswebsite.com/rylan-meilutis/rust-docker-builder:x86
   script:
     - chmod +x build.sh && ./build.sh test
 
