@@ -126,7 +126,11 @@ pub struct Router {
 }
 
 impl Router {
-    pub fn new<Tx>(transmit: Option<Tx>, cfg: BoardConfig, clock: Box<dyn Clock + Send + Sync>) -> Self
+    pub fn new<Tx>(
+        transmit: Option<Tx>,
+        cfg: BoardConfig,
+        clock: Box<dyn Clock + Send + Sync>,
+    ) -> Self
     where
         Tx: Fn(&[u8]) -> TelemetryResult<()> + Send + Sync + 'static,
     {
@@ -135,7 +139,7 @@ impl Router {
             cfg,
             received_queue: Vec::new(),
             transmit_queue: Vec::new(),
-            clock
+            clock,
         }
     }
 
@@ -238,10 +242,7 @@ impl Router {
         self.transmit_queue.clear();
     }
 
-    pub fn process_tx_queue_with_timeout(
-        &mut self,
-        timeout_ms: u32,
-    ) -> TelemetryResult<()> {
+    pub fn process_tx_queue_with_timeout(&mut self, timeout_ms: u32) -> TelemetryResult<()> {
         let start = self.clock.now_ms();
         // Prefer pop_front if this is a queue; avoid unwrap() in no_std.
         while let Some(pkt) = self.transmit_queue.pop() {
@@ -261,10 +262,7 @@ impl Router {
         }
     }
 
-    pub fn process_rx_queue_with_timeout(
-        &mut self,
-        timeout_ms: u32,
-    ) -> TelemetryResult<()> {
+    pub fn process_rx_queue_with_timeout(&mut self, timeout_ms: u32) -> TelemetryResult<()> {
         let start = self.clock.now_ms();
         // Prefer pop_front if this is a queue; avoid unwrap() in no_std.
         while let Some(pkt) = self.received_queue.pop() {
@@ -277,10 +275,7 @@ impl Router {
         Ok(())
     }
 
-    pub fn process_all_queues_with_timeout(
-        &mut self,
-        timeout_ms: u32,
-    ) -> TelemetryResult<()> {
+    pub fn process_all_queues_with_timeout(&mut self, timeout_ms: u32) -> TelemetryResult<()> {
         let drain_fully = timeout_ms == 0;
         let start = if drain_fully { 0 } else { self.clock.now_ms() };
 
@@ -292,6 +287,9 @@ impl Router {
                 self.send(&pkt)?;
                 did_any = true;
             }
+            if !drain_fully && self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
+                break;
+            }
 
             // Then RX
             if let Some(pkt) = self.received_queue.pop() {
@@ -299,13 +297,13 @@ impl Router {
                 did_any = true;
             }
 
-            // If both queues were empty this round, we're done.
-            if !did_any {
+            // If we're on a timed run, stop once we've hit the budget.
+            if !drain_fully && self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
                 break;
             }
 
-            // If we're on a timed run, stop once we've hit the budget.
-            if !drain_fully && self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
+            // If both queues were empty this round, we're done.
+            if !did_any {
                 break;
             }
         }
@@ -338,6 +336,20 @@ impl Router {
         Ok(())
     }
 
+    fn retry<F, T, E>(&self, times: usize, mut f: F) -> Result<T, E>
+    where
+        F: FnMut() -> Result<T, E>,
+    {
+        let mut last_err = None;
+        for _ in 0..times {
+            match f() {
+                Ok(v) => return Ok(v),
+                Err(e) => last_err = Some(e),
+            }
+        }
+        Err(last_err.expect("times > 0"))
+    }
+
     /// Log (send) a packet: serialize once, transmit (if any remote endpoint), then deliver to matching locals.
     pub fn send(&self, pkt: &TelemetryPacket) -> TelemetryResult<()> {
         pkt.validate()?;
@@ -352,42 +364,33 @@ impl Router {
 
         if send_remote {
             if let Some(tx) = &self.transmit {
-                for i in 0..MAX_NUMBER_OF_RETRYS {
-                    match tx(&bytes) {
-                        Ok(_) => break,
-                        Err(e) => {
-                            if i == MAX_NUMBER_OF_RETRYS - 1 {
-                                // create a packet to all endpoints except the one that failed
-                                self.handle_callback_error(pkt, None, e)?;
-                                return Err(TelemetryError::HandlerError("TX failed"));
-                            }
-                        }
-                    }
+                // Retry up to MAX_NUMBER_OF_RETRYS sending bytes
+                if let Err(e) = self.retry(MAX_NUMBER_OF_RETRYS, || tx(&bytes)) {
+                    self.handle_callback_error(pkt, None, e)?;
+                    return Err(TelemetryError::HandlerError("TX failed"));
                 }
             }
         }
 
-        for &dest in pkt.endpoints.iter() {
-            for h in &self.cfg.handlers {
-                if h.endpoint == dest {
-                    for i in 0..MAX_NUMBER_OF_RETRYS {
-                        match (h.handler)(pkt) {
-                            Ok(_) => break,
-                            Err(e) => {
-                                // Here we just retry up to 3 times.
-                                if i == MAX_NUMBER_OF_RETRYS - 1 {
-                                    // create a packet to all endpoints except the one that failed
-                                    self.handle_callback_error(pkt, Some(dest), e)?;
-                                    return Err(TelemetryError::HandlerError(
-                                        "local handler failed",
-                                    ));
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        pkt.endpoints
+            .iter()
+            .copied()
+            .flat_map(|dest| {
+                self.cfg
+                    .handlers
+                    .iter()
+                    .filter(move |h| h.endpoint == dest)
+                    .map(move |h| (dest, h))
+            })
+            .try_for_each(|(dest, h)| {
+                self.retry(MAX_NUMBER_OF_RETRYS, || (h.handler)(pkt))
+                    .map_err(|e| {
+                        // side effect on failure, then map to an error
+                        // (propagate handle_callback_error's error if it can fail)
+                        let _ = self.handle_callback_error(pkt, Some(dest), e);
+                        TelemetryError::HandlerError("local handler failed")
+                    })
+            })?;
         Ok(())
     }
 
@@ -400,24 +403,18 @@ impl Router {
 
     pub fn receive(&self, pkt: &TelemetryPacket) -> TelemetryResult<()> {
         pkt.validate()?;
-        for &dest in pkt.endpoints.iter() {
-            for h in &self.cfg.handlers {
-                if h.endpoint == dest {
-                    for i in 0..MAX_NUMBER_OF_RETRYS {
-                        match (h.handler)(&pkt) {
-                            Ok(_) => break,
-                            Err(e) => {
-                                // Here we just retry up to 3 times.
-                                if i == MAX_NUMBER_OF_RETRYS - 1 {
-                                    // create a packet to all endpoints except the one that failed
-                                    self.handle_callback_error(&pkt, Some(dest), e)?;
-                                }
-                            }
-                        }
+        pkt.endpoints.iter().copied().for_each(|dest| {
+            self.cfg
+                .handlers
+                .iter()
+                .filter(|h| h.endpoint == dest)
+                .for_each(|h| {
+                    if let Err(e) = self.retry(MAX_NUMBER_OF_RETRYS, || (h.handler)(&pkt)) {
+                        // swallow/handle error, then continue with others
+                        let _ = self.handle_callback_error(&pkt, Some(dest), e);
                     }
-                }
-            }
-        }
+                });
+        });
         Ok(())
     }
 
