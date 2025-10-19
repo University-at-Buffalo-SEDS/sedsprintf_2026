@@ -484,6 +484,59 @@ pub extern "C" fn seds_router_rx_packet_to_queue(
     ok_or_status(router.rx_packet_to_queue(pkt))
 }
 
+
+/// Returns a pointer to the packet payload bytes and (optionally) its length.
+/// - If `out_len` is non-null, it is filled with `payload_len`.
+/// - Returns NULL on bad args.
+#[no_mangle]
+pub extern "C" fn seds_pkt_bytes_ptr(
+    pkt: *const SedsPacketView,
+    out_len: *mut usize,
+) -> *const c_void {
+    if pkt.is_null() {
+        return ptr::null();
+    }
+    let view = unsafe { &*pkt };
+
+    if !out_len.is_null() {
+        unsafe { *out_len = view.payload_len; }
+    }
+    view.payload as *const c_void
+}
+
+/// Returns a pointer to the payload as a typed array (still raw bytes) after basic validation.
+/// - `elem_size` must be 1, 2, 4, or 8.
+/// - If `out_count` is non-null, it is set to `payload_len / elem_size`.
+/// - Fails (returns NULL) if `payload_len % elem_size != 0`.
+/// NOTE: No endianness conversion is performed; the caller may cast to the desired type
+///       and must interpret values as little-endian if needed.
+#[no_mangle]
+pub extern "C" fn seds_pkt_data_ptr(
+    pkt: *const SedsPacketView,
+    elem_size: usize,        // 1,2,4,8
+    out_count: *mut usize,   // optional
+) -> *const c_void {
+    if pkt.is_null() || !matches!(elem_size, 1 | 2 | 4 | 8) {
+        return ptr::null();
+    }
+    let view = unsafe { &*pkt };
+
+    if elem_size == 0 || view.payload_len % elem_size != 0 {
+        if !out_count.is_null() {
+            unsafe { *out_count = 0; }
+        }
+        return ptr::null();
+    }
+
+    let count = view.payload_len / elem_size;
+    if !out_count.is_null() {
+        unsafe { *out_count = count; }
+    }
+
+    view.payload as *const c_void
+}
+
+
 // ----------------- Optional helpers: generic decode from a packet view -----------------
 /// Copy-decode `count` elements of type `T` from pkt.payload (LE) into `out` (host endianness).
 /// - Validates that `count * size_of::<T>() == pkt.payload_len`.
