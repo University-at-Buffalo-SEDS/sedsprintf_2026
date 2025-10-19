@@ -366,7 +366,7 @@ impl Router {
             if let Some(tx) = &self.transmit {
                 // Retry up to MAX_NUMBER_OF_RETRYS sending bytes
                 if let Err(e) = self.retry(MAX_NUMBER_OF_RETRYS, || tx(&bytes)) {
-                    self.handle_callback_error(pkt, None, e)?;
+                    let _ = self.handle_callback_error(pkt, None, e);
                     return Err(TelemetryError::HandlerError("TX failed"));
                 }
             }
