@@ -425,7 +425,7 @@ impl Router {
     /// Build a packet from `ty` + *generic* `data` using default endpoints, then send.
     ///
     /// Works with **any** type `T` that implements `LeBytes` (primitives already do).
-    pub fn log<T: LeBytes>(&self, ty: DataType, data: &[T], timestamp: u64) -> TelemetryResult<()> {
+    pub fn log<T: LeBytes>(&self, ty: DataType, data: &[T]) -> TelemetryResult<()> {
         let meta = message_meta(ty);
 
         // Validate total byte size against schema.
@@ -444,7 +444,7 @@ impl Router {
             ty,
             &meta.endpoints,
             DEVICE_IDENTIFIER,
-            timestamp,
+            self.clock.now_ms(),
             Arc::<[u8]>::from(payload_vec),
         )?;
 
@@ -455,7 +455,6 @@ impl Router {
         &mut self,
         ty: DataType,
         data: &[T],
-        timestamp: u64,
     ) -> TelemetryResult<()> {
         let meta = message_meta(ty);
 
@@ -475,7 +474,7 @@ impl Router {
             ty,
             &meta.endpoints,
             DEVICE_IDENTIFIER,
-            timestamp,
+            self.clock.now_ms(),
             Arc::<[u8]>::from(payload_vec),
         )?;
 
@@ -484,11 +483,11 @@ impl Router {
 
     // optional convenience shorthands
     #[inline]
-    pub fn log_bytes(&self, ty: DataType, bytes: &[u8], ts: u64) -> TelemetryResult<()> {
-        self.log::<u8>(ty, bytes, ts)
+    pub fn log_bytes(&self, ty: DataType, bytes: &[u8]) -> TelemetryResult<()> {
+        self.log::<u8>(ty, bytes)
     }
     #[inline]
-    pub fn log_f32(&self, ty: DataType, vals: &[f32], ts: u64) -> TelemetryResult<()> {
-        self.log::<f32>(ty, vals, ts)
+    pub fn log_f32(&self, ty: DataType, vals: &[f32]) -> TelemetryResult<()> {
+        self.log::<f32>(ty, vals)
     }
 }
