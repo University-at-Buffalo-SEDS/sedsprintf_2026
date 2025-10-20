@@ -153,7 +153,7 @@ mod tests {
 
         // send GPS_DATA (3 * f32) using Router::log (uses default endpoints from schema)
         let data = [1.0_f32, 2.0, 3.0];
-        router.log(DataType::GpsData, &data, 0).unwrap();
+        router.log(DataType::GpsData, &data).unwrap();
 
         // --- assertions ---
 
@@ -227,7 +227,7 @@ mod tests {
 
         // --- 1) Sender enqueues a packet for TX ---
         let data = [1.0_f32, 2.0, 3.0];
-        tx_router.log_queue(DataType::GpsData, &data, 0).unwrap();
+        tx_router.log_queue(DataType::GpsData, &data).unwrap();
 
         // --- 2) Flush TX queue -> pushes wire frames into TestBus ---
         tx_router.process_send_queue().unwrap();
@@ -259,15 +259,15 @@ mod tests {
 
         // Enqueue for transmit
         let data = [10.0_f32, 10.25, 10.5];
-        router.log_queue(DataType::GpsData, &data, 42).unwrap();
+        router.log_queue(DataType::GpsData, &data).unwrap();
 
         let data = [10.0_f32, 10.25, 10.5, 12.3];
         router
-            .log_queue(DataType::BatteryStatus, &data, 42)
+            .log_queue(DataType::BatteryStatus, &data)
             .unwrap();
 
         let data = [10.0_f32, 10.25, 10.5];
-        router.log_queue(DataType::GpsData, &data, 42).unwrap();
+        router.log_queue(DataType::GpsData, &data).unwrap();
         // Flush -> frame appears on the "bus"
         router.process_send_queue().unwrap();
         let frames = bus.frames.lock().unwrap().clone();
@@ -675,7 +675,7 @@ mod timeout_tests {
 
         // Enqueue TX (3)
         for _ in 0..3 {
-            r.log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0], 0)
+            r.log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0])
                 .unwrap();
         }
         // Enqueue RX (2) with only-local endpoint
@@ -717,7 +717,7 @@ mod timeout_tests {
 
         // Seed work in both queues
         for _ in 0..5 {
-            r.log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0], 0)
+            r.log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0])
                 .unwrap();
             // RX with only-local endpoint to avoid implicit re-TX during receive
             r.rx_packet_to_queue(
@@ -769,7 +769,7 @@ mod timeout_tests {
 
         // Seed work in both queues
         for _ in 0..5 {
-            r.log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0], 0)
+            r.log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0])
                 .unwrap();
             // RX with only-local endpoint to avoid implicit re-TX during receive
             r.rx_packet_to_queue(
@@ -820,7 +820,7 @@ mod timeout_tests {
         let mut r = Router::new(Some(tx), BoardConfig::new(vec![handler]), clock);
 
         // One TX and one RX (RX is only-local to avoid creating extra TX on receive)
-        r.log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0], 0)
+        r.log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0])
             .unwrap();
         r.rx_packet_to_queue(mk_rx_only_local(&[4.0, 5.0, 6.0], 7))
             .unwrap();

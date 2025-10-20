@@ -356,7 +356,6 @@ pub extern "C" fn seds_router_log_bytes(
     ty_u32: u32,
     data: *const u8,
     len: usize,
-    ts: u64,
 ) -> i32 {
     if r.is_null() || (len > 0 && data.is_null()) {
         return status_from_err(TelemetryError::BadArg);
@@ -367,7 +366,7 @@ pub extern "C" fn seds_router_log_bytes(
     };
     let router = unsafe { &(*r).inner };
     let slice = unsafe { slice::from_raw_parts(data, len) };
-    ok_or_status(router.log::<u8>(ty, slice, ts))
+    ok_or_status(router.log::<u8>(ty, slice))
 }
 
 #[no_mangle]
@@ -376,7 +375,6 @@ pub extern "C" fn seds_router_log_f32(
     ty_u32: u32,
     vals: *const f32,
     n_vals: usize,
-    ts: u64,
 ) -> i32 {
     if r.is_null() || (n_vals > 0 && vals.is_null()) {
         return status_from_err(TelemetryError::BadArg);
@@ -387,7 +385,7 @@ pub extern "C" fn seds_router_log_f32(
     };
     let router = unsafe { &(*r).inner };
     let slice = unsafe { slice::from_raw_parts(vals, n_vals) };
-    ok_or_status(router.log::<f32>(ty, slice, ts))
+    ok_or_status(router.log::<f32>(ty, slice))
 }
 
 // ----------------- FFI: receive serialized -----------------
@@ -801,7 +799,6 @@ unsafe fn log_unaligned_slice<T: LeBytes>(
     ty: DataType,
     data: *const c_void,
     count: usize,
-    ts: u64,
 ) -> TelemetryResult<()> {
     use core::ptr;
     let mut tmp: Vec<T> = Vec::with_capacity(count);
@@ -813,7 +810,7 @@ unsafe fn log_unaligned_slice<T: LeBytes>(
         let v = ptr::read_unaligned(p);
         tmp.push(v);
     }
-    router.log::<T>(ty, &tmp, ts)
+    router.log::<T>(ty, &tmp)
 }
 
 #[inline]
@@ -822,7 +819,6 @@ unsafe fn log_queue_unaligned_slice<T: LeBytes>(
     ty: DataType,
     data: *const c_void,
     count: usize,
-    ts: u64,
 ) -> TelemetryResult<()> {
     use core::ptr;
     let mut tmp: Vec<T> = Vec::with_capacity(count);
@@ -834,7 +830,7 @@ unsafe fn log_queue_unaligned_slice<T: LeBytes>(
         let v = ptr::read_unaligned(p);
         tmp.push(v);
     }
-    router.log_queue::<T>(ty, &tmp, ts)
+    router.log_queue::<T>(ty, &tmp)
 }
 #[no_mangle]
 pub extern "C" fn seds_router_log_typed(
@@ -844,7 +840,6 @@ pub extern "C" fn seds_router_log_typed(
     count: usize,
     elem_size: usize, // 1,2,4,8
     elem_kind: u32,   // 0=unsigned,1=signed,2=float
-    ts: u64,
 ) -> i32 {
     if r.is_null() || (count > 0 && data.is_null()) {
         return status_from_err(TelemetryError::BadArg);
@@ -858,18 +853,18 @@ pub extern "C" fn seds_router_log_typed(
     // dispatch on (elem_kind, elem_size)
     let res = unsafe {
         match (elem_kind, elem_size) {
-            (SEDS_EK_UNSIGNED, 1) => log_unaligned_slice::<u8>(router, ty, data, count, ts),
-            (SEDS_EK_UNSIGNED, 2) => log_unaligned_slice::<u16>(router, ty, data, count, ts),
-            (SEDS_EK_UNSIGNED, 4) => log_unaligned_slice::<u32>(router, ty, data, count, ts),
-            (SEDS_EK_UNSIGNED, 8) => log_unaligned_slice::<u64>(router, ty, data, count, ts),
+            (SEDS_EK_UNSIGNED, 1) => log_unaligned_slice::<u8>(router, ty, data, count),
+            (SEDS_EK_UNSIGNED, 2) => log_unaligned_slice::<u16>(router, ty, data, count),
+            (SEDS_EK_UNSIGNED, 4) => log_unaligned_slice::<u32>(router, ty, data, count),
+            (SEDS_EK_UNSIGNED, 8) => log_unaligned_slice::<u64>(router, ty, data, count),
 
-            (SEDS_EK_SIGNED, 1) => log_unaligned_slice::<i8>(router, ty, data, count, ts),
-            (SEDS_EK_SIGNED, 2) => log_unaligned_slice::<i16>(router, ty, data, count, ts),
-            (SEDS_EK_SIGNED, 4) => log_unaligned_slice::<i32>(router, ty, data, count, ts),
-            (SEDS_EK_SIGNED, 8) => log_unaligned_slice::<i64>(router, ty, data, count, ts),
+            (SEDS_EK_SIGNED, 1) => log_unaligned_slice::<i8>(router, ty, data, count),
+            (SEDS_EK_SIGNED, 2) => log_unaligned_slice::<i16>(router, ty, data, count),
+            (SEDS_EK_SIGNED, 4) => log_unaligned_slice::<i32>(router, ty, data, count),
+            (SEDS_EK_SIGNED, 8) => log_unaligned_slice::<i64>(router, ty, data, count),
 
-            (SEDS_EK_FLOAT, 4) => log_unaligned_slice::<f32>(router, ty, data, count, ts),
-            (SEDS_EK_FLOAT, 8) => log_unaligned_slice::<f64>(router, ty, data, count, ts),
+            (SEDS_EK_FLOAT, 4) => log_unaligned_slice::<f32>(router, ty, data, count),
+            (SEDS_EK_FLOAT, 8) => log_unaligned_slice::<f64>(router, ty, data, count),
 
             _ => return status_from_err(TelemetryError::BadArg),
         }
@@ -886,7 +881,6 @@ pub extern "C" fn seds_router_log_queue_typed(
     count: usize,
     elem_size: usize, // 1,2,4,8
     elem_kind: u32,   // 0=unsigned,1=signed,2=float
-    ts: u64,
 ) -> i32 {
     if r.is_null() || (count > 0 && data.is_null()) {
         return status_from_err(TelemetryError::BadArg);
@@ -900,18 +894,18 @@ pub extern "C" fn seds_router_log_queue_typed(
     // dispatch on (elem_kind, elem_size)
     let res = unsafe {
         match (elem_kind, elem_size) {
-            (SEDS_EK_UNSIGNED, 1) => log_queue_unaligned_slice::<u8>(router, ty, data, count, ts),
-            (SEDS_EK_UNSIGNED, 2) => log_queue_unaligned_slice::<u16>(router, ty, data, count, ts),
-            (SEDS_EK_UNSIGNED, 4) => log_queue_unaligned_slice::<u32>(router, ty, data, count, ts),
-            (SEDS_EK_UNSIGNED, 8) => log_queue_unaligned_slice::<u64>(router, ty, data, count, ts),
+            (SEDS_EK_UNSIGNED, 1) => log_queue_unaligned_slice::<u8>(router, ty, data, count),
+            (SEDS_EK_UNSIGNED, 2) => log_queue_unaligned_slice::<u16>(router, ty, data, count),
+            (SEDS_EK_UNSIGNED, 4) => log_queue_unaligned_slice::<u32>(router, ty, data, count),
+            (SEDS_EK_UNSIGNED, 8) => log_queue_unaligned_slice::<u64>(router, ty, data, count),
 
-            (SEDS_EK_SIGNED, 1) => log_queue_unaligned_slice::<i8>(router, ty, data, count, ts),
-            (SEDS_EK_SIGNED, 2) => log_queue_unaligned_slice::<i16>(router, ty, data, count, ts),
-            (SEDS_EK_SIGNED, 4) => log_queue_unaligned_slice::<i32>(router, ty, data, count, ts),
-            (SEDS_EK_SIGNED, 8) => log_queue_unaligned_slice::<i64>(router, ty, data, count, ts),
+            (SEDS_EK_SIGNED, 1) => log_queue_unaligned_slice::<i8>(router, ty, data, count),
+            (SEDS_EK_SIGNED, 2) => log_queue_unaligned_slice::<i16>(router, ty, data, count),
+            (SEDS_EK_SIGNED, 4) => log_queue_unaligned_slice::<i32>(router, ty, data, count),
+            (SEDS_EK_SIGNED, 8) => log_queue_unaligned_slice::<i64>(router, ty, data, count),
 
-            (SEDS_EK_FLOAT, 4) => log_queue_unaligned_slice::<f32>(router, ty, data, count, ts),
-            (SEDS_EK_FLOAT, 8) => log_queue_unaligned_slice::<f64>(router, ty, data, count, ts),
+            (SEDS_EK_FLOAT, 4) => log_queue_unaligned_slice::<f32>(router, ty, data, count),
+            (SEDS_EK_FLOAT, 8) => log_queue_unaligned_slice::<f64>(router, ty, data, count),
 
             _ => return status_from_err(TelemetryError::BadArg),
         }
