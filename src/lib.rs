@@ -19,7 +19,6 @@ extern crate std;
 #[cfg(test)]
 mod tests;
 
-
 // ---------- Allocator & panic handlers ----------
 // For EMBEDDED builds (no_std + bare-metal target), provide FreeRTOS allocator + panic.
 #[cfg(all(not(feature = "std"), target_os = "none"))]
@@ -76,10 +75,6 @@ mod router;
 mod serialize;
 mod telemetry_packet;
 
-
-pub type Result<T, E> = core::result::Result<T, E>;
-
-
 #[derive(Debug)]
 pub enum TelemetryError {
     InvalidType,
@@ -94,4 +89,5 @@ pub enum TelemetryError {
     Io(&'static str),
 }
 
-pub type TelemetryResult<T> = std::result::Result<T, TelemetryError>;
+pub type Result<T, E> = core::result::Result<T, E>;
+pub type TelemetryResult<T> = Result<T, TelemetryError>;

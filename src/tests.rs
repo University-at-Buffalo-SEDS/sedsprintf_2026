@@ -57,9 +57,10 @@ mod tests {
     use crate::tests::timeout_tests::StepClock;
     use crate::{
         config::{DataEndpoint, DataType, MESSAGE_ELEMENTS},
-        serialize, telemetry_packet::{TelemetryPacket},
-        TelemetryResult,
         router::Router,
+        serialize,
+        telemetry_packet::TelemetryPacket,
+        TelemetryResult,
     };
     use std::sync::{Arc, Mutex};
     use std::vec::Vec;
@@ -385,9 +386,9 @@ mod handler_failure_tests {
     use super::*;
     use crate::config::{DEVICE_IDENTIFIER, MAX_STRING_LENGTH, MAX_VALUE_DATA_TYPE};
     use crate::router::EndpointHandler;
+    use crate::router::{BoardConfig, Router};
     use crate::telemetry_packet::{message_meta, DataType};
     use crate::TelemetryError;
-    use crate::router::{Router, BoardConfig};
     use alloc::{sync::Arc, vec, vec::Vec};
     use core::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
@@ -593,7 +594,10 @@ mod handler_failure_tests {
 mod timeout_tests {
     use crate::config::DataEndpoint;
     use crate::tests::get_handler;
-    use crate::{router::Clock, router::BoardConfig, telemetry_packet::DataType, router::Router, telemetry_packet::TelemetryPacket, TelemetryResult};
+    use crate::{
+        router::BoardConfig, router::Clock, router::Router, telemetry_packet::DataType,
+        telemetry_packet::TelemetryPacket, TelemetryResult,
+    };
     use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     use std::sync::Arc;
 

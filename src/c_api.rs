@@ -6,7 +6,7 @@ use crate::{
     config::DataEndpoint,
     router::{BoardConfig, EndpointHandler, Router},
     telemetry_packet::{DataType, TelemetryPacket},
-    TelemetryError
+    TelemetryError,
 };
 
 use crate::router::Clock;
@@ -485,7 +485,6 @@ pub extern "C" fn seds_router_rx_packet_to_queue(
     ok_or_status(router.rx_packet_to_queue(pkt))
 }
 
-
 /// Returns a pointer to the packet payload bytes and (optionally) its length.
 /// - If `out_len` is non-null, it is filled with `payload_len`.
 /// - Returns NULL on bad args.
@@ -500,7 +499,9 @@ pub extern "C" fn seds_pkt_bytes_ptr(
     let view = unsafe { &*pkt };
 
     if !out_len.is_null() {
-        unsafe { *out_len = view.payload_len; }
+        unsafe {
+            *out_len = view.payload_len;
+        }
     }
     view.payload as *const c_void
 }
@@ -514,8 +515,8 @@ pub extern "C" fn seds_pkt_bytes_ptr(
 #[no_mangle]
 pub extern "C" fn seds_pkt_data_ptr(
     pkt: *const SedsPacketView,
-    elem_size: usize,        // 1,2,4,8
-    out_count: *mut usize,   // optional
+    elem_size: usize,      // 1,2,4,8
+    out_count: *mut usize, // optional
 ) -> *const c_void {
     if pkt.is_null() || !matches!(elem_size, 1 | 2 | 4 | 8) {
         return ptr::null();
@@ -524,19 +525,22 @@ pub extern "C" fn seds_pkt_data_ptr(
 
     if elem_size == 0 || view.payload_len % elem_size != 0 {
         if !out_count.is_null() {
-            unsafe { *out_count = 0; }
+            unsafe {
+                *out_count = 0;
+            }
         }
         return ptr::null();
     }
 
     let count = view.payload_len / elem_size;
     if !out_count.is_null() {
-        unsafe { *out_count = count; }
+        unsafe {
+            *out_count = count;
+        }
     }
 
     view.payload as *const c_void
 }
-
 
 // ----------------- Optional helpers: generic decode from a packet view -----------------
 /// Copy-decode `count` elements of type `T` from pkt.payload (LE) into `out` (host endianness).
@@ -985,7 +989,7 @@ pub extern "C" fn seds_router_process_tx_queue_with_timeout(
     r: *mut SedsRouter,
     timeout_ms: u32,
 ) -> i32 {
-    if r.is_null(){
+    if r.is_null() {
         return status_from_err(TelemetryError::BadArg); // bad arg
     }
     let router = unsafe { &mut (*r).inner };
