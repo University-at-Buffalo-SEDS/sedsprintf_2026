@@ -1,10 +1,14 @@
 #![allow(dead_code)]
-pub use crate::config::{message_meta, DataEndpoint, DataType, MessageDataType, MESSAGE_DATA_TYPES, MessageType, DEVICE_IDENTIFIER,
-                        data_type_size, get_info_type};
+
+
+pub use crate::config::{
+    data_type_size, get_info_type, message_meta, DataEndpoint, DataType, MessageDataType,
+    MessageType, DEVICE_IDENTIFIER, MESSAGE_DATA_TYPES,
+};
 // ---- core/alloc imports usable in both std and no_std ----
+use crate::{TelemetryError, TelemetryResult};
 use alloc::{format, string::String, string::ToString, sync::Arc, vec::Vec};
 use core::{convert::TryInto, fmt::Write};
-use crate::{TelemetryError, TelemetryResult};
 
 
 /// Payload-bearing packet (safe, heap-backed, shareable).
