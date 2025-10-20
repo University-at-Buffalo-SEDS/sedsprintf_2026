@@ -15,6 +15,7 @@ typedef struct
 {
     SedsRouter * r;
     uint8_t created;
+    uint64_t start_time;
 } RouterState;
 
 // A single global router state (defined in telemetry.c)

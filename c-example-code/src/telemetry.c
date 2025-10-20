@@ -35,6 +35,15 @@ static uint64_t host_now_ms(void * user)
 #endif
 }
 
+
+uint64_t node_now_since_bus_ms(void *user)
+{
+    const RouterState router = g_router;               // same user passed to TX
+    const uint64_t now = host_now_ms(NULL);       // monotonic ms
+    return (router.r) ? (now - router.start_time) : 0;
+}
+
+
 // Define the global router state here (one definition only)
 RouterState g_router = {.r = NULL, .created = 0};
 
@@ -101,7 +110,7 @@ SedsResult init_telemetry_router(void)
     SedsRouter * r = seds_router_new(
         tx_send,
         NULL, // tx_user
-        host_now_ms,
+        node_now_since_bus_ms,
         locals,
         sizeof(locals) / sizeof(locals[0])
     );
@@ -116,6 +125,7 @@ SedsResult init_telemetry_router(void)
 
     g_router.r = r;
     g_router.created = 1;
+    g_router.start_time = host_now_ms(NULL);
     return SEDS_OK;
 }
 
