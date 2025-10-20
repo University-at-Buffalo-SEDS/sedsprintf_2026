@@ -5,7 +5,8 @@
 use crate::{
     config::DataEndpoint,
     router::{BoardConfig, EndpointHandler, Router},
-    DataType, TelemetryResult, TelemetryError, TelemetryPacket,
+    telemetry_packet::{DataType, TelemetryPacket},
+    TelemetryError
 };
 
 use crate::router::Clock;
@@ -782,6 +783,7 @@ pub extern "C" fn seds_pkt_get_f32(pkt: *const SedsPacketView, out: *mut f32, n:
 
 
 use crate::router::LeBytes;
+use crate::TelemetryResult;
 // bring the trait bound into scope
 
 const SEDS_EK_UNSIGNED: u32 = 0;

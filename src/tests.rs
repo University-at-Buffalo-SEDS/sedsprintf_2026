@@ -1,6 +1,7 @@
-use crate::config::get_needed_message_size;
+use crate::config::{get_needed_message_size, MESSAGE_ELEMENTS};
 use crate::router::EndpointHandler;
-use crate::{DataEndpoint, DataType, TelemetryError, TelemetryPacket, MESSAGE_ELEMENTS};
+use crate::telemetry_packet::{DataEndpoint, DataType, TelemetryPacket};
+use crate::TelemetryError;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -56,7 +57,9 @@ mod tests {
     use crate::tests::timeout_tests::StepClock;
     use crate::{
         config::{DataEndpoint, DataType, MESSAGE_ELEMENTS},
-        serialize, Router, TelemetryPacket, TelemetryResult,
+        serialize, telemetry_packet::{TelemetryPacket},
+        TelemetryResult,
+        router::Router,
     };
     use std::sync::{Arc, Mutex};
     use std::vec::Vec;
@@ -122,7 +125,7 @@ mod tests {
 
     #[test]
     fn router_sends_and_receives() {
-        use crate::{BoardConfig, Router};
+        use crate::router::{BoardConfig, Router};
 
         // capture spaces
         let tx_seen: Arc<Mutex<Option<TelemetryPacket>>> = Arc::new(Mutex::new(None));
@@ -217,7 +220,7 @@ mod tests {
 
         let mut rx_router = Router::new(
             Some(tx_handler),
-            crate::BoardConfig::new(vec![sd_handler]),
+            crate::router::BoardConfig::new(vec![sd_handler]),
             box_clock_rx,
         );
 
@@ -382,7 +385,9 @@ mod handler_failure_tests {
     use super::*;
     use crate::config::{DEVICE_IDENTIFIER, MAX_STRING_LENGTH, MAX_VALUE_DATA_TYPE};
     use crate::router::EndpointHandler;
-    use crate::{message_meta, BoardConfig, DataType, Router, TelemetryError};
+    use crate::telemetry_packet::{message_meta, DataType};
+    use crate::TelemetryError;
+    use crate::router::{Router, BoardConfig};
     use alloc::{sync::Arc, vec, vec::Vec};
     use core::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
@@ -588,7 +593,7 @@ mod handler_failure_tests {
 mod timeout_tests {
     use crate::config::DataEndpoint;
     use crate::tests::get_handler;
-    use crate::{router::Clock, BoardConfig, DataType, Router, TelemetryPacket, TelemetryResult};
+    use crate::{router::Clock, router::BoardConfig, telemetry_packet::DataType, router::Router, telemetry_packet::TelemetryPacket, TelemetryResult};
     use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     use std::sync::Arc;
 

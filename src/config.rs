@@ -1,4 +1,5 @@
 // src/config.rs
+#[allow(dead_code)]
 use core::mem::size_of;
 
 
@@ -114,32 +115,26 @@ pub const MAX_HEX_LENGTH: usize = 1024;
 /// All message types with their metadata.
 pub const MESSAGE_TYPES: [MessageMeta; DataType::COUNT] = [
     MessageMeta {
-        ty: DataType::TelemetryError,
         data_size: get_needed_message_size(DataType::TelemetryError),
         endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
     },
     MessageMeta {
-        ty: DataType::GpsData,
         data_size: get_needed_message_size(DataType::GpsData),
         endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
     },
     MessageMeta {
-        ty: DataType::ImuData,
         data_size: get_needed_message_size(DataType::ImuData),
         endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
     },
     MessageMeta {
-        ty: DataType::BatteryStatus,
         data_size: get_needed_message_size(DataType::BatteryStatus),
         endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
     },
     MessageMeta {
-        ty: DataType::SystemStatus,
         data_size: get_needed_message_size(DataType::SystemStatus),
         endpoints: &[DataEndpoint::SdCard],
     },
     MessageMeta {
-        ty: DataType::BarometerData,
         data_size: get_needed_message_size(DataType::BarometerData),
         endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
     },
@@ -149,7 +144,6 @@ pub const MESSAGE_TYPES: [MessageMeta; DataType::COUNT] = [
 // ----------------------Not User Editable----------------------
 #[derive(Debug, Clone, Copy)]
 pub struct MessageMeta {
-    pub ty: DataType,
     pub data_size: usize,
     pub endpoints: &'static [DataEndpoint],
 }
