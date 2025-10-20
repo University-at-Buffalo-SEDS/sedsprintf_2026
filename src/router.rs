@@ -5,8 +5,7 @@ use crate::{
 };
 
 use crate::config::DEVICE_IDENTIFIER;
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
-use std::collections::VecDeque;
+use alloc::{boxed::Box, sync::Arc, vec::Vec, collections::VecDeque};
 
 
 enum RxQueueItem {
