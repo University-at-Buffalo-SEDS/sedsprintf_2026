@@ -6,6 +6,7 @@ use crate::{
 
 use crate::config::DEVICE_IDENTIFIER;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use std::collections::VecDeque;
 
 
 enum RxQueueItem {
@@ -120,8 +121,8 @@ fn fallback_stdout(msg: &str) {
 pub struct Router {
     transmit: Option<Box<dyn Fn(&[u8]) -> TelemetryResult<()> + Send + Sync + 'static>>,
     cfg: BoardConfig,
-    received_queue: Vec<RxQueueItem>,
-    transmit_queue: Vec<TelemetryPacket>,
+    received_queue: VecDeque<RxQueueItem>,
+    transmit_queue: VecDeque<TelemetryPacket>,
     clock: Box<dyn Clock + Send + Sync>,
 }
 
@@ -137,8 +138,8 @@ impl Router {
         Self {
             transmit: transmit.map(|t| Box::new(t) as _),
             cfg,
-            received_queue: Vec::new(),
-            transmit_queue: Vec::new(),
+            received_queue: VecDeque::new(),
+            transmit_queue: VecDeque::new(),
             clock,
         }
     }
@@ -217,7 +218,7 @@ impl Router {
     }
 
     pub fn process_send_queue(&mut self) -> TelemetryResult<()> {
-        while let Some(pkt) = self.transmit_queue.pop() {
+        while let Some(pkt) = self.transmit_queue.pop_front() {
             self.send(&pkt)?;
         }
         Ok(())
@@ -245,7 +246,7 @@ impl Router {
     pub fn process_tx_queue_with_timeout(&mut self, timeout_ms: u32) -> TelemetryResult<()> {
         let start = self.clock.now_ms();
         // Prefer pop_front if this is a queue; avoid unwrap() in no_std.
-        while let Some(pkt) = self.transmit_queue.pop() {
+        while let Some(pkt) = self.transmit_queue.pop_front() {
             self.send(&pkt)?;
             // wrapping_sub handles u64 rollover gracefully
             if self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
@@ -265,7 +266,7 @@ impl Router {
     pub fn process_rx_queue_with_timeout(&mut self, timeout_ms: u32) -> TelemetryResult<()> {
         let start = self.clock.now_ms();
         // Prefer pop_front if this is a queue; avoid unwrap() in no_std.
-        while let Some(pkt) = self.received_queue.pop() {
+        while let Some(pkt) = self.received_queue.pop_front() {
             self.handle_rx_queue_item(pkt)?;
             // wrapping_sub handles u64 rollover gracefully
             if self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
@@ -283,7 +284,7 @@ impl Router {
             let mut did_any = false;
 
             // TX first (use pop_front() if it's a FIFO)
-            if let Some(pkt) = self.transmit_queue.pop() {
+            if let Some(pkt) = self.transmit_queue.pop_front() {
                 self.send(&pkt)?;
                 did_any = true;
             }
@@ -292,7 +293,7 @@ impl Router {
             }
 
             // Then RX
-            if let Some(pkt) = self.received_queue.pop() {
+            if let Some(pkt) = self.received_queue.pop_front() {
                 self.handle_rx_queue_item(pkt)?;
                 did_any = true;
             }
@@ -313,12 +314,12 @@ impl Router {
 
     pub fn queue_tx_message(&mut self, pkt: TelemetryPacket) -> TelemetryResult<()> {
         pkt.validate()?;
-        self.transmit_queue.push(pkt);
+        self.transmit_queue.push_back(pkt);
         Ok(())
     }
 
     pub fn process_received_queue(&mut self) -> TelemetryResult<()> {
-        while let Some(pkt) = self.received_queue.pop() {
+        while let Some(pkt) = self.received_queue.pop_front() {
             self.handle_rx_queue_item(pkt)?;
         }
         Ok(())
@@ -326,13 +327,13 @@ impl Router {
 
     pub fn rx_serialized_packet_to_queue(&mut self, bytes: &[u8]) -> TelemetryResult<()> {
         self.received_queue
-            .push(RxQueueItem::Serialized(bytes.to_vec()));
+            .push_back(RxQueueItem::Serialized(bytes.to_vec()));
         Ok(())
     }
 
     pub fn rx_packet_to_queue(&mut self, pkt: TelemetryPacket) -> TelemetryResult<()> {
         pkt.validate()?;
-        self.received_queue.push(RxQueueItem::Packet(pkt));
+        self.received_queue.push_back(RxQueueItem::Packet(pkt));
         Ok(())
     }
 
