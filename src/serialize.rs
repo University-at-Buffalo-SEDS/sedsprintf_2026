@@ -2,7 +2,9 @@
 
 use crate::config::{MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE};
 use crate::repr_u32::ReprU32Enum;
-use crate::{config::DataType, impl_repr_u32_enum, DataEndpoint, TelemetryError, TelemetryPacket};
+use crate::{config::DataType, impl_repr_u32_enum};
+use crate::telemetry_packet::{DataEndpoint, TelemetryPacket};
+use crate::TelemetryError;
 use alloc::{borrow::ToOwned, boxed::Box, sync::Arc, vec::Vec};
 use core::convert::TryInto;
 use core::mem::size_of;

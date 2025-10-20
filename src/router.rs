@@ -1,11 +1,15 @@
 // src/router.rs
-use crate::{
-    config::{message_meta, DataEndpoint, DataType},
-    serialize, TelemetryError, TelemetryPacket, TelemetryResult,
-};
+#![allow(dead_code)]
+
 
 use crate::config::DEVICE_IDENTIFIER;
-use alloc::{boxed::Box, sync::Arc, vec::Vec, collections::VecDeque};
+use crate::{
+    config::{message_meta, DataEndpoint, DataType},
+    serialize,
+    telemetry_packet::TelemetryPacket,
+    TelemetryError, TelemetryResult,
+};
+use alloc::{boxed::Box, collections::VecDeque, sync::Arc, vec::Vec};
 
 
 enum RxQueueItem {
