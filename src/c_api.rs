@@ -10,9 +10,15 @@ use crate::{
 };
 
 use crate::router::Clock;
+use crate::router::LeBytes;
+use crate::TelemetryResult;
 use alloc::{borrow::ToOwned, boxed::Box, sync::Arc, vec::Vec};
 use core::{ffi::c_char, ffi::c_void, ptr, slice, str::from_utf8};
 
+
+const SEDS_EK_UNSIGNED: u32 = 0;
+const SEDS_EK_SIGNED: u32 = 1;
+const SEDS_EK_FLOAT: u32 = 2;
 
 //constants
 const SIZE_OF_U8: usize = 1;
@@ -107,6 +113,15 @@ fn ok_or_status(r: TelemetryResult<()>) -> i32 {
         Ok(()) => status_from_result_code(SedsResult::SedsOk),
         Err(e) => status_from_err(e),
     }
+}
+
+#[derive(Debug)]
+#[allow(dead_code)]
+pub enum VectorizeError {
+    NullBasePtr,
+    ElemSizeMismatch { elem_size: usize, expected: usize },
+    Overflow, // count * elem_size overflowed
+    ZeroCount,
 }
 
 #[inline]
@@ -545,7 +560,6 @@ pub extern "C" fn seds_pkt_data_ptr(
 /// - Validates that `count * size_of::<T>() == pkt.payload_len`.
 /// - Works with unaligned `out`.
 unsafe fn pkt_get_into<T>(pkt: &SedsPacketView, out: *mut T, count: usize) -> i32 {
-    use core::ptr;
     let need = match count.checked_mul(size_of::<T>()) {
         Some(v) => v,
         None => return status_from_err(TelemetryError::SizeMismatchError),
@@ -605,7 +619,6 @@ unsafe fn pkt_get_unsigned<T>(
     count: usize,
     width: usize,
 ) -> i32 {
-    use core::ptr;
     match width {
         SIZE_OF_U8 => {
             // u8
@@ -795,22 +808,48 @@ pub extern "C" fn seds_pkt_get_f32(pkt: *const SedsPacketView, out: *mut f32, n:
     seds_pkt_get_typed(pkt, out as *mut c_void, n, 4, SEDS_EK_FLOAT)
 }
 
-
-use crate::router::LeBytes;
-use crate::TelemetryResult;
-// bring the trait bound into scope
-
-const SEDS_EK_UNSIGNED: u32 = 0;
-const SEDS_EK_SIGNED: u32 = 1;
-const SEDS_EK_FLOAT: u32 = 2;
-
-fn vectorize_data<T: LeBytes>(base: *const u8, count: usize, elem_size: usize, tmp: &mut Vec<T>) {
-    for i in 0..count {
-        let p = unsafe { base.add(i * elem_size) as *const T };
-        // read without requiring alignment
-        let v = unsafe { ptr::read_unaligned(p) };
-        tmp.push(v);
+fn vectorize_data<T: LeBytes + Copy>(
+    base: *const u8,
+    count: usize,
+    elem_size: usize,
+    tmp: &mut Vec<T>,
+) -> Result<(), VectorizeError> {
+    if base.is_null() {
+        return Err(VectorizeError::NullBasePtr);
     }
+    if elem_size != size_of::<T>() {
+        return Err(VectorizeError::ElemSizeMismatch {
+            elem_size,
+            expected: size_of::<T>(),
+        });
+    }
+    if count == 0 {
+        return Err(VectorizeError::ZeroCount);
+    }
+
+    // Prevent arithmetic overflow before pointer math
+    let _ = count
+        .checked_mul(elem_size)
+        .ok_or(VectorizeError::Overflow)?;
+
+    // Reserve once to avoid multiple reallocations
+    tmp.reserve(count);
+
+    // SAFETY:
+    // - Caller promises `base .. base + total` is a valid readable region.
+    // - We deliberately use read_unaligned.
+    // - We cast to *const T only to perform the read; alignment is ignored by read_unaligned.
+    unsafe {
+        let mut p = base;
+        for _ in 0..count {
+            let t_ptr = p as *const T;
+            let v = ptr::read_unaligned(t_ptr);
+            tmp.push(v);
+            p = p.add(elem_size);
+        }
+    }
+
+    Ok(())
 }
 
 /// Read possibly-unaligned elements from `data` into a Vec<T>, then call Router::log<T>.
@@ -824,7 +863,7 @@ unsafe fn log_unaligned_slice<T: LeBytes>(
     let mut tmp: Vec<T> = Vec::with_capacity(count);
     let elem_size = size_of::<T>();
     let base = data as *const u8;
-    vectorize_data::<T>(base, count, elem_size, &mut tmp);
+    vectorize_data::<T>(base, count, elem_size, &mut tmp).map_err(|_| TelemetryError::Io("vectorize_data failed"))?;
     router.log::<T>(ty, &tmp)
 }
 
@@ -838,7 +877,7 @@ unsafe fn log_queue_unaligned_slice<T: LeBytes>(
     let mut tmp: Vec<T> = Vec::with_capacity(count);
     let elem_size = size_of::<T>();
     let base = data as *const u8;
-    vectorize_data::<T>(base, count, elem_size, &mut tmp);
+    vectorize_data::<T>(base, count, elem_size, &mut tmp).map_err(|_| TelemetryError::Io("vectorize_data failed"))?;
     router.log_queue::<T>(ty, &tmp)
 }
 #[unsafe(no_mangle)]
