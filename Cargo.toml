@@ -12,6 +12,7 @@ default = ["std"]
 std = []
 
 [dependencies]
+time = { version = "0.3.44", default-features = false }
 # put common deps here (none required currently)
 
 # Pull cortex-m ONLY for bare-metal builds (target_os = "none")

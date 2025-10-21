@@ -7,9 +7,11 @@ pub use crate::config::{
 };
 // ---- core/alloc imports usable in both std and no_std ----
 use crate::{TelemetryError, TelemetryResult};
-use alloc::{format, string::String, string::ToString, sync::Arc, vec::Vec};
+use alloc::{string::String, string::ToString, sync::Arc, vec::Vec};
 use core::{convert::TryInto, fmt::Write};
+use time::{OffsetDateTime};
 
+const EPOCH_MS_THRESHOLD: u64 = 1_000_000_000_000; // clearly not an uptime counter
 
 /// Payload-bearing packet (safe, heap-backed, shareable).
 #[derive(Clone, Debug)]
@@ -134,26 +136,57 @@ impl TelemetryPacket {
 
     /// Header line without data payload.
     pub fn header_string(&self) -> String {
-        // build endpoints list without std::String::join
+        // Build endpoints list
         let mut endpoints = String::new();
         self.build_endpoint_string(&mut endpoints);
 
-        // Convert timestamp (ms since boot) into readable format
         let total_ms = self.timestamp;
-        let hours = total_ms / 3_600_000;
-        let minutes = (total_ms % 3_600_000) / 60_000;
-        let seconds = (total_ms % 60_000) / 1_000;
-        let milliseconds = total_ms % 1_000;
+        let human_time = if total_ms >= EPOCH_MS_THRESHOLD {
+            // Unix epoch (ms) → UTC "YYYY-MM-DD HH:MM:SS.mmmZ" (manual formatting)
+            let secs = (total_ms / 1_000) as i64;
+            let sub_ms = (total_ms % 1_000) as u32;
 
-        let human_time = if hours > 0 {
-            format!("{hours}h {minutes:02}m {seconds:02}s {milliseconds:03}ms")
-        } else if minutes > 0 {
-            format!("{minutes}m {seconds:02}s {milliseconds:03}ms")
+            let mut s = String::new();
+            match OffsetDateTime::from_unix_timestamp(secs) {
+                Ok(dt) => {
+                    let _ = write!(
+                        s,
+                        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03}Z",
+                        dt.year(),
+                        dt.month() as u8,
+                        dt.day(),
+                        dt.hour(),
+                        dt.minute(),
+                        dt.second(),
+                        sub_ms
+                    );
+                }
+                Err(_) => {
+                    let _ = write!(s, "Invalid epoch ({})", total_ms);
+                }
+            }
+            s
         } else {
-            format!("{seconds}s {milliseconds:03}ms")
+            // Uptime in ms since boot
+            let hours = total_ms / 3_600_000;
+            let minutes = (total_ms % 3_600_000) / 60_000;
+            let seconds = (total_ms % 60_000) / 1_000;
+            let milliseconds = total_ms % 1_000;
+
+            let mut s = String::new();
+            if hours > 0 {
+                let _ = write!(s, "{hours}h {minutes:02}m {seconds:02}s {milliseconds:03}ms");
+            } else if minutes > 0 {
+                let _ = write!(s, "{minutes}m {seconds:02}s {milliseconds:03}ms");
+            } else {
+                let _ = write!(s, "{seconds}s {milliseconds:03}ms");
+            }
+            s
         };
 
-        format!(
+        let mut out = String::new();
+        let _ = write!(
+            out,
             "Type: {}, Size: {}, Sender: {}, Endpoints: [{}], Timestamp: {} ({})",
             self.ty.as_str(),
             self.data_size,
@@ -161,7 +194,8 @@ impl TelemetryPacket {
             endpoints,
             self.timestamp,
             human_time
-        )
+        );
+        out
     }
 
     pub fn data_as_utf8(&self) -> Option<String> {
