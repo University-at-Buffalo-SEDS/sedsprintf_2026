@@ -86,6 +86,7 @@ add_dependencies(sedsprintf_rs sedsprintf_rs_build)
 # Prevent assembler from marking stack executable; force linker header to noexecstack
 include(CheckLinkerFlag)
 include(CheckCCompilerFlag)
+
 check_linker_flag(C "-Wl,-z,noexecstack" HAVE_LD_NOEXECSTACK)
 check_c_compiler_flag("-Wa,--noexecstack" HAVE_AS_NOEXECSTACK)
 
@@ -95,6 +96,9 @@ if (SEDSPRINTF_STM_BUILD)
     target_compile_options(sedsprintf_rs INTERFACE -Wa,--noexecstack)
     target_link_options(sedsprintf_rs INTERFACE -Wl,-z,noexecstack)
 endif ()
+
+add_compile_options(-ffunction-sections -fdata-sections -Os)
+add_link_options(-Wl,--gc-sections -Wl,--icf=all)
 
 # Optional niceties
 add_library(sedsprintf_rs::sedsprintf_rs ALIAS sedsprintf_rs)

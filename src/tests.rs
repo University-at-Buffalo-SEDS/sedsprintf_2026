@@ -317,8 +317,8 @@ unsafe fn copy_telemetry_packet_raw(
         // same object → OK no-op
         return Ok(());
     }
-    let s = &*src;
-    let d = &mut *dest;
+    let s = unsafe{&*src};
+    let d = unsafe{&mut *dest};
     // Deep copy
     *d = TelemetryPacket {
         ty: s.ty,

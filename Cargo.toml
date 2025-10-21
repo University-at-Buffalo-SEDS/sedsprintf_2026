@@ -1,7 +1,7 @@
 [package]
 name = "sedsprintf_rs"
 version = "0.1.0"
-edition = "2021" # keep your edition if you want; 2021 is broadly compatible
+edition = "2024"
 
 [lib]
 crate-type = ["staticlib"]
@@ -12,12 +12,18 @@ default = ["std"]
 std = []
 
 [dependencies]
-# put common deps here (none required for this snippet)
+# put common deps here (none required currently)
 
 # Pull cortex-m ONLY for bare-metal builds (target_os = "none")
 [target.'cfg(target_os = "none")'.dependencies]
 cortex-m = "0.7"
 
 [profile.release]
-panic = "abort"
-lto = false
+opt-level = "z"          # prioritize size ("s" also ok; "z" is smallest)
+lto = true               # full LTO (thin LTO also ok; try both)
+codegen-units = 1        # better inlining/GC across crates => smaller
+panic = "abort"          # you already have this (good)
+strip = "symbols"        # since Rust 1.70+: drop debug symbols from artifacts
+debug = 0                # ensure no DWARF remains
+incremental = false
+overflow-checks = false  # off by default in release, make it explicit
