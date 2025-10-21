@@ -5,7 +5,7 @@
 #include <time.h>
 
 // --- Monotonic milliseconds provider for the FFI timeout calls ---
-static uint64_t host_now_ms(void * user)
+uint64_t host_now_ms(void * user)
 {
     (void) user;
 
@@ -20,18 +20,11 @@ static uint64_t host_now_ms(void * user)
     QueryPerformanceCounter(&ctr);
     // convert to ms
     return (uint64_t) ((ctr.QuadPart * 1000ULL) / (uint64_t) freq.QuadPart);
-
-    // POSIX: prefer CLOCK_MONOTONIC if available
-#elif defined(CLOCK_MONOTONIC)
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t) ts.tv_sec * 1000ULL + (uint64_t) (ts.tv_nsec / 1000000ULL);
-
     // Fallback: gettimeofday (not strictly monotonic, but OK for tests)
 #else
     struct timeval tv;
     gettimeofday(&tv, NULL);
-    return (uint64_t) tv.tv_sec * 1000ULL + (uint64_t) (tv.tv_usec / 1000ULL);
+    return (uint64_t)tv.tv_sec * 1000 + tv.tv_usec / 1000;
 #endif
 }
 
