@@ -1,30 +1,59 @@
 // src/c_api.rs
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
-
 use crate::{
     config::DataEndpoint,
     router::{BoardConfig, EndpointHandler, Router},
     telemetry_packet::{DataType, TelemetryPacket},
-    TelemetryError,
+    TelemetryError, TelemetryResult,
 };
 
-use crate::router::Clock;
-use crate::router::LeBytes;
-use crate::TelemetryResult;
+use crate::router::{Clock, LeBytes};
 use alloc::{borrow::ToOwned, boxed::Box, sync::Arc, vec::Vec};
-use core::{ffi::c_char, ffi::c_void, ptr, slice, str::from_utf8};
+use core::{ffi::c_char, ffi::c_void, fmt, mem::size_of, ptr, slice, str::from_utf8};
+use time::OffsetDateTime;
 
+// ----------------- error/status helpers -----------------
 
 const SEDS_EK_UNSIGNED: u32 = 0;
 const SEDS_EK_SIGNED: u32 = 1;
 const SEDS_EK_FLOAT: u32 = 2;
 
-//constants
-const SIZE_OF_U8: usize = 1;
-const SIZE_OF_U16: usize = 2;
-const SIZE_OF_U32: usize = 4;
-const SIZE_OF_F64: usize = 8;
+#[repr(i32)]
+#[allow(dead_code)]
+enum SedsResult {
+    SedsOk = 0,
+    SedsErr = 1,
+}
+
+#[inline]
+fn status_from_result_code(e: SedsResult) -> i32 {
+    match e {
+        SedsResult::SedsOk => 0,
+        SedsResult::SedsErr => 1,
+    }
+}
+
+#[inline]
+fn status_from_err(e: TelemetryError) -> i32 {
+    match e {
+        TelemetryError::InvalidType => -3,
+        TelemetryError::SizeMismatch { .. } => -4,
+        TelemetryError::Deserialize(_) => -5,
+        TelemetryError::HandlerError(_) => -6,
+        TelemetryError::BadArg => -2,
+        TelemetryError::SizeMismatchError => -4,
+        _ => -1,
+    }
+}
+
+#[inline]
+fn ok_or_status(r: TelemetryResult<()>) -> i32 {
+    match r {
+        Ok(()) => status_from_result_code(SedsResult::SedsOk),
+        Err(e) => status_from_err(e),
+    }
+}
 
 // ----------------- router wrapper -----------------
 
@@ -63,9 +92,7 @@ struct CHandler {
     cb: CEndpointHandler,
     user_addr: usize, // store pointer as integer to avoid capturing *mut c_void
 }
-
 unsafe impl Send for CHandler {}
-
 unsafe impl Sync for CHandler {}
 
 // For transmit, we only need the user address too
@@ -73,56 +100,10 @@ unsafe impl Sync for CHandler {}
 struct TxCtx {
     user_addr: usize,
 }
-
 unsafe impl Send for TxCtx {}
-
 unsafe impl Sync for TxCtx {}
 
-// ----------------- helpers -----------------
-
-#[inline]
-fn status_from_err(e: TelemetryError) -> i32 {
-    match e {
-        TelemetryError::InvalidType => -3,
-        TelemetryError::SizeMismatch { .. } => -4,
-        TelemetryError::Deserialize(_) => -5,
-        TelemetryError::HandlerError(_) => -6,
-        TelemetryError::BadArg => -2,
-        _ => -1,
-    }
-}
-
-#[repr(i32)]
-#[allow(dead_code)]
-enum SedsResult {
-    SedsOk = 0,
-    SedsErr = 1,
-}
-
-#[inline]
-fn status_from_result_code(e: SedsResult) -> i32 {
-    match e {
-        SedsResult::SedsOk => 0,
-        SedsResult::SedsErr => 1,
-    }
-}
-
-#[inline]
-fn ok_or_status(r: TelemetryResult<()>) -> i32 {
-    match r {
-        Ok(()) => status_from_result_code(SedsResult::SedsOk),
-        Err(e) => status_from_err(e),
-    }
-}
-
-#[derive(Debug)]
-#[allow(dead_code)]
-pub enum VectorizeError {
-    NullBasePtr,
-    ElemSizeMismatch { elem_size: usize, expected: usize },
-    Overflow, // count * elem_size overflowed
-    ZeroCount,
-}
+// ----------------- small helpers -----------------
 
 #[inline]
 fn dtype_from_u32(x: u32) -> TelemetryResult<DataType> {
@@ -134,6 +115,10 @@ fn endpoint_from_u32(x: u32) -> TelemetryResult<DataEndpoint> {
     DataEndpoint::try_from_u32(x).ok_or(TelemetryError::Deserialize("bad endpoint"))
 }
 
+/// NOTE: This converts a C view into an owned `TelemetryPacket`.
+/// It **still leaks** the sender string because the packet requires `&'static str`.
+/// To eliminate the leak completely, change `TelemetryPacket.sender` to `String`/`Arc<str>`
+/// across the crate. For now we keep it to avoid a breaking change.
 fn view_to_packet(view: &SedsPacketView) -> Result<TelemetryPacket, ()> {
     // ty
     let ty = DataType::try_from_u32(view.ty).ok_or(())?;
@@ -144,86 +129,196 @@ fn view_to_packet(view: &SedsPacketView) -> Result<TelemetryPacket, ()> {
     for &e in eps_u32 {
         eps.push(DataEndpoint::try_from_u32(e).ok_or(())?);
     }
+
+    // sender (leak to satisfy &'static str)
     let sender_static: &'static str = if view.sender.is_null() {
         if view.sender_len == 0 {
-            // allow empty sender (or swap in DEVICE_IDENTIFIER if you prefer)
             ""
         } else {
-            return Err(()); // bad pointer/len combo
+            return Err(());
         }
     } else {
-        let sb = unsafe {
-            // reinterpret c_char* as u8*
-            slice::from_raw_parts(view.sender as *const u8, view.sender_len)
-        };
+        let sb = unsafe { slice::from_raw_parts(view.sender as *const u8, view.sender_len) };
         let s = from_utf8(sb).map_err(|_| ())?;
-        // leak to satisfy &'static str in TelemetryPacket
         Box::leak(s.to_owned().into_boxed_str())
     };
+
     // payload
     let bytes = unsafe { slice::from_raw_parts(view.payload, view.payload_len) };
 
     Ok(TelemetryPacket {
         ty,
         data_size: view.data_size,
-        sender: sender_static,
+        sender: sender_static, // WARNING: leaked above
         endpoints: Arc::<[DataEndpoint]>::from(eps),
         timestamp: view.timestamp,
         payload: Arc::<[u8]>::from(bytes.to_vec()),
     })
 }
 
-unsafe fn write_str_to_buf(s: &str, buf: *mut c_char, buf_len: usize) -> i32 {
-    if buf.is_null() && buf_len != 0 {
-        return status_from_err(TelemetryError::BadArg); // SEDS_BAD_ARG
+// ----------------- no-alloc formatting from SedsPacketView -----------------
+
+const EPOCH_MS_THRESHOLD: u64 = 1_000_000_000_000;
+const I64_MAX_SECS: u64 = i64::MAX as u64;
+
+fn write_epoch_or_uptime(mut out: impl fmt::Write, total_ms: u64) -> fmt::Result {
+    if total_ms >= EPOCH_MS_THRESHOLD {
+        let secs_u64 = total_ms / 1_000;
+        let sub_ms = (total_ms % 1_000) as u32;
+        if secs_u64 > I64_MAX_SECS {
+            return write!(out, "Invalid epoch ({})", total_ms);
+        }
+        match OffsetDateTime::from_unix_timestamp(secs_u64 as i64) {
+            Ok(dt) => write!(
+                out,
+                "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03}Z",
+                dt.year(),
+                u8::from(dt.month()),
+                dt.day(),
+                dt.hour(),
+                dt.minute(),
+                dt.second(),
+                sub_ms
+            ),
+            Err(_) => write!(out, "Invalid epoch ({})", total_ms),
+        }
+    } else {
+        let hours = total_ms / 3_600_000;
+        let minutes = (total_ms % 3_600_000) / 60_000;
+        let seconds = (total_ms % 60_000) / 1_000;
+        let milliseconds = total_ms % 1_000;
+
+        if hours > 0 {
+            write!(out, "{hours}h {minutes:02}m {seconds:02}s {milliseconds:03}ms")
+        } else if minutes > 0 {
+            write!(out, "{minutes}m {seconds:02}s {milliseconds:03}ms")
+        } else {
+            write!(out, "{seconds}s {milliseconds:03}ms")
+        }
     }
-    let needed = s.len() + 1; // include NUL
-
-    // Query mode: tell caller required buffer size (including NUL)
-    if buf.is_null() || buf_len == 0 {
-        return needed as i32;
-    }
-
-    let ncopy = core::cmp::min(s.len(), buf_len.saturating_sub(1));
-    unsafe { ptr::copy_nonoverlapping(s.as_ptr(), buf as *mut u8, ncopy) };
-    unsafe { *buf.add(ncopy) = 0 };
-
-    // If too small, return required size, not success
-    if buf_len < needed {
-        return needed as i32;
-    }
-
-    status_from_result_code(SedsResult::SedsOk) // success
 }
+
+fn write_header_from_view(mut out: impl fmt::Write, view: &SedsPacketView) -> fmt::Result {
+    // sender
+    let sender = if view.sender.is_null() || view.sender_len == 0 {
+        ""
+    } else {
+        let bytes = unsafe { slice::from_raw_parts(view.sender as *const u8, view.sender_len) };
+        from_utf8(bytes).unwrap_or("<invalid-utf8>")
+    };
+
+    // endpoints list
+    write!(
+        out,
+        "Type: {}, Size: {}, Sender: {}, Endpoints: [",
+        view.ty, view.data_size, sender
+    )?;
+
+    if view.num_endpoints > 0 && !view.endpoints.is_null() {
+        let eps = unsafe { slice::from_raw_parts(view.endpoints, view.num_endpoints) };
+        for (i, ep_u32) in eps.iter().enumerate() {
+            if i > 0 {
+                out.write_str(", ")?;
+            }
+            let ep = DataEndpoint::try_from_u32(*ep_u32);
+            out.write_str(ep.map(|e| e.as_str()).unwrap_or("?"))?;
+        }
+    }
+    out.write_str("], Timestamp: ")?;
+    write!(out, "{}", view.timestamp)?;
+    out.write_str(" (")?;
+    write_epoch_or_uptime(&mut out, view.timestamp)?;
+    out.write_str(")")
+}
+
+fn write_full_from_view(mut out: impl fmt::Write, view: &SedsPacketView) -> fmt::Result {
+    write_header_from_view(&mut out, view)?;
+    if view.payload_len == 0 {
+        return out.write_str(", Data: <empty>");
+    }
+    out.write_str(", Data: ")?;
+
+    // Here we don’t know the semantic data type without mapping `view.ty` -> MessageDataType.
+    // If you want pretty types, duplicate your mapping here; for now dump bytes.
+    let bytes = unsafe { slice::from_raw_parts(view.payload, view.payload_len) };
+    for (i, b) in bytes.iter().enumerate() {
+        write!(out, "{}", *b)?;
+        if i + 1 < bytes.len() {
+            out.write_str(", ")?;
+        }
+    }
+    Ok(())
+}
+
+// counting writer for *_len
+struct CountingWriter(usize);
+impl fmt::Write for CountingWriter {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        self.0 += s.len();
+        Ok(())
+    }
+}
+
+// C buffer writer for *_to_string
+struct CBuf<'a> {
+    buf: &'a mut [u8], // includes space for NUL
+    len: usize,        // bytes written (no NUL)
+}
+impl<'a> CBuf<'a> {
+    fn new(buf: &'a mut [u8]) -> Self {
+        Self { buf, len: 0 }
+    }
+    fn remaining(&self) -> usize {
+        self.buf.len().saturating_sub(self.len)
+    }
+    fn finalize(&mut self) {
+        if !self.buf.is_empty() {
+            let i = self.len.min(self.buf.len() - 1);
+            self.buf[i] = 0;
+        }
+    }
+}
+impl<'a> fmt::Write for CBuf<'a> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        let need = s.len();
+        // require at least `need` bytes now; NUL is handled in finalize()
+        if self.remaining() < need {
+            return Err(fmt::Error);
+        }
+        self.buf[self.len..self.len + need].copy_from_slice(s.as_bytes());
+        self.len += need;
+        Ok(())
+    }
+}
+
+// ----------------- string/length FFI (no heap, no leak) -----------------
 
 /// Returns the number of bytes (including NUL) required to store the header string.
 #[unsafe(no_mangle)]
 pub extern "C" fn seds_pkt_header_string_len(pkt: *const SedsPacketView) -> i32 {
     if pkt.is_null() {
-        return status_from_err(TelemetryError::BadArg); // SEDS_BAD_ARG
+        return status_from_err(TelemetryError::BadArg);
     }
     let view = unsafe { &*pkt };
-    let tpkt = match view_to_packet(view) {
-        Ok(p) => p,
-        Err(_) => return status_from_err(TelemetryError::BadArg),
-    };
-    let s = tpkt.header_string();
-    (s.len() + 1) as i32
+    let mut cw = CountingWriter(0);
+    if write_header_from_view(&mut cw, view).is_err() {
+        return status_from_err(TelemetryError::Deserialize("fmt error"));
+    }
+    (cw.0 + 1) as i32
 }
 
 /// Returns the number of bytes (including NUL) required to store the full packet string.
 #[unsafe(no_mangle)]
 pub extern "C" fn seds_pkt_to_string_len(pkt: *const SedsPacketView) -> i32 {
     if pkt.is_null() {
-        return status_from_err(TelemetryError::BadArg); // SEDS_BAD_ARG
+        return status_from_err(TelemetryError::BadArg);
     }
     let view = unsafe { &*pkt };
-    let tpkt = match view_to_packet(view) {
-        Ok(p) => p,
-        Err(_) => return status_from_err(TelemetryError::BadArg),
-    };
-    let s = tpkt.to_string();
-    (s.len() + 1) as i32
+    let mut cw = CountingWriter(0);
+    if write_full_from_view(&mut cw, view).is_err() {
+        return status_from_err(TelemetryError::Deserialize("fmt error"));
+    }
+    (cw.0 + 1) as i32
 }
 
 // === ABI: packet -> header string ===
@@ -234,15 +329,21 @@ pub extern "C" fn seds_pkt_header_string(
     buf_len: usize,
 ) -> i32 {
     if pkt.is_null() {
-        return status_from_err(TelemetryError::BadArg); // SEDS_BAD_ARG
+        return status_from_err(TelemetryError::BadArg);
+    }
+    if buf.is_null() || buf_len == 0 {
+        // Query mode: return required size
+        return seds_pkt_header_string_len(pkt);
     }
     let view = unsafe { &*pkt };
-    let tpkt = match view_to_packet(view) {
-        Ok(p) => p,
-        Err(_) => return status_from_err(TelemetryError::BadArg), // SEDS_BAD_ARG
-    };
-    let s = tpkt.header_string();
-    unsafe { write_str_to_buf(&s, buf, buf_len) }
+    let out_bytes = unsafe { slice::from_raw_parts_mut(buf as *mut u8, buf_len) };
+    let mut w = CBuf::new(out_bytes);
+    let res = write_header_from_view(&mut w, view);
+    w.finalize();
+    match res {
+        Ok(()) => status_from_result_code(SedsResult::SedsOk),
+        Err(_) => seds_pkt_header_string_len(pkt), // return required size when too small
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -252,17 +353,41 @@ pub extern "C" fn seds_pkt_to_string(
     buf_len: usize,
 ) -> i32 {
     if pkt.is_null() {
-        return status_from_err(TelemetryError::BadArg); // SEDS_BAD_ARG
+        return status_from_err(TelemetryError::BadArg);
+    }
+    if buf.is_null() || buf_len == 0 {
+        // Query mode: return required size
+        return seds_pkt_to_string_len(pkt);
     }
     let view = unsafe { &*pkt };
-    let tpkt = match view_to_packet(view) {
-        Ok(p) => p,
-        Err(_) => return status_from_err(TelemetryError::BadArg), // SEDS_BAD_ARG
-    };
-    let s = tpkt.to_string();
-    unsafe { write_str_to_buf(&s, buf, buf_len) }
+    let out_bytes = unsafe { slice::from_raw_parts_mut(buf as *mut u8, buf_len) };
+    let mut w = CBuf::new(out_bytes);
+    let res = write_full_from_view(&mut w, view);
+    w.finalize();
+    match res {
+        Ok(()) => status_from_result_code(SedsResult::SedsOk),
+        Err(_) => seds_pkt_to_string_len(pkt), // return required size when too small
+    }
 }
+
 // ----------------- FFI: new/free -----------------
+
+type CNowMs = Option<extern "C" fn(user: *mut c_void) -> u64>;
+
+struct FfiClock {
+    cb: CNowMs,
+    user_addr: usize,
+}
+impl Clock for FfiClock {
+    #[inline]
+    fn now_ms(&self) -> u64 {
+        if let Some(f) = self.cb {
+            f(self.user_addr as *mut c_void)
+        } else {
+            status_from_result_code(SedsResult::SedsOk) as u64
+        }
+    }
+}
 
 #[unsafe(no_mangle)]
 pub extern "C" fn seds_router_new(
@@ -345,7 +470,6 @@ pub extern "C" fn seds_router_new(
         user_addr: tx_user as usize,
     };
 
-    //make a new box clock
     let box_clock = Box::new(clock);
     let cfg = BoardConfig::new(v);
     let router = Router::new(transmit, cfg, box_clock);
@@ -363,7 +487,6 @@ pub extern "C" fn seds_router_free(r: *mut SedsRouter) {
 }
 
 // ----------------- FFI: log (bytes / f32) -----------------
-// These call the new generic Router::log::<T>() directly.
 
 #[unsafe(no_mangle)]
 pub extern "C" fn seds_router_log_bytes(
@@ -427,7 +550,7 @@ pub extern "C" fn seds_router_receive(r: *mut SedsRouter, view: *const SedsPacke
     let router = unsafe { &(*r).inner };
     let pkt = match view_to_packet(unsafe { &*view }) {
         Ok(p) => p,
-        Err(_) => return status_from_err(TelemetryError::InvalidType), // bad view / conversion failed
+        Err(_) => return status_from_err(TelemetryError::InvalidType),
     };
     ok_or_status(router.receive(&pkt))
 }
@@ -450,10 +573,9 @@ pub extern "C" fn seds_router_queue_tx_message(
         return status_from_err(TelemetryError::BadArg);
     }
     let router = unsafe { &mut (*r).inner };
-    // SAFETY: checked for null above
     let pkt = match view_to_packet(unsafe { &*view }) {
         Ok(p) => p,
-        Err(_) => return status_from_err(TelemetryError::InvalidType), // bad view / conversion failed
+        Err(_) => return status_from_err(TelemetryError::InvalidType),
     };
     ok_or_status(router.queue_tx_message(pkt))
 }
@@ -490,17 +612,15 @@ pub extern "C" fn seds_router_rx_packet_to_queue(
         return status_from_err(TelemetryError::BadArg);
     }
     let router = unsafe { &mut (*r).inner };
-    // SAFETY: checked for null above
     let pkt = match view_to_packet(unsafe { &*view }) {
         Ok(p) => p,
-        Err(_) => return status_from_err(TelemetryError::InvalidType), // bad view / conversion failed
+        Err(_) => return status_from_err(TelemetryError::InvalidType),
     };
     ok_or_status(router.rx_packet_to_queue(pkt))
 }
 
-/// Returns a pointer to the packet payload bytes and (optionally) its length.
-/// - If `out_len` is non-null, it is filled with `payload_len`.
-/// - Returns NULL on bad args.
+// ----------------- payload pointer helpers -----------------
+
 #[unsafe(no_mangle)]
 pub extern "C" fn seds_pkt_bytes_ptr(
     pkt: *const SedsPacketView,
@@ -510,21 +630,12 @@ pub extern "C" fn seds_pkt_bytes_ptr(
         return ptr::null();
     }
     let view = unsafe { &*pkt };
-
     if !out_len.is_null() {
-        unsafe {
-            *out_len = view.payload_len;
-        }
+        unsafe { *out_len = view.payload_len };
     }
     view.payload as *const c_void
 }
 
-/// Returns a pointer to the payload as a typed array (still raw bytes) after basic validation.
-/// - `elem_size` must be 1, 2, 4, or 8.
-/// - If `out_count` is non-null, it is set to `payload_len / elem_size`.
-/// - Fails (returns NULL) if `payload_len % elem_size != 0`.
-/// NOTE: No endianness conversion is performed; the caller may cast to the desired type
-///       and must interpret values as little-endian if needed.
 #[unsafe(no_mangle)]
 pub extern "C" fn seds_pkt_data_ptr(
     pkt: *const SedsPacketView,
@@ -538,274 +649,27 @@ pub extern "C" fn seds_pkt_data_ptr(
 
     if elem_size == 0 || view.payload_len % elem_size != 0 {
         if !out_count.is_null() {
-            unsafe {
-                *out_count = 0;
-            }
+            unsafe { *out_count = 0 };
         }
         return ptr::null();
     }
 
     let count = view.payload_len / elem_size;
     if !out_count.is_null() {
-        unsafe {
-            *out_count = count;
-        }
+        unsafe { *out_count = count };
     }
-
     view.payload as *const c_void
 }
 
-// ----------------- Optional helpers: generic decode from a packet view -----------------
-/// Copy-decode `count` elements of type `T` from pkt.payload (LE) into `out` (host endianness).
-/// - Validates that `count * size_of::<T>() == pkt.payload_len`.
-/// - Works with unaligned `out`.
-unsafe fn pkt_get_into<T>(pkt: &SedsPacketView, out: *mut T, count: usize) -> i32 {
-    let need = match count.checked_mul(size_of::<T>()) {
-        Some(v) => v,
-        None => return status_from_err(TelemetryError::SizeMismatchError),
-    };
-    if pkt.payload_len != need {
-        return status_from_err(TelemetryError::SizeMismatchError);
-    }
-    // walk source bytes, decode LE -> host for T, write unaligned to out
-    let src = pkt.payload;
-    for i in 0..count {
-        let off = i * size_of::<T>();
-        let dst = unsafe { out.add(i) };
+// ----------------- generic decode helpers -----------------
 
-        if size_of::<T>() == 1 {
-            // fast path: byte copy (u8/i8)
-            unsafe { ptr::write_unaligned(dst as *mut u8, *src.add(off)) };
-            continue;
-        }
-
-        // read up to 8 bytes (we only support 1,2,4,8)
-        match size_of::<T>() {
-            SIZE_OF_U16 => {
-                let b = unsafe { slice::from_raw_parts(src.add(off), 2) };
-                // T is one of u16/i16
-                #[allow(trivial_casts)]
-                let val_u16 = u16::from_le_bytes([b[0], b[1]]);
-                // transmute only to the exact T the caller requested
-                unsafe { ptr::write_unaligned(dst as *mut u16, val_u16) };
-            }
-            SIZE_OF_U32 => {
-                let b = unsafe { slice::from_raw_parts(src.add(off), 4) };
-                unsafe { ptr::write_unaligned(dst as *mut [u8; 4], [b[0], b[1], b[2], b[3]]) };
-            }
-            SIZE_OF_F64 => {
-                let b = unsafe { slice::from_raw_parts(src.add(off), 8) };
-                unsafe {
-                    ptr::write_unaligned(
-                        dst as *mut [u8; 8],
-                        [b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]],
-                    )
-                };
-            }
-            _ => return status_from_err(TelemetryError::BadArg),
-        }
-    }
-    status_from_result_code(SedsResult::SedsOk)
-}
-
-/// Internal helpers that perform proper LE -> host conversion for each scalar.
-/// We use the raw bytes written by `pkt_get_into` when width is 4 or 8 and convert here.
-/// Splitting responsibilities like this keeps the core byte loop simple.
-
-#[inline]
-unsafe fn pkt_get_unsigned<T>(
-    pkt: &SedsPacketView,
-    out: *mut T,
-    count: usize,
-    width: usize,
-) -> i32 {
-    match width {
-        SIZE_OF_U8 => {
-            // u8
-            if pkt.payload_len != count {
-                return status_from_err(TelemetryError::SizeMismatchError);
-            }
-            unsafe { ptr::copy_nonoverlapping(pkt.payload, out as *mut u8, count) };
-            status_from_result_code(SedsResult::SedsOk)
-        }
-        SIZE_OF_U16 => {
-            let rc = unsafe { pkt_get_into::<u16>(pkt, out as *mut u16, count) };
-            rc
-        }
-        SIZE_OF_U32 => {
-            // read bytes then convert to u32::from_le_bytes
-            let need = count
-                .checked_mul(4)
-                .ok_or(())
-                .map_err(|_| status_from_err(TelemetryError::SizeMismatchError))
-                .unwrap();
-            if pkt.payload_len != need {
-                return status_from_err(TelemetryError::SizeMismatchError);
-            }
-            for i in 0..count {
-                let off = i * 4;
-                let b = unsafe { slice::from_raw_parts(pkt.payload.add(off), 4) };
-                let v = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
-                unsafe { (out as *mut u32).add(i).write_unaligned(v) };
-            }
-            status_from_result_code(SedsResult::SedsOk)
-        }
-        SIZE_OF_F64 => {
-            let need = count
-                .checked_mul(8)
-                .ok_or(())
-                .map_err(|_| status_from_err(TelemetryError::SizeMismatchError))
-                .unwrap();
-            if pkt.payload_len != need {
-                return status_from_err(TelemetryError::SizeMismatchError);
-            }
-            for i in 0..count {
-                let off = i * 8;
-                let b = unsafe { slice::from_raw_parts(pkt.payload.add(off), 8) };
-                let v = u64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]);
-                unsafe { (out as *mut u64).add(i).write_unaligned(v) };
-            }
-            status_from_result_code(SedsResult::SedsOk)
-        }
-        _ => status_from_err(TelemetryError::BadArg),
-    }
-}
-
-#[inline]
-unsafe fn pkt_get_signed<T>(pkt: &SedsPacketView, out: *mut T, count: usize, width: usize) -> i32 {
-    match width {
-        SIZE_OF_U8 => unsafe { pkt_get_into::<i8>(pkt, out as *mut i8, count) },
-        SIZE_OF_U16 => {
-            // convert explicitly to i16 host endian
-            let need = count * 2;
-            if pkt.payload_len != need {
-                return status_from_err(TelemetryError::SizeMismatchError);
-            }
-            for i in 0..count {
-                let b = unsafe { slice::from_raw_parts(pkt.payload.add(i * 2), 2) };
-                unsafe {
-                    (out as *mut i16)
-                        .add(i)
-                        .write_unaligned(i16::from_le_bytes([b[0], b[1]]))
-                };
-            }
-            status_from_result_code(SedsResult::SedsOk)
-        }
-        SIZE_OF_U32 => {
-            let need = count * 4;
-            if pkt.payload_len != need {
-                return status_from_err(TelemetryError::SizeMismatchError);
-            }
-            for i in 0..count {
-                let b = unsafe { slice::from_raw_parts(pkt.payload.add(i * 4), 4) };
-                unsafe {
-                    (out as *mut i32)
-                        .add(i)
-                        .write_unaligned(i32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-                };
-            }
-            status_from_result_code(SedsResult::SedsOk)
-        }
-        SIZE_OF_F64 => {
-            let need = count * 8;
-            if pkt.payload_len != need {
-                return status_from_err(TelemetryError::SizeMismatchError);
-            }
-            for i in 0..count {
-                let b = unsafe { slice::from_raw_parts(pkt.payload.add(i * 8), 8) };
-                unsafe {
-                    (out as *mut i64)
-                        .add(i)
-                        .write_unaligned(i64::from_le_bytes([
-                            b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
-                        ]))
-                };
-            }
-            status_from_result_code(SedsResult::SedsOk)
-        }
-        _ => status_from_err(TelemetryError::BadArg),
-    }
-}
-
-#[inline]
-unsafe fn pkt_get_float<T>(pkt: &SedsPacketView, out: *mut T, count: usize, width: usize) -> i32 {
-    match width {
-        SIZE_OF_U32 => {
-            let need = count * 4;
-            if pkt.payload_len != need {
-                return status_from_err(TelemetryError::SizeMismatchError);
-            }
-            for i in 0..count {
-                let b = unsafe { slice::from_raw_parts(pkt.payload.add(i * 4), 4) };
-                unsafe {
-                    (out as *mut f32)
-                        .add(i)
-                        .write_unaligned(f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-                };
-            }
-            status_from_result_code(SedsResult::SedsOk)
-        }
-        SIZE_OF_F64 => {
-            let need = count * 8;
-            if pkt.payload_len != need {
-                return status_from_err(TelemetryError::SizeMismatchError);
-            }
-            for i in 0..count {
-                let b = unsafe { slice::from_raw_parts(pkt.payload.add(i * 8), 8) };
-                unsafe {
-                    (out as *mut f64)
-                        .add(i)
-                        .write_unaligned(f64::from_le_bytes([
-                            b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
-                        ]))
-                };
-            }
-            status_from_result_code(SedsResult::SedsOk)
-        }
-        _ => status_from_err(TelemetryError::BadArg),
-    }
-}
-
-/// Generic, typed extractor that mirrors `seds_router_log_typed`.
-/// Returns 0 on success; -2 bad arg; -4 size mismatch.
-#[unsafe(no_mangle)]
-pub extern "C" fn seds_pkt_get_typed(
-    pkt: *const SedsPacketView,
-    out: *mut c_void,
-    count: usize,
-    elem_size: usize, // 1,2,4,8
-    elem_kind: u32,   // 0=unsigned,1=signed,2=float
-) -> i32 {
-    if pkt.is_null() || (count > 0 && out.is_null()) {
-        return status_from_err(TelemetryError::BadArg);
-    }
-    let pkt = unsafe { &*pkt };
-
-    // Dispatch based on (kind, size). We treat `out` as the correct pointer type for the combo.
-    unsafe {
-        match (elem_kind, elem_size) {
-            (SEDS_EK_UNSIGNED, 1) => pkt_get_unsigned::<u8>(pkt, out as *mut u8, count, 1),
-            (SEDS_EK_UNSIGNED, 2) => pkt_get_unsigned::<u16>(pkt, out as *mut u16, count, 2),
-            (SEDS_EK_UNSIGNED, 4) => pkt_get_unsigned::<u32>(pkt, out as *mut u32, count, 4),
-            (SEDS_EK_UNSIGNED, 8) => pkt_get_unsigned::<u64>(pkt, out as *mut u64, count, 8),
-
-            (SEDS_EK_SIGNED, 1) => pkt_get_signed::<i8>(pkt, out as *mut i8, count, 1),
-            (SEDS_EK_SIGNED, 2) => pkt_get_signed::<i16>(pkt, out as *mut i16, count, 2),
-            (SEDS_EK_SIGNED, 4) => pkt_get_signed::<i32>(pkt, out as *mut i32, count, 4),
-            (SEDS_EK_SIGNED, 8) => pkt_get_signed::<i64>(pkt, out as *mut i64, count, 8),
-
-            (SEDS_EK_FLOAT, 4) => pkt_get_float::<f32>(pkt, out as *mut f32, count, 4),
-            (SEDS_EK_FLOAT, 8) => pkt_get_float::<f64>(pkt, out as *mut f64, count, 8),
-
-            _ => status_from_err(TelemetryError::BadArg),
-        }
-    }
-}
-
-// Keep the old f32 helper but implement via the generic version.
-#[unsafe(no_mangle)]
-pub extern "C" fn seds_pkt_get_f32(pkt: *const SedsPacketView, out: *mut f32, n: usize) -> i32 {
-    seds_pkt_get_typed(pkt, out as *mut c_void, n, 4, SEDS_EK_FLOAT)
+#[derive(Debug)]
+#[allow(dead_code)]
+pub enum VectorizeError {
+    NullBasePtr,
+    ElemSizeMismatch { elem_size: usize, expected: usize },
+    Overflow,
+    ZeroCount,
 }
 
 fn vectorize_data<T: LeBytes + Copy>(
@@ -826,19 +690,9 @@ fn vectorize_data<T: LeBytes + Copy>(
     if count == 0 {
         return Err(VectorizeError::ZeroCount);
     }
-
-    // Prevent arithmetic overflow before pointer math
-    let _ = count
-        .checked_mul(elem_size)
-        .ok_or(VectorizeError::Overflow)?;
-
-    // Reserve once to avoid multiple reallocations
+    let _ = count.checked_mul(elem_size).ok_or(VectorizeError::Overflow)?;
     tmp.reserve(count);
 
-    // SAFETY:
-    // - Caller promises `base .. base + total` is a valid readable region.
-    // - We deliberately use read_unaligned.
-    // - We cast to *const T only to perform the read; alignment is ignored by read_unaligned.
     unsafe {
         let mut p = base;
         for _ in 0..count {
@@ -848,11 +702,9 @@ fn vectorize_data<T: LeBytes + Copy>(
             p = p.add(elem_size);
         }
     }
-
     Ok(())
 }
 
-/// Read possibly-unaligned elements from `data` into a Vec<T>, then call Router::log<T>.
 #[inline]
 unsafe fn log_unaligned_slice<T: LeBytes>(
     router: &Router,
@@ -863,7 +715,8 @@ unsafe fn log_unaligned_slice<T: LeBytes>(
     let mut tmp: Vec<T> = Vec::with_capacity(count);
     let elem_size = size_of::<T>();
     let base = data as *const u8;
-    vectorize_data::<T>(base, count, elem_size, &mut tmp).map_err(|_| TelemetryError::Io("vectorize_data failed"))?;
+    vectorize_data::<T>(base, count, elem_size, &mut tmp)
+        .map_err(|_| TelemetryError::Io("vectorize_data failed"))?;
     router.log::<T>(ty, &tmp)
 }
 
@@ -877,9 +730,11 @@ unsafe fn log_queue_unaligned_slice<T: LeBytes>(
     let mut tmp: Vec<T> = Vec::with_capacity(count);
     let elem_size = size_of::<T>();
     let base = data as *const u8;
-    vectorize_data::<T>(base, count, elem_size, &mut tmp).map_err(|_| TelemetryError::Io("vectorize_data failed"))?;
+    vectorize_data::<T>(base, count, elem_size, &mut tmp)
+        .map_err(|_| TelemetryError::Io("vectorize_data failed"))?;
     router.log_queue::<T>(ty, &tmp)
 }
+
 #[unsafe(no_mangle)]
 pub extern "C" fn seds_router_log_typed(
     r: *mut SedsRouter,
@@ -898,7 +753,6 @@ pub extern "C" fn seds_router_log_typed(
     };
     let router = unsafe { &(*r).inner };
 
-    // dispatch on (elem_kind, elem_size)
     let res = unsafe {
         match (elem_kind, elem_size) {
             (SEDS_EK_UNSIGNED, 1) => log_unaligned_slice::<u8>(router, ty, data, count),
@@ -939,7 +793,6 @@ pub extern "C" fn seds_router_log_queue_typed(
     };
     let router = unsafe { &mut (*r).inner };
 
-    // dispatch on (elem_kind, elem_size)
     let res = unsafe {
         match (elem_kind, elem_size) {
             (SEDS_EK_UNSIGNED, 1) => log_queue_unaligned_slice::<u8>(router, ty, data, count),
@@ -962,31 +815,12 @@ pub extern "C" fn seds_router_log_queue_typed(
     ok_or_status(res)
 }
 
-// -------- Clock bridge from C --------
-type CNowMs = Option<extern "C" fn(user: *mut c_void) -> u64>;
-
-struct FfiClock {
-    cb: CNowMs,
-    user_addr: usize,
-}
-
-impl Clock for FfiClock {
-    #[inline]
-    fn now_ms(&self) -> u64 {
-        if let Some(f) = self.cb {
-            f(self.user_addr as *mut c_void)
-        } else {
-            status_from_result_code(SedsResult::SedsOk) as u64
-        }
-    }
-}
-
 // ----------------- FFI: queue utilities -----------------
 
 #[unsafe(no_mangle)]
 pub extern "C" fn seds_router_process_all_queues(r: *mut SedsRouter) -> i32 {
     if r.is_null() {
-        return status_from_err(TelemetryError::BadArg); // SEDS_BAD_ARG
+        return status_from_err(TelemetryError::BadArg);
     }
     let router = unsafe { &mut (*r).inner };
     ok_or_status(router.process_all_queues())
@@ -1022,49 +856,40 @@ pub extern "C" fn seds_router_clear_tx_queue(r: *mut SedsRouter) -> i32 {
     status_from_result_code(SedsResult::SedsOk)
 }
 
-// --------- FFI: process queues with timeout (requires a clock callback) ----------
+// --------- FFI: process queues with timeout ----------
 
-/// Process TX queue until empty or timeout.
-/// `now_ms_cb`: extern "C" u64 (*)(void* user) returning monotonic milliseconds.
 #[unsafe(no_mangle)]
 pub extern "C" fn seds_router_process_tx_queue_with_timeout(
     r: *mut SedsRouter,
     timeout_ms: u32,
 ) -> i32 {
     if r.is_null() {
-        return status_from_err(TelemetryError::BadArg); // bad arg
+        return status_from_err(TelemetryError::BadArg);
     }
     let router = unsafe { &mut (*r).inner };
-
     ok_or_status(router.process_tx_queue_with_timeout(timeout_ms))
 }
 
-/// Process RX queue until empty or timeout.
-/// `now_ms_cb`: extern "C" u64 (*)(void* user) returning monotonic milliseconds.
 #[unsafe(no_mangle)]
 pub extern "C" fn seds_router_process_rx_queue_with_timeout(
     r: *mut SedsRouter,
     timeout_ms: u32,
 ) -> i32 {
     if r.is_null() {
-        return status_from_err(TelemetryError::BadArg); // bad arg
+        return status_from_err(TelemetryError::BadArg);
     }
     let router = unsafe { &mut (*r).inner };
-
     ok_or_status(router.process_rx_queue_with_timeout(timeout_ms))
 }
 
-/// Process all queues until empty or timeout.
-/// `now_ms_cb`: extern "C" u64 (*)(void* user) returning monotonic milliseconds.
 #[unsafe(no_mangle)]
 pub extern "C" fn seds_router_process_all_queues_with_timeout(
     r: *mut SedsRouter,
     timeout_ms: u32,
 ) -> i32 {
     if r.is_null() {
-        return status_from_err(TelemetryError::BadArg); // bad arg
+        return status_from_err(TelemetryError::BadArg);
     }
     let router = unsafe { &mut (*r).inner };
-
     ok_or_status(router.process_all_queues_with_timeout(timeout_ms))
 }
