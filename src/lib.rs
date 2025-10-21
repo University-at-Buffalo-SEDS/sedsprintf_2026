@@ -26,7 +26,7 @@ mod embedded_alloc {
     use core::alloc::{GlobalAlloc, Layout};
 
 
-    extern "C" {
+    unsafe extern "C" {
         fn pvPortMalloc(size: usize) -> *mut core::ffi::c_void;
         fn vPortFree(ptr: *mut core::ffi::c_void);
     }
@@ -35,10 +35,10 @@ mod embedded_alloc {
 
     unsafe impl GlobalAlloc for FreeRtosAlloc {
         unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-            pvPortMalloc(layout.size()) as *mut u8
+            unsafe{pvPortMalloc(layout.size()) as *mut u8}
         }
         unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
-            vPortFree(ptr as *mut _)
+            unsafe{vPortFree(ptr as *mut _)}
         }
     }
 
