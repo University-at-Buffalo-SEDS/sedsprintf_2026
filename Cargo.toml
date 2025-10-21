@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021" # keep your edition if you want; 2021 is broadly compatible
 
 [lib]
-crate-type = ["rlib", "staticlib"]
+crate-type = ["staticlib"]
 
 [features]
 # Host/dev convenience: enable std by default so `cargo build` / `cargo test` work.

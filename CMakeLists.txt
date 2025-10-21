@@ -32,9 +32,9 @@ set(RS_LIB_DBG "${RUST_DIR}/target/${RUST_TRIPLE}debug/libsedsprintf_rs.a")
 set(RS_LIB_REL "${RUST_DIR}/target/${RUST_TRIPLE}release/libsedsprintf_rs.a")
 set(RS_INCLUDE "${RUST_DIR}/C-Headers")
 
-if(RUST_PROFILE STREQUAL "release")
-    set(RS_ARGS_STR "${RS_ARGS_STR} release")
-endif()
+set(RS_ARG_REL " $<$<CONFIG:Release>:release>")
+
+set(RS_ARGS_STR "${RS_ARGS_STR} ${RS_ARG_REL}")
 
 if (NOT EXISTS "${RUST_DIR}/Cargo.toml")
     message(FATAL_ERROR "SEDSPRINTF_RS_DIR='${RUST_DIR}' does not contain Cargo.toml. "

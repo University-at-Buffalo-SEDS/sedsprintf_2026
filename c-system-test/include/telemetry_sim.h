@@ -5,9 +5,6 @@
 
 #ifdef __cplusplus
 extern "C" {
-
-
-
 #endif
 
 // Forward declare via typedef, then define the named struct.
@@ -64,7 +61,7 @@ SedsResult sdcard_handler(const SedsPacketView * pkt, void * user);
 
 uint64_t host_now_ms(void * user);
 
-uint64_t node_now_since_bus_ms(void *user);
+uint64_t node_now_since_bus_ms(void * user);
 #ifdef __cplusplus
 }
 #endif

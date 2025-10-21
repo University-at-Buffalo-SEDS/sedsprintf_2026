@@ -5,9 +5,6 @@
 
 #ifdef __cplusplus
 extern "C" {
-
-
-
 #endif
 
 // Router state type
