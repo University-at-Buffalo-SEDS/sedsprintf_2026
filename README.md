@@ -41,8 +41,8 @@ codebases.
 
 ## Usage
 
-- When using this library as a submodule or subtree in a c or c++ project, make sure to add the following to your
-- cmakelists.txt
+- When using this library as a submodule or subtree in a C or C++ project, make sure to add the following to your
+cmakelists.txt
   ```cmake
   add_subdirectory(${CMAKE_SOURCE_DIR}/sedsprintf_rs)
   target_link_libraries(${CMAKE_PROJECT_NAME} sedsprintf_rs)
