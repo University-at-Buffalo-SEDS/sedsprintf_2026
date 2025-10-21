@@ -323,7 +323,7 @@ unsafe fn copy_telemetry_packet_raw(
     *d = TelemetryPacket {
         ty: s.ty,
         data_size: s.data_size,
-        sender: s.sender,
+        sender: s.sender.clone(),
         endpoints: std::sync::Arc::from((&*s.endpoints).to_vec().into_boxed_slice()),
         timestamp: s.timestamp,
         payload: std::sync::Arc::from((&*s.payload).to_vec().into_boxed_slice()),
@@ -360,12 +360,12 @@ fn helpers_copy_telemetry_packet() {
 
     // (3) distinct objects → deep copy and equal fields
     let mut dest = TelemetryPacket {
-        ty: src.ty, // initialize minimally; it will be overwritten
+        ty: src.ty,                    // seed; will be overwritten
         data_size: 0,
-        sender: src.sender,
-        endpoints: std::sync::Arc::from(Vec::<DataEndpoint>::new().into_boxed_slice()),
+        sender: std::sync::Arc::clone(&src.sender), // <-- CLONE, not move
+        endpoints: std::sync::Arc::clone(&src.endpoints),
         timestamp: 0,
-        payload: std::sync::Arc::from(Vec::<u8>::new().into_boxed_slice()),
+        payload: std::sync::Arc::clone(&src.payload),
     };
     let st = unsafe { copy_telemetry_packet_raw(&mut dest as *mut _, &src as *const _) };
     assert!(st.is_ok());

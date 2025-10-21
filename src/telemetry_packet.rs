@@ -1,15 +1,14 @@
 #![allow(dead_code)]
 
-
 pub use crate::config::{
-    data_type_size, get_info_type, message_meta, DataEndpoint, DataType, MessageDataType,
+    get_info_type, message_meta, DataEndpoint, DataType, MessageDataType,
     MessageType, DEVICE_IDENTIFIER, MESSAGE_DATA_TYPES,
 };
 // ---- core/alloc imports usable in both std and no_std ----
 use crate::{TelemetryError, TelemetryResult};
 use alloc::{string::String, string::ToString, sync::Arc, vec::Vec};
 use core::{convert::TryInto, fmt::Write};
-use time::{OffsetDateTime};
+use time::OffsetDateTime;
 
 const EPOCH_MS_THRESHOLD: u64 = 1_000_000_000_000; // clearly not an uptime counter
 
@@ -18,18 +17,19 @@ const EPOCH_MS_THRESHOLD: u64 = 1_000_000_000_000; // clearly not an uptime coun
 pub struct TelemetryPacket {
     pub ty: DataType,
     pub data_size: usize,
-    pub sender: &'static str,
+    pub sender: Arc<str>,                 // <-- OWNED (was &'static str)
     pub endpoints: Arc<[DataEndpoint]>,
     pub timestamp: u64,
     pub payload: Arc<[u8]>,
 }
+
 // -------------------- TelemetryPacket impl --------------------
 impl TelemetryPacket {
     /// Create a packet from a raw payload (validated against `message_meta(ty)`).
     pub fn new(
         ty: DataType,
         endpoints: &[DataEndpoint],
-        sender: &'static str,
+        sender: impl Into<Arc<str>>,      // <-- accept &str/String/Arc<str>
         timestamp: u64,
         payload: Arc<[u8]>,
     ) -> TelemetryResult<Self> {
@@ -46,7 +46,7 @@ impl TelemetryPacket {
         Ok(Self {
             ty,
             data_size: meta.data_size,
-            sender,
+            sender: sender.into(),
             endpoints: Arc::<[DataEndpoint]>::from(endpoints.to_vec()),
             timestamp,
             payload,
@@ -70,7 +70,7 @@ impl TelemetryPacket {
         Self::new(
             ty,
             endpoints,
-            DEVICE_IDENTIFIER,
+            Arc::<str>::from(DEVICE_IDENTIFIER), // <-- no leak
             timestamp,
             Arc::<[u8]>::from(bytes.to_vec()),
         )
@@ -98,7 +98,7 @@ impl TelemetryPacket {
         Self::new(
             ty,
             endpoints,
-            DEVICE_IDENTIFIER,
+            Arc::<str>::from(DEVICE_IDENTIFIER), // <-- no leak
             timestamp,
             Arc::<[u8]>::from(bytes),
         )
@@ -190,7 +190,7 @@ impl TelemetryPacket {
             "Type: {}, Size: {}, Sender: {}, Endpoints: [{}], Timestamp: {} ({})",
             self.ty.as_str(),
             self.data_size,
-            self.sender,
+            self.sender.as_ref(),            // <-- Arc<str> to &str
             endpoints,
             self.timestamp,
             human_time
@@ -220,10 +220,12 @@ impl TelemetryPacket {
             None => None,
         }
     }
+
     #[inline]
     fn msg_ty(&self) -> MessageDataType {
         MESSAGE_DATA_TYPES[self.ty as usize]
     }
+
     /// Full pretty string including decoded data portion.
     pub fn to_string(&self) -> String {
         const MAX_PRECISION: usize = 12;
@@ -247,7 +249,6 @@ impl TelemetryPacket {
         }
 
         // Non-string payloads
-
         match self.msg_ty() {
             MessageDataType::Float32 => {
                 for (i, chunk) in self.payload.chunks_exact(4).enumerate() {
@@ -288,45 +289,14 @@ impl TelemetryPacket {
         let mut hex = String::with_capacity(self.payload.len().saturating_mul(5));
         if !self.payload.is_empty() {
             match self.msg_ty() {
-                // If payload length is a multiple of 4 → format each f32 as 4 bytes (LE)
-                MessageDataType::Float32 => {
-                    for chunk in self
-                        .payload
-                        .chunks_exact(data_type_size(MessageDataType::Float32))
-                    {
-                        let val = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
-                        let bytes = val.to_le_bytes();
-                        for b in bytes {
-                            let _ = write!(&mut hex, " 0x{:02x}", b);
-                        }
-                    }
-                }
-                MessageDataType::UInt32 => {
-                    for chunk in self
-                        .payload
-                        .chunks_exact(data_type_size(MessageDataType::Float32))
-                    {
-                        let val = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
-                        let bytes = val.to_le_bytes();
-                        for b in bytes {
-                            let _ = write!(&mut hex, " 0x{:02x}", b);
-                        }
-                    }
-                }
-                MessageDataType::UInt8 => {
-                    for chunk in self
-                        .payload
-                        .chunks_exact(data_type_size(MessageDataType::Float32))
-                    {
-                        let val = u8::from_le_bytes([chunk[0]]);
-                        let bytes = val.to_le_bytes();
-                        for b in bytes {
-                            let _ = write!(&mut hex, " 0x{:02x}", b);
-                        }
+                // Dump raw bytes for numeric payloads (grouping can be added if desired)
+                MessageDataType::Float32 | MessageDataType::UInt32 | MessageDataType::UInt8 => {
+                    for &b in self.payload.iter() {
+                        let _ = write!(&mut hex, " 0x{:02x}", b);
                     }
                 }
                 _ => {
-                    // Fallback: print raw bytes
+                    // Fallback: raw bytes
                     for &b in self.payload.iter() {
                         let _ = write!(&mut hex, " 0x{:02x}", b);
                     }
@@ -344,7 +314,6 @@ impl TelemetryPacket {
 // ---- Optional: Display so we can `format!("{pkt}")` ----
 impl core::fmt::Display for TelemetryPacket {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        // endpoints
         f.write_str(&TelemetryPacket::to_string(self))
     }
 }
