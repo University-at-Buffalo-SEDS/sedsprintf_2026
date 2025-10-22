@@ -69,9 +69,9 @@ int main(void)
         usleep(gen_random_num_ms());
 
         // B logs PRESSURE (1 float)
-        const u_int32_t barometer_data[3] = {54, 1234214, 123421};
+        make_series(buf, 4, 3.7f);
         assert(
-            node_log(&flightControllerBoard, SEDS_DT_BAROMETER, barometer_data, 3, sizeof(barometer_data[0])) ==
+            node_log(&flightControllerBoard, SEDS_DT_BAROMETER, buf, 3, sizeof(buf[0])) ==
             SEDS_OK);
 
         seds_router_process_tx_queue_with_timeout(flightControllerBoard.r, 100);

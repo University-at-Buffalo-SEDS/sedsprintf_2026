@@ -77,7 +77,7 @@ pub const MESSAGE_DATA_TYPES: [MessageDataType; DataType::COUNT] = [
     MessageDataType::Float32,
     MessageDataType::Float32,
     MessageDataType::UInt8,
-    MessageDataType::UInt32,
+    MessageDataType::Float32,
 ];
 
 pub const MESSAGE_INFO_TYPES: [MessageType; DataType::COUNT] = [
