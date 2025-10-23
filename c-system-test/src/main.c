@@ -48,7 +48,6 @@ int main(void)
     usleep(gen_random_num_ms());
     assert(node_init(&powerBoard, &bus, "Power Board", 0, 0) == SEDS_OK);
     // 3) Send a variety of types from each board
-    //    (Adjust SEDS_DT_* to match your definitions)
     float buf[8];
 
     // A logs GPS (3 floats)
