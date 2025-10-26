@@ -3,7 +3,7 @@
 use crate::config::{MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE};
 use crate::repr_u32::ReprU32Enum;
 use crate::telemetry_packet::{DataEndpoint, TelemetryPacket};
-use crate::TelemetryError;
+use crate::{try_enum_from_u32, TelemetryError};
 use crate::{config::DataType, impl_repr_u32_enum};
 use alloc::{sync::Arc, vec::Vec};
 use core::convert::TryInto;
@@ -146,16 +146,7 @@ impl<'a> ByteReader<'a> {
     }
 }
 
-// ---- tiny enum helpers ----
 
-pub fn try_enum_from_u32<E: ReprU32Enum>(x: u32) -> Option<E> {
-    if x > E::MAX {
-        return None;
-    }
-    // SAFETY: `E` is promised to be a fieldless #[repr(u32)] enum (thus 4 bytes, Copy).
-    let e = unsafe { (&x as *const u32 as *const E).read() };
-    Some(e)
-}
 
 // Implement the ReprU32Enum trait for the enums using the macro.
 impl_repr_u32_enum!(DataType, MAX_VALUE_DATA_TYPE);
