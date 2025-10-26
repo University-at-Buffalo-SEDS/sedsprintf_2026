@@ -117,11 +117,12 @@ SedsResult init_telemetry_router(void)
 
 SedsResult log_telemetry_synchronous(
     SedsDataType data_type,
-    const void *data,
+    const void * data,
     size_t element_count,
     size_t element_size)
 {
-    if (!g_router.r) {
+    if (!g_router.r)
+    {
         if (init_telemetry_router() != SEDS_OK)
             return SEDS_ERR;
     }
@@ -157,11 +158,12 @@ SedsResult process_rx_queue(void)
 
 SedsResult log_telemetry_asynchronous(
     SedsDataType data_type,
-    const void *data,
+    const void * data,
     size_t element_count,
     size_t element_size)
 {
-    if (!g_router.r) {
+    if (!g_router.r)
+    {
         if (init_telemetry_router() != SEDS_OK)
             return SEDS_ERR;
     }
@@ -212,4 +214,18 @@ SedsResult process_all_queues_timeout(uint32_t timeout_ms)
         g_router.r,
         timeout_ms
     );
+}
+
+SedsResult print_handle_telemetry_error(const int32_t error_code)
+{
+    char buf[seds_error_to_string_len(error_code)];
+
+    SedsResult res = seds_error_to_string(error_code, buf, sizeof(buf));
+    if (res != SEDS_OK)
+    {
+        printf("handle_error: seds_error_to_string failed: {%d}\n", res);
+        return res;
+    }
+    printf("Error: %s\n", &*buf);
+    return SEDS_OK;
 }

@@ -59,7 +59,7 @@ impl DataType {
     pub const COUNT: usize = 6;
 
     #[inline]
-    pub fn as_str(self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             DataType::TelemetryError => "TELEMETRY_ERROR",
             DataType::GpsData => "GPS_DATA",

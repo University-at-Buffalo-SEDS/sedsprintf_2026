@@ -49,11 +49,11 @@ typedef enum
 {
     SEDS_OK = 0, /**< Success. */
     SEDS_ERR = -1, /**< Unspecified error. */
-    SEDS_BAD_ARG = -2, /**< One or more arguments are invalid (NULL/size mismatch/etc). */
-    SEDS_INVALID_TYPE = -3, /**< Unsupported/unknown type or endpoint value. */
-    SEDS_SIZE_MISMATCH = -4, /**< Element/byte length does not match schema requirement. */
-    SEDS_DESERIALIZE = -5, /**< Failed to deserialize a packet from bytes. */
-    SEDS_HANDLER_ERROR = -6, /**< A user-provided endpoint handler returned an error. */
+    SEDS_BAD_ARG = -9, /**< One or more arguments are invalid (NULL/size mismatch/etc). */
+    SEDS_INVALID_TYPE = -2, /**< Unsupported/unknown type or endpoint value. */
+    SEDS_SIZE_MISMATCH = -3, /**< Element/byte length does not match schema requirement. */
+    SEDS_DESERIALIZE = -10, /**< Failed to deserialize a packet from bytes. */
+    SEDS_HANDLER_ERROR = -8, /**< A user-provided endpoint handler returned an error. */
 } SedsResult;
 
 /**
@@ -154,6 +154,16 @@ int32_t seds_pkt_header_string_len(const SedsPacketView * pkt);
  */
 int32_t seds_pkt_to_string_len(const SedsPacketView * pkt);
 
+/**
+ * @brief Get required buffer length for @ref seds_error_to_string.
+ *
+ * @param error_code Value of the error code.
+ * @return Required number of bytes (>=1) including the terminating NUL.
+ *
+ * @note Use this to size your buffer prior to calling @ref seds_error_to_string.
+ */
+int32_t seds_error_to_string_len(const int32_t error_code);
+
 // ==============================
 // Packet -> string formatting
 // ==============================
@@ -184,8 +194,18 @@ int32_t seds_pkt_header_string(const SedsPacketView * pkt, char * buf, size_t bu
  * @param buf_len Size of @p buf in bytes when non-NULL.
  * @return Required length including NUL (>=1) on success, or a negative @ref SedsResult.
  */
-int32_t seds_pkt_to_string(const SedsPacketView * pkt, char * buf, size_t buf_len);
+SedsResult seds_pkt_to_string(const SedsPacketView * pkt, char * buf, size_t buf_len);
 
+/**
+ * @brief Write the error as text.
+ *
+ *
+ * @param error_code     Value of the error code.
+ * @param buf     Destination buffer or NULL to query the required length.
+ * @param buf_len Size of @p buf in bytes when non-NULL.
+ * @return Required length including NUL (>=1) on success, or a negative @ref SedsResult.
+ */
+SedsResult seds_error_to_string(const int32_t error_code, char * buf, size_t buf_len);
 
 // ==============================
 // Router lifecycle

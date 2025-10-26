@@ -5,6 +5,8 @@
 
 #ifdef __cplusplus
 extern "C" {
+
+
 #endif
 
 // Router state type
@@ -53,7 +55,7 @@ SedsResult process_rx_queue_timeout(uint32_t timeout_ms);
 
 SedsResult process_all_queues_timeout(uint32_t timeout_ms);
 
-
+SedsResult print_handle_telemetry_error(int32_t error_code);
 #ifdef __cplusplus
 }
 #endif

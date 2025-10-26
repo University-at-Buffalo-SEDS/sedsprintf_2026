@@ -2,17 +2,17 @@
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 #![allow(dead_code)]
 
-use crate::{
-    config::DataEndpoint,
-    router::{BoardConfig, EndpointHandler, Router},
-    telemetry_packet::{DataType, TelemetryPacket},
-    TelemetryError, TelemetryResult,
-};
+
 use crate::router::{Clock, LeBytes};
+use crate::{
+    config::DataEndpoint, router::{BoardConfig, EndpointHandler, Router}, telemetry_packet::{DataType, TelemetryPacket},
+    TelemetryError,
+    TelemetryErrorCode,
+    TelemetryResult,
+};
 
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::{ffi::c_char, ffi::c_void, mem::size_of, ptr, slice, str::from_utf8};
-
 // ============================ status / error helpers ============================
 
 const SEDS_EK_UNSIGNED: u32 = 0;
@@ -41,15 +41,7 @@ fn status_from_result_code(e: SedsResult) -> i32 {
 
 #[inline]
 fn status_from_err(e: TelemetryError) -> i32 {
-    match e {
-        TelemetryError::InvalidType => -3,
-        TelemetryError::SizeMismatch { .. } => -4,
-        TelemetryError::SizeMismatchError => -4,
-        TelemetryError::Deserialize(_) => -5,
-        TelemetryError::HandlerError(_) => -6,
-        TelemetryError::BadArg => -2,
-        _ => -1,
-    }
+    e.to_error_code() as i32
 }
 
 #[inline]
@@ -107,14 +99,18 @@ struct CHandler {
     cb: CEndpointHandler,
     user_addr: usize,
 }
+
 unsafe impl Send for CHandler {}
+
 unsafe impl Sync for CHandler {}
 
 #[derive(Copy, Clone)]
 struct TxCtx {
     user_addr: usize,
 }
+
 unsafe impl Send for TxCtx {}
+
 unsafe impl Sync for TxCtx {}
 
 // ============================ view_to_packet (NO LEAKS) ============================
@@ -163,8 +159,8 @@ unsafe fn write_str_to_buf(s: &str, buf: *mut c_char, buf_len: usize) -> i32 {
     }
 
     let ncopy = core::cmp::min(s.len(), buf_len.saturating_sub(1));
-    unsafe {ptr::copy_nonoverlapping(s.as_ptr(), buf as *mut u8, ncopy)};
-    unsafe {*buf.add(ncopy) = 0};
+    unsafe { ptr::copy_nonoverlapping(s.as_ptr(), buf as *mut u8, ncopy) };
+    unsafe { *buf.add(ncopy) = 0 };
 
     // If too small, return required size (not success)
     if buf_len < needed {
@@ -176,7 +172,8 @@ unsafe fn write_str_to_buf(s: &str, buf: *mut c_char, buf_len: usize) -> i32 {
 
 // ============================ FFI: *_len / *_to_string via TelemetryPacket ============================
 
-#[unsafe(no_mangle)]pub extern "C" fn seds_pkt_header_string_len(pkt: *const SedsPacketView) -> i32 {
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_pkt_header_string_len(pkt: *const SedsPacketView) -> i32 {
     if pkt.is_null() {
         return status_from_err(TelemetryError::BadArg);
     }
@@ -189,20 +186,52 @@ unsafe fn write_str_to_buf(s: &str, buf: *mut c_char, buf_len: usize) -> i32 {
     (s.len() + 1) as i32
 }
 
-#[unsafe(no_mangle)]pub extern "C" fn seds_pkt_to_string_len(pkt: *const SedsPacketView) -> i32 {
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_pkt_to_string_len(pkt: *const SedsPacketView) -> i32 {
+    let result = packet_to_string(pkt);
+    if let Err(err) = result {
+        return err;
+    }
+    let s = result.unwrap();
+    (s.len() + 1) as i32
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_error_to_string_len(error_code: i32) -> i32 {
+    let s = error_code_to_string(error_code);
+    (s.len() + 1) as i32
+}
+
+fn packet_to_string(pkt: *const SedsPacketView) -> Result<String, i32> {
     if pkt.is_null() {
-        return status_from_err(TelemetryError::BadArg);
+        return Err(status_from_err(TelemetryError::BadArg));
     }
     let view = unsafe { &*pkt };
     let tpkt = match view_to_packet(view) {
         Ok(p) => p,
-        Err(_) => return status_from_err(TelemetryError::BadArg),
+        Err(_) => return Err(status_from_err(TelemetryError::BadArg)),
     };
-    let s = tpkt.to_string(); // uses module's formatting
-    (s.len() + 1) as i32
+    Ok(tpkt.to_string())
 }
 
-#[unsafe(no_mangle)]pub extern "C" fn seds_pkt_header_string(
+fn error_code_to_string(error_code: i32) -> &'static str {
+    let result = TelemetryErrorCode::try_from_i32(error_code);
+
+    match result {
+        Some(s) => s.to_string(),
+        None => {
+            if error_code == SedsResult::SedsOk as i32 {
+                "SEDS OK"
+            } else if error_code == SedsResult::SedsErr as i32 {
+                "SEDS ERROR"
+            } else {
+                "Unknown error"
+            }
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_pkt_header_string(
     pkt: *const SedsPacketView,
     buf: *mut c_char,
     buf_len: usize,
@@ -219,23 +248,33 @@ unsafe fn write_str_to_buf(s: &str, buf: *mut c_char, buf_len: usize) -> i32 {
     unsafe { write_str_to_buf(&s, buf, buf_len) }
 }
 
-#[unsafe(no_mangle)]pub extern "C" fn seds_pkt_to_string(
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_pkt_to_string(
     pkt: *const SedsPacketView,
     buf: *mut c_char,
     buf_len: usize,
 ) -> i32 {
-    if pkt.is_null() {
+    let result = packet_to_string(pkt);
+    if let Err(err) = result {
+        return err;
+    }
+    let s = result.unwrap();
+
+    if s.len() > buf_len {
         return status_from_err(TelemetryError::BadArg);
     }
-    let view = unsafe { &*pkt };
-    let tpkt = match view_to_packet(view) {
-        Ok(p) => p,
-        Err(_) => return status_from_err(TelemetryError::BadArg),
-    };
-    let s = tpkt.to_string(); // uses module's formatting
     unsafe { write_str_to_buf(&s, buf, buf_len) }
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_error_to_string(error_code: i32, buf: *mut c_char, buf_len: usize) -> i32 {
+    let s = error_code_to_string(error_code);
+
+    if s.len() > buf_len {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    unsafe { write_str_to_buf(&s, buf, buf_len) }
+}
 // ============================ FFI: new / free ============================
 
 type CNowMs = Option<extern "C" fn(user: *mut c_void) -> u64>;
@@ -244,6 +283,7 @@ struct FfiClock {
     cb: CNowMs,
     user_addr: usize,
 }
+
 impl Clock for FfiClock {
     #[inline]
     fn now_ms(&self) -> u64 {
@@ -255,7 +295,8 @@ impl Clock for FfiClock {
     }
 }
 
-#[unsafe(no_mangle)]pub extern "C" fn seds_router_new(
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_new(
     tx: CTransmit,
     tx_user: *mut c_void,
     now_ms_cb: CNowMs,
@@ -341,7 +382,8 @@ impl Clock for FfiClock {
     Box::into_raw(Box::new(SedsRouter { inner: router }))
 }
 
-#[unsafe(no_mangle)]pub extern "C" fn seds_router_free(r: *mut SedsRouter) {
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_free(r: *mut SedsRouter) {
     if r.is_null() {
         return;
     }
@@ -352,7 +394,8 @@ impl Clock for FfiClock {
 
 // ============================ FFI: logging / receive ============================
 
-#[unsafe(no_mangle)]pub extern "C" fn seds_router_log_bytes(
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_log_bytes(
     r: *mut SedsRouter,
     ty_u32: u32,
     data: *const u8,
@@ -370,7 +413,8 @@ impl Clock for FfiClock {
     ok_or_status(router.log::<u8>(ty, slice))
 }
 
-#[unsafe(no_mangle)]pub extern "C" fn seds_router_log_f32(
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_log_f32(
     r: *mut SedsRouter,
     ty_u32: u32,
     vals: *const f32,
@@ -388,7 +432,8 @@ impl Clock for FfiClock {
     ok_or_status(router.log::<f32>(ty, slice))
 }
 
-#[unsafe(no_mangle)]pub extern "C" fn seds_router_receive_serialized(
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_receive_serialized(
     r: *mut SedsRouter,
     bytes: *const u8,
     len: usize,
@@ -401,7 +446,8 @@ impl Clock for FfiClock {
     ok_or_status(router.receive_serialized(slice))
 }
 
-#[unsafe(no_mangle)]pub extern "C" fn seds_router_receive(r: *mut SedsRouter, view: *const SedsPacketView) -> i32 {
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_receive(r: *mut SedsRouter, view: *const SedsPacketView) -> i32 {
     if r.is_null() || view.is_null() {
         return status_from_err(TelemetryError::BadArg);
     }
@@ -413,7 +459,8 @@ impl Clock for FfiClock {
     ok_or_status(router.receive(&pkt))
 }
 
-#[unsafe(no_mangle)]pub extern "C" fn seds_router_queue_tx_message(
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_queue_tx_message(
     r: *mut SedsRouter,
     view: *const SedsPacketView,
 ) -> i32 {
@@ -430,7 +477,8 @@ impl Clock for FfiClock {
 
 // ============================ FFI: queue processing ============================
 
-#[unsafe(no_mangle)]pub extern "C" fn seds_router_process_send_queue(r: *mut SedsRouter) -> i32 {
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_process_send_queue(r: *mut SedsRouter) -> i32 {
     if r.is_null() {
         return status_from_err(TelemetryError::BadArg);
     }
@@ -438,7 +486,8 @@ impl Clock for FfiClock {
     ok_or_status(router.process_send_queue())
 }
 
-#[unsafe(no_mangle)]pub extern "C" fn seds_router_process_received_queue(r: *mut SedsRouter) -> i32 {
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_process_received_queue(r: *mut SedsRouter) -> i32 {
     if r.is_null() {
         return status_from_err(TelemetryError::BadArg);
     }
@@ -446,7 +495,8 @@ impl Clock for FfiClock {
     ok_or_status(router.process_received_queue())
 }
 
-#[unsafe(no_mangle)]pub extern "C" fn seds_router_rx_serialized_packet_to_queue(
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_rx_serialized_packet_to_queue(
     r: *mut SedsRouter,
     bytes: *const u8,
     len: usize,
@@ -459,7 +509,8 @@ impl Clock for FfiClock {
     ok_or_status(router.rx_serialized_packet_to_queue(slice))
 }
 
-#[unsafe(no_mangle)]pub extern "C" fn seds_router_rx_packet_to_queue(
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_rx_packet_to_queue(
     r: *mut SedsRouter,
     view: *const SedsPacketView,
 ) -> i32 {
@@ -474,7 +525,8 @@ impl Clock for FfiClock {
     ok_or_status(router.rx_packet_to_queue(pkt))
 }
 
-#[unsafe(no_mangle)]pub extern "C" fn seds_router_process_all_queues(r: *mut SedsRouter) -> i32 {
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_process_all_queues(r: *mut SedsRouter) -> i32 {
     if r.is_null() {
         return status_from_err(TelemetryError::BadArg);
     }
@@ -482,7 +534,8 @@ impl Clock for FfiClock {
     ok_or_status(router.process_all_queues())
 }
 
-#[unsafe(no_mangle)]pub extern "C" fn seds_router_clear_queues(r: *mut SedsRouter) -> i32 {
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_clear_queues(r: *mut SedsRouter) -> i32 {
     if r.is_null() {
         return status_from_err(TelemetryError::BadArg);
     }
@@ -491,7 +544,8 @@ impl Clock for FfiClock {
     status_from_result_code(SedsResult::SedsOk)
 }
 
-#[unsafe(no_mangle)]pub extern "C" fn seds_router_clear_rx_queue(r: *mut SedsRouter) -> i32 {
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_clear_rx_queue(r: *mut SedsRouter) -> i32 {
     if r.is_null() {
         return status_from_err(TelemetryError::BadArg);
     }
@@ -500,7 +554,8 @@ impl Clock for FfiClock {
     status_from_result_code(SedsResult::SedsOk)
 }
 
-#[unsafe(no_mangle)]pub extern "C" fn seds_router_clear_tx_queue(r: *mut SedsRouter) -> i32 {
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_clear_tx_queue(r: *mut SedsRouter) -> i32 {
     if r.is_null() {
         return status_from_err(TelemetryError::BadArg);
     }
@@ -511,7 +566,8 @@ impl Clock for FfiClock {
 
 // --------- time-budgeted variants (require clock passed at router_new) ---------
 
-#[unsafe(no_mangle)]pub extern "C" fn seds_router_process_tx_queue_with_timeout(
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_process_tx_queue_with_timeout(
     r: *mut SedsRouter,
     timeout_ms: u32,
 ) -> i32 {
@@ -522,7 +578,8 @@ impl Clock for FfiClock {
     ok_or_status(router.process_tx_queue_with_timeout(timeout_ms))
 }
 
-#[unsafe(no_mangle)]pub extern "C" fn seds_router_process_rx_queue_with_timeout(
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_process_rx_queue_with_timeout(
     r: *mut SedsRouter,
     timeout_ms: u32,
 ) -> i32 {
@@ -533,7 +590,8 @@ impl Clock for FfiClock {
     ok_or_status(router.process_rx_queue_with_timeout(timeout_ms))
 }
 
-#[unsafe(no_mangle)]pub extern "C" fn seds_router_process_all_queues_with_timeout(
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_process_all_queues_with_timeout(
     r: *mut SedsRouter,
     timeout_ms: u32,
 ) -> i32 {
@@ -546,7 +604,8 @@ impl Clock for FfiClock {
 
 // ============================ payload pointer helpers ============================
 
-#[unsafe(no_mangle)]pub extern "C" fn seds_pkt_bytes_ptr(
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_pkt_bytes_ptr(
     pkt: *const SedsPacketView,
     out_len: *mut usize,
 ) -> *const c_void {
@@ -560,7 +619,8 @@ impl Clock for FfiClock {
     view.payload as *const c_void
 }
 
-#[unsafe(no_mangle)]pub extern "C" fn seds_pkt_data_ptr(
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_pkt_data_ptr(
     pkt: *const SedsPacketView,
     elem_size: usize,      // 1,2,4,8
     out_count: *mut usize, // optional
@@ -615,7 +675,9 @@ fn vectorize_data<T: LeBytes + Copy>(
         return Err(VectorizeError::ZeroCount);
     }
 
-    let _ = count.checked_mul(elem_size).ok_or(VectorizeError::Overflow)?;
+    let _ = count
+        .checked_mul(elem_size)
+        .ok_or(VectorizeError::Overflow)?;
     tmp.reserve(count);
 
     unsafe {
@@ -661,7 +723,8 @@ unsafe fn log_queue_unaligned_slice<T: LeBytes>(
     router.log_queue::<T>(ty, &tmp)
 }
 
-#[unsafe(no_mangle)]pub extern "C" fn seds_router_log_typed(
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_log_typed(
     r: *mut SedsRouter,
     ty_u32: u32,
     data: *const c_void,
@@ -700,7 +763,8 @@ unsafe fn log_queue_unaligned_slice<T: LeBytes>(
     ok_or_status(res)
 }
 
-#[unsafe(no_mangle)]pub extern "C" fn seds_router_log_queue_typed(
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_log_queue_typed(
     r: *mut SedsRouter,
     ty_u32: u32,
     data: *const c_void,
