@@ -11,7 +11,7 @@ use crate::{
     TelemetryResult,
 };
 
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec, string::String};
 use core::{ffi::c_char, ffi::c_void, mem::size_of, ptr, slice, str::from_utf8};
 // ============================ status / error helpers ============================
 
