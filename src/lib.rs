@@ -133,16 +133,16 @@ impl TelemetryErrorCode {
     pub const MIN: i32 = TelemetryErrorCode::Io as i32;
     pub fn to_string(&self) -> &'static str {
         match self {
-            TelemetryErrorCode::InvalidType => "Invalid Type",
-            TelemetryErrorCode::SizeMismatch => "Size Mismatch",
-            TelemetryErrorCode::SizeMismatchError => "Size Mismatch Error",
-            TelemetryErrorCode::EmptyEndpoints => "Empty Endpoints",
-            TelemetryErrorCode::TimestampInvalid => "Timestamp Invalid",
-            TelemetryErrorCode::MissingPayload => "Missing Payload",
-            TelemetryErrorCode::HandlerError => "Handler Error",
-            TelemetryErrorCode::BadArg => "Bad Arg",
-            TelemetryErrorCode::Deserialize => "Deserialize Error",
-            TelemetryErrorCode::Io => "IO Error",
+            TelemetryErrorCode::InvalidType => "{Invalid Type}",
+            TelemetryErrorCode::SizeMismatch => "{Size Mismatch}",
+            TelemetryErrorCode::SizeMismatchError => "{Size Mismatch Error}",
+            TelemetryErrorCode::EmptyEndpoints => "{Empty Endpoints}",
+            TelemetryErrorCode::TimestampInvalid => "{Timestamp Invalid}",
+            TelemetryErrorCode::MissingPayload => "{Missing Payload}",
+            TelemetryErrorCode::HandlerError => "{Handler Error}",
+            TelemetryErrorCode::BadArg => "{Bad Arg}",
+            TelemetryErrorCode::Deserialize => "{Deserialize Error}",
+            TelemetryErrorCode::Io => "{IO Error}",
         }
     }
 
