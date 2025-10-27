@@ -235,21 +235,24 @@ impl TelemetryPacket {
     pub fn to_string(&self) -> String {
         const MAX_PRECISION: usize = 12;
         let mut s = String::new();
+        s.push_str("{");
         s.push_str(&self.header_string());
 
         if self.payload.is_empty() {
-            s.push_str(", Data: <empty>");
+            s.push_str(", Data: (<empty>)");
             return s;
         }
 
         if get_info_type(self.ty) == MessageType::Error {
-            s.push_str(", Error: ");
+            s.push_str(", Error: (");
         } else {
-            s.push_str(", Data: ");
+            s.push_str(", Data: (");
         }
         // Strings first
         if let Some(msg) = self.data_as_utf8() {
+            s.push_str("\"");
             s.push_str(&msg);
+            s.push_str("\")}");
             return s;
         }
 
@@ -284,7 +287,7 @@ impl TelemetryPacket {
             MessageDataType::String => s.push_str(""),
             MessageDataType::Hex => return self.to_hex_string(),
         }
-
+        s.push_str(")}");
         s
     }
 

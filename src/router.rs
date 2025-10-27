@@ -32,6 +32,7 @@ pub struct EndpointHandler {
 pub trait Clock {
     fn now_ms(&self) -> u64;
 }
+
 impl<T: Fn() -> u64> Clock for T {
     #[inline]
     fn now_ms(&self) -> u64 {
@@ -43,6 +44,7 @@ impl<T: Fn() -> u64> Clock for T {
 pub struct BoardConfig {
     pub handlers: Arc<[EndpointHandler]>,
 }
+
 impl BoardConfig {
     pub fn new<H>(handlers: H) -> Self
     where
@@ -80,13 +82,43 @@ impl_letype_num!(f64, 8, to_le_bytes);
 #[inline]
 fn encode_slice_le<T: LeBytes>(data: &[T]) -> Arc<[u8]> {
     let total = data.len() * T::WIDTH;
-    let mut buf = alloc::vec::Vec::with_capacity(total);
+    let mut buf = Vec::with_capacity(total);
     unsafe { buf.set_len(total) };
     for (i, v) in data.iter().copied().enumerate() {
         let start = i * T::WIDTH;
         v.write_le(&mut buf[start..start + T::WIDTH]);
     }
     Arc::<[u8]>::from(buf)
+}
+
+fn log_raw<T, F>(
+    ty: DataType,
+    data: &[T],
+    timestamp: u64,
+    mut tx_function: F,
+) -> TelemetryResult<()>
+where
+    T: LeBytes,
+    F: FnMut(TelemetryPacket) -> TelemetryResult<()>,
+{
+    let meta = message_meta(ty);
+    let got = data.len() * T::WIDTH;
+    if got != meta.data_size {
+        return Err(TelemetryError::SizeMismatch {
+            expected: meta.data_size,
+            got,
+        });
+    }
+    let payload_vec = encode_slice_le(data);
+
+    let pkt = TelemetryPacket::new(
+        ty,
+        &meta.endpoints,
+        Arc::<str>::from(DEVICE_IDENTIFIER),
+        timestamp,
+        Arc::<[u8]>::from(payload_vec),
+    )?;
+    tx_function(pkt)
 }
 
 #[inline]
@@ -569,45 +601,31 @@ impl Router {
 
     /// Build a packet then send.
     pub fn log<T: LeBytes>(&self, ty: DataType, data: &[T]) -> TelemetryResult<()> {
-        let meta = message_meta(ty);
-        let got = data.len() * T::WIDTH;
-        if got != meta.data_size {
-            return Err(TelemetryError::SizeMismatch {
-                expected: meta.data_size,
-                got,
-            });
-        }
-        let payload_vec = encode_slice_le(data);
-
-        let pkt = TelemetryPacket::new(
-            ty,
-            &meta.endpoints,
-            Arc::<str>::from(DEVICE_IDENTIFIER), // <-- owned
-            self.clock.now_ms(),
-            Arc::<[u8]>::from(payload_vec),
-        )?;
-        self.send(&pkt)
+        log_raw(ty, data, self.clock.now_ms(), |pkt| self.send(&pkt))
     }
 
     pub fn log_queue<T: LeBytes>(&mut self, ty: DataType, data: &[T]) -> TelemetryResult<()> {
-        let meta = message_meta(ty);
-        let got = data.len() * T::WIDTH;
-        if got != meta.data_size {
-            return Err(TelemetryError::SizeMismatch {
-                expected: meta.data_size,
-                got,
-            });
-        }
-        let payload_vec = encode_slice_le(data);
+        log_raw(ty, data, self.clock.now_ms(), |pkt| {
+            self.queue_tx_message(pkt)
+        })
+    }
 
-        let pkt = TelemetryPacket::new(
-            ty,
-            &meta.endpoints,
-            Arc::<str>::from(DEVICE_IDENTIFIER), // <-- owned
-            self.clock.now_ms(),
-            Arc::<[u8]>::from(payload_vec),
-        )?;
-        self.queue_tx_message(pkt)
+    pub fn log_ts<T: LeBytes>(
+        &self,
+        ty: DataType,
+        timestamp: u64,
+        data: &[T],
+    ) -> TelemetryResult<()> {
+        log_raw(ty, data, timestamp, |pkt| self.send(&pkt))
+    }
+
+    pub fn log_queue_ts<T: LeBytes>(
+        &mut self,
+        ty: DataType,
+        timestamp: u64,
+        data: &[T],
+    ) -> TelemetryResult<()> {
+        log_raw(ty, data, timestamp, |pkt| self.queue_tx_message(pkt))
     }
 
     #[inline]
