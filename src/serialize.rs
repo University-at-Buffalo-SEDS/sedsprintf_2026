@@ -3,7 +3,7 @@
 use crate::config::{MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE};
 use crate::repr_u32::ReprU32Enum;
 use crate::telemetry_packet::{DataEndpoint, TelemetryPacket};
-use crate::{try_enum_from_u32, TelemetryError};
+use crate::{try_enum_from_u32, TelemetryError, TelemetryResult};
 use crate::{config::DataType, impl_repr_u32_enum};
 use alloc::{sync::Arc, vec::Vec};
 use core::convert::TryInto;
@@ -16,6 +16,26 @@ pub const NUM_ENDPOINTS_SIZE: usize = size_of::<u32>();
 pub const ENDPOINT_ELEM_SIZE: usize = size_of::<u32>();
 pub const SENDER_LEN_SIZE: usize = size_of::<u32>();
 
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+pub struct TelemetryEnvelope {
+    pub ty: DataType,
+    pub endpoints: Vec<DataEndpoint>,
+    pub sender: Arc<str>,
+    pub timestamp_ms: u64,
+}
+
+pub fn peek_envelope(bytes: &[u8]) -> TelemetryResult<TelemetryEnvelope> {
+    // Implement according to your wire format:
+    // - decode DataType
+    // - decode endpoint count + list
+    // - decode sender len + sender
+    // - decode timestamp_ms
+    // Return TelemetryError on malformed headers.
+    // (Stub for illustration)
+    deserialize_packet_header_only(bytes)
+}
 #[inline]
 pub fn header_size_bytes() -> usize {
     TYPE_SIZE + DATA_SIZE_SIZE + TIME_SIZE + SENDER_LEN_SIZE + NUM_ENDPOINTS_SIZE
@@ -29,6 +49,7 @@ pub fn packet_wire_size(pkt: &TelemetryPacket) -> usize {
         + pkt.sender.as_bytes().len()
         + pkt.data_size
 }
+
 
 pub fn serialize_packet(pkt: &TelemetryPacket) -> Vec<u8> {
     let mut out = Vec::with_capacity(packet_wire_size(pkt));
@@ -56,6 +77,58 @@ pub fn serialize_packet(pkt: &TelemetryPacket) -> Vec<u8> {
     out
 }
 
+fn get_eps(eps: &mut Vec<DataEndpoint>, nep: usize, r: &mut ByteReader) -> Result<(), TelemetryError> {
+    for _ in 0..nep {
+        let e = r.read_u32()?;
+        let ep =
+            DataEndpoint::try_from_u32(e).ok_or(TelemetryError::Deserialize("bad endpoint"))?;
+        eps.push(ep);
+    }        
+    Ok(())
+}
+pub fn deserialize_packet_header_only(buf: &[u8]) -> Result<TelemetryEnvelope, TelemetryError>{
+    let mut r = ByteReader::new(buf);
+
+    if r.remaining() < header_size_bytes() {
+        return Err(TelemetryError::Deserialize("short header"));
+    }
+
+    // type
+    let ty_raw = r.read_u32()?;
+    let ty = DataType::try_from_u32(ty_raw).ok_or(TelemetryError::InvalidType)?;
+
+    // data_size, sender_len, timestamp, num_endpoints
+    let _dsz = r.read_u32()? as usize;
+    let sender_len = r.read_u32()? as usize;
+    let ts = r.read_u64()?;
+    let nep = r.read_u32()? as usize;
+
+    // total required size = header + endpoints + sender
+    let need = header_size_bytes()
+        + nep * ENDPOINT_ELEM_SIZE
+        + sender_len;
+    if buf.len() < need {
+        return Err(TelemetryError::Deserialize("short buffer"));
+    }
+
+    // endpoints
+    let mut eps = Vec::with_capacity(nep);
+
+    get_eps(&mut eps, nep, &mut r)?;
+    
+    // sender (OWNED, no leak)
+    let sender_bytes = r.read_bytes(sender_len)?;
+    let sender_str = core::str::from_utf8(sender_bytes)
+        .map_err(|_| TelemetryError::Deserialize("sender not UTF-8"))?;
+    let sender_arc: Arc<str> = Arc::<str>::from(sender_str);
+
+    Ok(TelemetryEnvelope {
+        ty,
+        endpoints: eps,
+        sender: sender_arc,
+        timestamp_ms: ts,
+    })
+}
 pub fn deserialize_packet(buf: &[u8]) -> Result<TelemetryPacket, TelemetryError> {
     let mut r = ByteReader::new(buf);
 
@@ -84,12 +157,7 @@ pub fn deserialize_packet(buf: &[u8]) -> Result<TelemetryPacket, TelemetryError>
 
     // endpoints
     let mut eps = Vec::with_capacity(nep);
-    for _ in 0..nep {
-        let e = r.read_u32()?;
-        let ep =
-            DataEndpoint::try_from_u32(e).ok_or(TelemetryError::Deserialize("bad endpoint"))?;
-        eps.push(ep);
-    }
+    get_eps(&mut eps, nep, &mut r)?;
 
     // sender (OWNED, no leak)
     let sender_bytes = r.read_bytes(sender_len)?;
