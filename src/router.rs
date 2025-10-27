@@ -1,8 +1,15 @@
 #![allow(dead_code)]
 
+
 use crate::config::DEVICE_IDENTIFIER;
-use crate::{config::{message_meta, DataEndpoint, DataType}, impl_letype_num, serialize, telemetry_packet::TelemetryPacket, TelemetryError, TelemetryResult};
+use crate::{
+    config::{message_meta, DataEndpoint, DataType}, impl_letype_num,
+    serialize,
+    telemetry_packet::TelemetryPacket, TelemetryError,
+    TelemetryResult,
+};
 use alloc::{boxed::Box, collections::VecDeque, sync::Arc, vec::Vec};
+
 
 pub enum RxItem {
     Packet(TelemetryPacket),
@@ -25,21 +32,27 @@ pub struct EndpointHandler {
 pub trait Clock {
     fn now_ms(&self) -> u64;
 }
+
 impl<T: Fn() -> u64> Clock for T {
     #[inline]
-    fn now_ms(&self) -> u64 { self() }
+    fn now_ms(&self) -> u64 {
+        self()
+    }
 }
 
 #[derive(Default)]
 pub struct BoardConfig {
     pub handlers: Arc<[EndpointHandler]>,
 }
+
 impl BoardConfig {
     pub fn new<H>(handlers: H) -> Self
-        where
-            H: Into<Arc<[EndpointHandler]>>,
+    where
+        H: Into<Arc<[EndpointHandler]>>,
     {
-        Self { handlers: handlers.into() }
+        Self {
+            handlers: handlers.into(),
+        }
     }
 
     #[inline]
@@ -69,7 +82,7 @@ impl_letype_num!(f64, 8, to_le_bytes);
 #[inline]
 fn encode_slice_le<T: LeBytes>(data: &[T]) -> Arc<[u8]> {
     let total = data.len() * T::WIDTH;
-    let mut buf = alloc::vec::Vec::with_capacity(total);
+    let mut buf = Vec::with_capacity(total);
     unsafe { buf.set_len(total) };
     for (i, v) in data.iter().copied().enumerate() {
         let start = i * T::WIDTH;
@@ -78,12 +91,46 @@ fn encode_slice_le<T: LeBytes>(data: &[T]) -> Arc<[u8]> {
     Arc::<[u8]>::from(buf)
 }
 
+fn log_raw<T, F>(
+    ty: DataType,
+    data: &[T],
+    timestamp: u64,
+    mut tx_function: F,
+) -> TelemetryResult<()>
+where
+    T: LeBytes,
+    F: FnMut(TelemetryPacket) -> TelemetryResult<()>,
+{
+    let meta = message_meta(ty);
+    let got = data.len() * T::WIDTH;
+    if got != meta.data_size {
+        return Err(TelemetryError::SizeMismatch {
+            expected: meta.data_size,
+            got,
+        });
+    }
+    let payload_vec = encode_slice_le(data);
+
+    let pkt = TelemetryPacket::new(
+        ty,
+        &meta.endpoints,
+        Arc::<str>::from(DEVICE_IDENTIFIER),
+        timestamp,
+        Arc::<[u8]>::from(payload_vec),
+    )?;
+    tx_function(pkt)
+}
+
 #[inline]
 fn fallback_stdout(msg: &str) {
     #[cfg(feature = "std")]
-    { println!("{}", msg); }
+    {
+        println!("{}", msg);
+    }
     #[cfg(not(feature = "std"))]
-    { let _ = msg; }
+    {
+        let _ = msg;
+    }
 }
 
 // -------------------- Router --------------------
@@ -102,8 +149,8 @@ impl Router {
         cfg: BoardConfig,
         clock: Box<dyn Clock + Send + Sync>,
     ) -> Self
-        where
-            Tx: Fn(&[u8]) -> TelemetryResult<()> + Send + Sync + 'static,
+    where
+        Tx: Fn(&[u8]) -> TelemetryResult<()> + Send + Sync + 'static,
     {
         Self {
             transmit: transmit.map(|t| Box::new(t) as _),
@@ -123,11 +170,14 @@ impl Router {
         let error_msg = match dest {
             Some(failed_local) => alloc::format!(
                 "Handler for endpoint {:?} failed on device {:?}: {:?}",
-                failed_local, DEVICE_IDENTIFIER, e
+                failed_local,
+                DEVICE_IDENTIFIER,
+                e
             ),
             None => alloc::format!(
                 "TX Handler failed on device {:?}: {:?}",
-                DEVICE_IDENTIFIER, e
+                DEVICE_IDENTIFIER,
+                e
             ),
         };
 
@@ -164,7 +214,7 @@ impl Router {
         let error_pkt = TelemetryPacket::new(
             DataType::TelemetryError,
             &locals,
-            Arc::<str>::from(DEVICE_IDENTIFIER),   // <-- owned sender
+            Arc::<str>::from(DEVICE_IDENTIFIER), // <-- owned sender
             self.clock.now_ms(),
             Arc::<[u8]>::from(buf),
         )?;
@@ -190,14 +240,20 @@ impl Router {
         self.received_queue.clear();
     }
 
-    pub fn clear_rx_queue(&mut self) { self.received_queue.clear(); }
-    pub fn clear_tx_queue(&mut self) { self.transmit_queue.clear(); }
+    pub fn clear_rx_queue(&mut self) {
+        self.received_queue.clear();
+    }
+    pub fn clear_tx_queue(&mut self) {
+        self.transmit_queue.clear();
+    }
 
     pub fn process_tx_queue_with_timeout(&mut self, timeout_ms: u32) -> TelemetryResult<()> {
         let start = self.clock.now_ms();
         while let Some(pkt) = self.transmit_queue.pop_front() {
             self.send(&pkt)?;
-            if self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 { break; }
+            if self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
+                break;
+            }
         }
         Ok(())
     }
@@ -210,7 +266,9 @@ impl Router {
         let start = self.clock.now_ms();
         while let Some(pkt) = self.received_queue.pop_front() {
             self.handle_rx_queue_item(pkt)?;
-            if self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 { break; }
+            if self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
+                break;
+            }
         }
         Ok(())
     }
@@ -226,15 +284,21 @@ impl Router {
                 self.send(&pkt)?;
                 did_any = true;
             }
-            if !drain_fully && self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 { break; }
+            if !drain_fully && self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
+                break;
+            }
 
             if let Some(pkt) = self.received_queue.pop_front() {
                 self.handle_rx_queue_item(pkt)?;
                 did_any = true;
             }
 
-            if !drain_fully && self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 { break; }
-            if !did_any { break; }
+            if !drain_fully && self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
+                break;
+            }
+            if !did_any {
+                break;
+            }
         }
 
         Ok(())
@@ -254,7 +318,8 @@ impl Router {
     }
 
     pub fn rx_serialized_packet_to_queue(&mut self, bytes: &[u8]) -> TelemetryResult<()> {
-        self.received_queue.push_back(RxItem::Serialized(Arc::<[u8]>::from(bytes)));
+        self.received_queue
+            .push_back(RxItem::Serialized(Arc::<[u8]>::from(bytes)));
         Ok(())
     }
 
@@ -265,8 +330,8 @@ impl Router {
     }
 
     fn retry<F, T, E>(&self, times: usize, mut f: F) -> Result<T, E>
-        where
-            F: FnMut() -> Result<T, E>,
+    where
+        F: FnMut() -> Result<T, E>,
     {
         let mut last_err = None;
         for _ in 0..times {
@@ -279,11 +344,17 @@ impl Router {
     }
 
     fn endpoint_has_packet_handler(&self, ep: DataEndpoint) -> bool {
-        self.cfg.handlers.iter().any(|h| h.endpoint == ep && matches!(h.handler, EndpointHandlerFn::Packet(_)))
+        self.cfg
+            .handlers
+            .iter()
+            .any(|h| h.endpoint == ep && matches!(h.handler, EndpointHandlerFn::Packet(_)))
     }
 
     fn endpoint_has_serialized_handler(&self, ep: DataEndpoint) -> bool {
-        self.cfg.handlers.iter().any(|h| h.endpoint == ep && matches!(h.handler, EndpointHandlerFn::Serialized(_)))
+        self.cfg
+            .handlers
+            .iter()
+            .any(|h| h.endpoint == ep && matches!(h.handler, EndpointHandlerFn::Serialized(_)))
     }
 
     fn call_handler_with_retries(
@@ -291,7 +362,7 @@ impl Router {
         dest: DataEndpoint,
         handler: &EndpointHandler,
         data: &RxItem,
-        pkt_for_ctx: Option<&TelemetryPacket>,        // may be None if we didn’t deserialize
+        pkt_for_ctx: Option<&TelemetryPacket>, // may be None if we didn’t deserialize
         env_for_ctx: Option<&serialize::TelemetryEnvelope>, // header-only context
     ) -> TelemetryResult<()> {
         // --- Shared helper function for retry + error handling ---
@@ -302,8 +373,8 @@ impl Router {
             env_for_ctx: Option<&serialize::TelemetryEnvelope>,
             mut run: F,
         ) -> TelemetryResult<()>
-            where
-                F: FnMut() -> TelemetryResult<()>,
+        where
+            F: FnMut() -> TelemetryResult<()>,
         {
             this.retry(MAX_NUMBER_OF_RETRYS, || run()).map_err(|e| {
                 if let Some(pkt) = pkt_for_ctx {
@@ -335,7 +406,6 @@ impl Router {
         }
     }
 
-
     /// Error helper when we only have an envelope (no full packet).
     fn handle_callback_error_from_env(
         &self,
@@ -359,7 +429,9 @@ impl Router {
 
         let error_msg = alloc::format!(
             "Handler for endpoint {:?} failed on device {:?}: {:?}",
-            dest, DEVICE_IDENTIFIER, e
+            dest,
+            DEVICE_IDENTIFIER,
+            e
         );
         if locals.is_empty() {
             fallback_stdout(&error_msg);
@@ -370,7 +442,9 @@ impl Router {
         let mut buf = alloc::vec![0u8; meta.data_size];
         let msg_bytes = error_msg.as_bytes();
         let n = core::cmp::min(buf.len(), msg_bytes.len());
-        if n > 0 { buf[..n].copy_from_slice(&msg_bytes[..n]); }
+        if n > 0 {
+            buf[..n].copy_from_slice(&msg_bytes[..n]);
+        }
 
         // Build a minimal error packet using envelope fields for sender/timestamp.
         let error_pkt = TelemetryPacket::new(
@@ -421,17 +495,35 @@ impl Router {
                     for h in self.cfg.handlers.iter().filter(|h| h.endpoint == dest) {
                         match (&h.handler, &pkt_opt) {
                             (EndpointHandlerFn::Packet(_), Some(pkt)) => {
-                                self.call_handler_with_retries(dest, h, item, Some(pkt), Some(&env))?;
+                                self.call_handler_with_retries(
+                                    dest,
+                                    h,
+                                    item,
+                                    Some(pkt),
+                                    Some(&env),
+                                )?;
                             }
                             (EndpointHandlerFn::Packet(_), None) => {
                                 // Shouldn’t happen because any_packet_needed would be true.
                                 // But guard anyway with a fast path: deserialize just-in-time.
                                 let pkt = serialize::deserialize_packet(bytes)?;
                                 pkt.validate()?;
-                                self.call_handler_with_retries(dest, h, item, Some(&pkt), Some(&env))?;
+                                self.call_handler_with_retries(
+                                    dest,
+                                    h,
+                                    item,
+                                    Some(&pkt),
+                                    Some(&env),
+                                )?;
                             }
                             (EndpointHandlerFn::Serialized(_), _) => {
-                                self.call_handler_with_retries(dest, h, item, pkt_opt.as_ref(), Some(&env))?;
+                                self.call_handler_with_retries(
+                                    dest,
+                                    h,
+                                    item,
+                                    pkt_opt.as_ref(),
+                                    Some(&env),
+                                )?;
                             }
                         }
                     }
@@ -447,9 +539,15 @@ impl Router {
     pub fn send(&self, pkt: &TelemetryPacket) -> TelemetryResult<()> {
         pkt.validate()?;
 
-        let has_serialized_local = pkt.endpoints.iter().copied()
-                                      .any(|ep| self.endpoint_has_serialized_handler(ep));
-        let send_remote = pkt.endpoints.iter().any(|e| !self.cfg.is_local_endpoint(*e));
+        let has_serialized_local = pkt
+            .endpoints
+            .iter()
+            .copied()
+            .any(|ep| self.endpoint_has_serialized_handler(ep));
+        let send_remote = pkt
+            .endpoints
+            .iter()
+            .any(|e| !self.cfg.is_local_endpoint(*e));
 
         // Only serialize if needed.
         let bytes_opt = if has_serialized_local || send_remote {
@@ -501,46 +599,41 @@ impl Router {
         self.receive_item(&item)
     }
 
-
     /// Build a packet then send.
     pub fn log<T: LeBytes>(&self, ty: DataType, data: &[T]) -> TelemetryResult<()> {
-        let meta = message_meta(ty);
-        let got = data.len() * T::WIDTH;
-        if got != meta.data_size {
-            return Err(TelemetryError::SizeMismatch { expected: meta.data_size, got });
-        }
-        let payload_vec = encode_slice_le(data);
-
-        let pkt = TelemetryPacket::new(
-            ty,
-            &meta.endpoints,
-            Arc::<str>::from(DEVICE_IDENTIFIER),    // <-- owned
-            self.clock.now_ms(),
-            Arc::<[u8]>::from(payload_vec),
-        )?;
-        self.send(&pkt)
+        log_raw(ty, data, self.clock.now_ms(), |pkt| self.send(&pkt))
     }
 
     pub fn log_queue<T: LeBytes>(&mut self, ty: DataType, data: &[T]) -> TelemetryResult<()> {
-        let meta = message_meta(ty);
-        let got = data.len() * T::WIDTH;
-        if got != meta.data_size {
-            return Err(TelemetryError::SizeMismatch { expected: meta.data_size, got });
-        }
-        let payload_vec = encode_slice_le(data);
+        log_raw(ty, data, self.clock.now_ms(), |pkt| {
+            self.queue_tx_message(pkt)
+        })
+    }
 
-        let pkt = TelemetryPacket::new(
-            ty,
-            &meta.endpoints,
-            Arc::<str>::from(DEVICE_IDENTIFIER),    // <-- owned
-            self.clock.now_ms(),
-            Arc::<[u8]>::from(payload_vec),
-        )?;
-        self.queue_tx_message(pkt)
+    pub fn log_ts<T: LeBytes>(
+        &self,
+        ty: DataType,
+        timestamp: u64,
+        data: &[T],
+    ) -> TelemetryResult<()> {
+        log_raw(ty, data, timestamp, |pkt| self.send(&pkt))
+    }
+
+    pub fn log_queue_ts<T: LeBytes>(
+        &mut self,
+        ty: DataType,
+        timestamp: u64,
+        data: &[T],
+    ) -> TelemetryResult<()> {
+        log_raw(ty, data, timestamp, |pkt| self.queue_tx_message(pkt))
     }
 
     #[inline]
-    pub fn log_bytes(&self, ty: DataType, bytes: &[u8]) -> TelemetryResult<()> { self.log::<u8>(ty, bytes) }
+    pub fn log_bytes(&self, ty: DataType, bytes: &[u8]) -> TelemetryResult<()> {
+        self.log::<u8>(ty, bytes)
+    }
     #[inline]
-    pub fn log_f32(&self, ty: DataType, vals: &[f32]) -> TelemetryResult<()> { self.log::<f32>(ty, vals) }
+    pub fn log_f32(&self, ty: DataType, vals: &[f32]) -> TelemetryResult<()> {
+        self.log::<f32>(ty, vals)
+    }
 }

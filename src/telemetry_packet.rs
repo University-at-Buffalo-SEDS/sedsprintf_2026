@@ -1,14 +1,16 @@
 #![allow(dead_code)]
 
+
 pub use crate::config::{
-    get_info_type, message_meta, DataEndpoint, DataType, MessageDataType,
-    MessageType, DEVICE_IDENTIFIER, MESSAGE_DATA_TYPES,
+    get_info_type, message_meta, DataEndpoint, DataType, MessageDataType, MessageType,
+    DEVICE_IDENTIFIER, MESSAGE_DATA_TYPES,
 };
 // ---- core/alloc imports usable in both std and no_std ----
 use crate::{TelemetryError, TelemetryResult};
 use alloc::{string::String, string::ToString, sync::Arc, vec::Vec};
 use core::{convert::TryInto, fmt::Write};
 use time::OffsetDateTime;
+
 
 const EPOCH_MS_THRESHOLD: u64 = 1_000_000_000_000; // clearly not an uptime counter
 
@@ -175,7 +177,10 @@ impl TelemetryPacket {
 
             let mut s = String::new();
             if hours > 0 {
-                let _ = write!(s, "{hours}h {minutes:02}m {seconds:02}s {milliseconds:03}ms");
+                let _ = write!(
+                    s,
+                    "{hours}h {minutes:02}m {seconds:02}s {milliseconds:03}ms"
+                );
             } else if minutes > 0 {
                 let _ = write!(s, "{minutes}m {seconds:02}s {milliseconds:03}ms");
             } else {
@@ -190,7 +195,7 @@ impl TelemetryPacket {
             "Type: {}, Size: {}, Sender: {}, Endpoints: [{}], Timestamp: {} ({})",
             self.ty.as_str(),
             self.data_size,
-            self.sender.as_ref(),            // <-- Arc<str> to &str
+            self.sender.as_ref(), // <-- Arc<str> to &str
             endpoints,
             self.timestamp,
             human_time
@@ -230,21 +235,24 @@ impl TelemetryPacket {
     pub fn to_string(&self) -> String {
         const MAX_PRECISION: usize = 12;
         let mut s = String::new();
+        s.push_str("{");
         s.push_str(&self.header_string());
 
         if self.payload.is_empty() {
-            s.push_str(", Data: <empty>");
+            s.push_str(", Data: (<empty>)");
             return s;
         }
 
         if get_info_type(self.ty) == MessageType::Error {
-            s.push_str(", Error: ");
+            s.push_str(", Error: (");
         } else {
-            s.push_str(", Data: ");
+            s.push_str(", Data: (");
         }
         // Strings first
         if let Some(msg) = self.data_as_utf8() {
+            s.push_str("\"");
             s.push_str(&msg);
+            s.push_str("\")}");
             return s;
         }
 
@@ -279,7 +287,7 @@ impl TelemetryPacket {
             MessageDataType::String => s.push_str(""),
             MessageDataType::Hex => return self.to_hex_string(),
         }
-
+        s.push_str(")}");
         s
     }
 

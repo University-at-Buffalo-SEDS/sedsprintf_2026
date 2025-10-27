@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <fcntl.h>
+#include <string.h>
 // Helper to generate some demo float samples
 static void make_series(float * out, size_t n, float base)
 {
@@ -67,6 +68,9 @@ int main(void)
         assert(node_log(&powerBoard, SEDS_DT_BATTERY, buf, 4, sizeof(buf[0])) == SEDS_OK);
         usleep(gen_random_num_ms());
 
+        char * char_buf = "hello world!";
+        assert(node_log(&powerBoard, SEDS_MESSAGE_DATA, char_buf, strlen(char_buf), sizeof(char_buf[0])) == SEDS_OK);
+        usleep(gen_random_num_ms());
         // B logs PRESSURE (1 float)
         make_series(buf, 4, 3.7f);
         assert(
@@ -85,8 +89,8 @@ int main(void)
     printf("A.radio_hits=%u, B.sd_hits=%u, C.radio_hits=%u, C.sd_hits=%u\n",
            radioBoard.radio_hits, flightControllerBoard.sd_hits, powerBoard.radio_hits, powerBoard.sd_hits);
 
-    assert(radioBoard.radio_hits == 20);
-    assert(flightControllerBoard.sd_hits == 20);
+    assert(radioBoard.radio_hits == 25);
+    assert(flightControllerBoard.sd_hits == 25);
     assert(powerBoard.radio_hits == 0);
     assert(powerBoard.sd_hits == 0);
     // 4) Cleanup

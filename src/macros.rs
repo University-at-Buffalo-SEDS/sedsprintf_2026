@@ -47,3 +47,40 @@ macro_rules! impl_letype_num {
         }
     };
 }
+
+#[macro_export]
+macro_rules! do_vec_log_typed {
+    (
+        $router_ptr:expr,   // *mut SedsRouter
+        $ty:expr,           // DataType
+        $ts_opt:expr,       // Option<u64>
+        $queue:expr,        // bool
+        $data_ptr:expr,     // *const c_void
+        $count:expr,        // usize
+        $elem_ty:ty         // concrete element type, e.g. u16 / f32
+    ) => {{
+        use alloc::vec::Vec;
+        use core::mem;
+
+        let mut tmp: Vec<$elem_ty> = Vec::with_capacity($count);
+        let base = $data_ptr as *const u8;
+
+        match $crate::c_api::vectorize_data::<$elem_ty>(
+            base,
+            $count,
+            mem::size_of::<$elem_ty>(),
+            &mut tmp,
+        ) {
+            Ok(()) => $crate::c_api::ok_or_status($crate::c_api::call_log_or_queue::<$elem_ty>(
+                $router_ptr,
+                $ty,
+                $ts_opt,
+                &tmp,
+                $queue,
+            )),
+            Err(_e) => {
+                $crate::c_api::status_from_err($crate::TelemetryError::Io("vectorize_data failed"))
+            }
+        }
+    }};
+}

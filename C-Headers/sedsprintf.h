@@ -3,26 +3,17 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <string.h> /* for strlen in string macros */
 
 #ifdef __cplusplus
 extern "C" {
 
 #endif
 
-// ==============================
-// Note: Besides the macros, everything in this file is designed to match the Rust API
-// for easy mapping into C code. It contains no state or complex logic nor any live data.
-// Any changes to the Rust API must be reflected here as well.
-// ==============================
+/* ==============================
+   Public enums / constants
+   ============================== */
 
-
-// ==============================
-// Public enums / constants
-// ==============================
-
-/**
- * @brief Telemetry data types (keep in sync with Rust DataType order).
- */
 typedef enum SedsDataType
 {
     SEDS_DT_TELEMETRY_ERROR = 0,
@@ -31,723 +22,283 @@ typedef enum SedsDataType
     SEDS_DT_BATTERY = 3,
     SEDS_DT_SYSTEM = 4,
     SEDS_DT_BAROMETER = 5,
-    SEDS_IMU_HEX_DATA = 6
+    SEDS_MESSAGE_DATA = 6
 } SedsDataType;
 
-/**
- * @brief Telemetry endpoints (keep in sync with Rust DataEndpoint order).
- */
 typedef enum SedsDataEndpoint
 {
     SEDS_EP_SD = 0,
     SEDS_EP_RADIO = 1,
 } SedsDataEndpoint;
 
-/**
- * @brief Status codes returned by the C API.
- */
 typedef enum
 {
-    SEDS_OK = 0, /**< Success. */
-    SEDS_ERR = -1, /**< Unspecified error. */
-    SEDS_BAD_ARG = -9, /**< One or more arguments are invalid (NULL/size mismatch/etc). */
-    SEDS_INVALID_TYPE = -2, /**< Unsupported/unknown type or endpoint value. */
-    SEDS_SIZE_MISMATCH = -3, /**< Element/byte length does not match schema requirement. */
-    SEDS_DESERIALIZE = -10, /**< Failed to deserialize a packet from bytes. */
-    SEDS_HANDLER_ERROR = -8, /**< A user-provided endpoint handler returned an error. */
+    SEDS_OK = 0,
+    SEDS_ERR = -1,
+    SEDS_INVALID_TYPE = -2,
+    SEDS_SIZE_MISMATCH = -3,
+    SEDS_HANDLER_ERROR = -8,
+    SEDS_BAD_ARG = -9,
+    SEDS_DESERIALIZE = -10,
 } SedsResult;
 
-/**
- * @brief Monotonic clock callback: must return milliseconds since an arbitrary epoch.
- *
- * @param user Opaque user pointer supplied at router construction.
- * @return Current monotonic time in milliseconds.
- *
- * @note The epoch is implementation-defined; only monotonicity matters.
- */
 typedef uint64_t (* SedsNowMsFn)(void * user);
 
-/** @brief Opaque Router handle. */
 typedef struct SedsRouter SedsRouter;
 
-/**
- * @brief Lightweight view of a telemetry packet (valid only during a callback).
- *
- * The view borrows data owned by the router. Fields must not be retained past the
- * callback that provided the view. Strings are not NUL-terminated unless specified.
- */
 typedef struct SedsPacketView
 {
-    uint32_t ty; /**< DataType as u32. */
-    size_t data_size; /**< Payload size in bytes. */
+    uint32_t ty;
+    size_t data_size;
 
-    /* Rust `&str` is (ptr,len). Not NUL-terminated. Lifetime = callback. */
-    const char * sender; /**< UTF-8 bytes; may not be NUL-terminated. */
-    size_t sender_len; /**< Number of bytes at `sender`. */
+    const char * sender;
+    size_t sender_len;
 
-    const uint32_t * endpoints; /**< Array of DataEndpoint (as u32). */
+    const uint32_t * endpoints;
     size_t num_endpoints;
-    uint64_t timestamp; /**< Timestamp units as defined by your system. */
-    const uint8_t * payload; /**< Raw payload bytes. */
-    size_t payload_len; /**< == data_size. */
-} SedsPacketView;
 
+    uint64_t timestamp;
+    const uint8_t * payload;
+    size_t payload_len;
+} SedsPacketView;
 
 typedef enum SedsElemKind
 {
-    SEDS_EK_UNSIGNED = 0, /**< u8/u16/u32/u64/... */
-    SEDS_EK_SIGNED = 1, /**< i8/i16/i32/i64/... */
-    SEDS_EK_FLOAT = 2 /**< f32/f64 */
+    SEDS_EK_UNSIGNED = 0,
+    SEDS_EK_SIGNED = 1,
+    SEDS_EK_FLOAT = 2
 } SedsElemKind;
 
-/**
- * @brief Transmit callback.
- *
- * @param bytes Pointer to serialized bytes to transmit.
- * @param len   Number of bytes at @p bytes.
- * @param user  Opaque user pointer supplied at router construction.
- * @return SEDS_OK on success, or a negative @ref SedsResult error.
- *
- * @note Returning an error stops the current send processing.
- */
 typedef SedsResult (* SedsTransmitFn)(const uint8_t * bytes, size_t len, void * user);
 
-/**
- * @brief Local endpoint handler callback.
- *
- * @param pkt  Borrowed view of the packet. Valid only during the call.
- * @param user Opaque user pointer supplied in the handler descriptor.
- * @return SEDS_OK on success, or a negative @ref SedsResult error.
- *
- * @warning Do not retain pointers from @p pkt after returning.
- */
 typedef SedsResult (* SedsEndpointHandlerFn)(const SedsPacketView * pkt, void * user);
 
+typedef SedsResult (* SedsSerializedHandlerFn)(const uint8_t * bytes, size_t len, void * user);
 
-/** @brief Serialized-bytes handler callback (raw wire bytes). */
-typedef SedsResult (* SedsSerializedHandlerFn)(const uint8_t * bytes,
-                                               size_t len,
-
-                                               void * user);
-
-/**
- * @brief Endpoint handler descriptor (used when constructing a router).
- *
- * You may set either or both callbacks:
- *  - packet_handler: receives a structured SedsPacketView
- *  - serialized_handler: receives the raw serialized bytes
- *
- * If both are set for the same endpoint, both will be invoked.
- */
 typedef struct SedsLocalEndpointDesc
 {
-    uint32_t endpoint; /**< DataEndpoint as u32. */
-    SedsEndpointHandlerFn packet_handler; /**< Optional; may be NULL. */
-    SedsSerializedHandlerFn serialized_handler; /**< Optional; may be NULL. */
-    void * user; /**< Opaque user context. */
+    uint32_t endpoint;
+    SedsEndpointHandlerFn packet_handler; /* optional */
+    SedsSerializedHandlerFn serialized_handler; /* optional */
+    void * user;
 } SedsLocalEndpointDesc;
 
-/**
- * @brief Get required buffer length for @ref seds_pkt_header_string (includes NUL).
- *
- * @param pkt Pointer to a valid @ref SedsPacketView.
- * @return Required number of bytes (>=1) including the terminating NUL,
- *         or a negative @ref SedsResult on error (e.g., SEDS_BAD_ARG).
- *
- * @note Use this to size your buffer prior to calling @ref seds_pkt_header_string.
- */
+/* ==============================
+   String / error formatting
+   ============================== */
+
 int32_t seds_pkt_header_string_len(const SedsPacketView * pkt);
 
-/**
- * @brief Get required buffer length for @ref seds_pkt_to_string (includes NUL).
- *
- * @param pkt Pointer to a valid @ref SedsPacketView.
- * @return Required number of bytes (>=1) including the terminating NUL,
- *         or a negative @ref SedsResult on error (e.g., SEDS_BAD_ARG).
- *
- * @note Use this to size your buffer prior to calling @ref seds_pkt_to_string.
- */
 int32_t seds_pkt_to_string_len(const SedsPacketView * pkt);
 
-/**
- * @brief Get required buffer length for @ref seds_error_to_string.
- *
- * @param error_code Value of the error code.
- * @return Required number of bytes (>=1) including the terminating NUL.
- *
- * @note Use this to size your buffer prior to calling @ref seds_error_to_string.
- */
 int32_t seds_error_to_string_len(const int32_t error_code);
 
-// ==============================
-// Packet -> string formatting
-// ==============================
+SedsResult seds_pkt_header_string(const SedsPacketView * pkt, char * buf, size_t buf_len);
 
-/**
- * @brief Write the packet header as text.
- *
- * If @p buf is NULL or @p buf_len == 0, no data is written and the function returns the
- * required buffer length **including** the terminating NUL. If @p buf is non-NULL, up to
- * (@p buf_len - 1) characters are written and the output is always NUL-terminated on success.
- *
- * @param pkt     Pointer to a valid @ref SedsPacketView.
- * @param buf     Destination buffer or NULL to query the required length.
- * @param buf_len Size of @p buf in bytes when non-NULL.
- * @return Required length including NUL (>=1) on success, or a negative @ref SedsResult.
- *
- * @retval SEDS_BAD_ARG If @p pkt is NULL, or @p buf is non-NULL but @p buf_len is 0.
- */
-int32_t seds_pkt_header_string(const SedsPacketView * pkt, char * buf, size_t buf_len);
-
-/**
- * @brief Write the full packet (header + formatted payload) as text.
- *
- * Same sizing rules as @ref seds_pkt_header_string.
- *
- * @param pkt     Pointer to a valid @ref SedsPacketView.
- * @param buf     Destination buffer or NULL to query the required length.
- * @param buf_len Size of @p buf in bytes when non-NULL.
- * @return Required length including NUL (>=1) on success, or a negative @ref SedsResult.
- */
 SedsResult seds_pkt_to_string(const SedsPacketView * pkt, char * buf, size_t buf_len);
 
-/**
- * @brief Write the error as text.
- *
- *
- * @param error_code     Value of the error code.
- * @param buf     Destination buffer or NULL to query the required length.
- * @param buf_len Size of @p buf in bytes when non-NULL.
- * @return Required length including NUL (>=1) on success, or a negative @ref SedsResult.
- */
-SedsResult seds_error_to_string(const int32_t error_code, char * buf, size_t buf_len);
+SedsResult seds_error_to_string(int32_t error_code, char * buf, size_t buf_len);
 
-// ==============================
-// Router lifecycle
-// ==============================
+/* ==============================
+   Router lifecycle
+   ============================== */
 
-/**
- * @brief Create a router with an optional transmit callback and an array of local handlers.
- *
- * @param tx         Optional transmit function (NULL if no remote transmit).
- * @param tx_user    Opaque user pointer for @p tx.
- * @param now_ms_cb  Callback to get current time in milliseconds (must not be NULL).
- * @param handlers   Array of handler descriptors (may be NULL if @p n_handlers==0).
- * @param n_handlers Number of entries in @p handlers.
- * @return New router instance, or NULL on failure.
- *
- * @retval NULL If allocation fails or @p now_ms_cb is NULL.
- * @note Each entry in @p handlers registers a local endpoint handler invoked
- *       when packets targeting that endpoint are received locally.
- * @warning This function does not copy @p handlers; it copies only the descriptors’ values.
- */
 SedsRouter * seds_router_new(SedsTransmitFn tx,
                              void * tx_user,
                              SedsNowMsFn now_ms_cb,
                              const SedsLocalEndpointDesc * handlers,
                              size_t n_handlers);
 
-/**
- * @brief Destroy a router created by @ref seds_router_new.
- *
- * @param r Router handle (NULL is safe and a no-op).
- *
- * @post All queues and internal resources are freed.
- * @warning Do not use @p r after calling this function.
- */
 void seds_router_free(SedsRouter * r);
 
-
-// ==============================
-// Generic typed logging
-// ==============================
-
-/**
- * @brief Log a typed slice; the router encodes elements to little-endian bytes internally.
- *
- * The total number of bytes (count * elem_size) **must** match the schema size for @p ty.
- * Supported element sizes are 1, 2, 4, and 8 bytes.
- *
- * @param r          Router handle (must not be NULL).
- * @param ty         Telemetry data type.
- * @param data       Pointer to the first element of the typed slice (must not be NULL if count>0).
- * @param count      Number of elements at @p data.
- * @param elem_size  Size of each element in bytes (1,2,4, or 8).
- * @param elem_kind  Element kind (unsigned/signed/float).
- * @return SEDS_OK on success, or a negative @ref SedsResult.
- *
- * @retval SEDS_BAD_ARG If any argument is invalid.
- * @retval SEDS_SIZE_MISMATCH If the total bytes do not match the schema for @p ty.
- * @note This call logs immediately to all relevant local handlers and/or queues a copy for TX,
- *       depending on router configuration.
- */
-SedsResult seds_router_log_typed(SedsRouter * r,
-                                 SedsDataType ty,
-                                 const void * data,
-                                 size_t count,
-                                 size_t elem_size,
-                                 SedsElemKind elem_kind);
+/* ==============================
+   NEW: schema helper
+   ============================== */
 
 /**
- * @brief Queue a typed slice to the TX queue (no immediate transmit).
- *
- * Same constraints as @ref seds_router_log_typed. Use @ref seds_router_process_send_queue
- * to flush the queued packets through the transmit callback.
- *
- * @param r          Router handle (must not be NULL).
- * @param ty         Telemetry data type.
- * @param data       Pointer to typed data.
- * @param count      Number of elements.
- * @param elem_size  Size of each element (1,2,4,8).
- * @param elem_kind  Element kind (unsigned/signed/float).
- * @return SEDS_OK on success, or a negative @ref SedsResult.
+ * @brief Return the fixed schema payload size (in bytes) required for a type.
+ * @return size (>=0) on success; negative SedsResult on error (e.g., invalid type).
  */
-SedsResult seds_router_log_queue_typed(SedsRouter * r,
-                                       SedsDataType ty,
-                                       const void * data,
-                                       size_t count,
-                                       size_t elem_size,
-                                       SedsElemKind elem_kind);
+int32_t seds_dtype_expected_size(SedsDataType ty);
 
-// ==============================
-// Convenience logging forms
-// ==============================
+/* ==============================
+   NEW: unified logging entry points
+   ============================== */
 
 /**
- * @brief Log a raw byte slice for @p ty.
+ * @brief Unified typed logger with optional timestamp + queue flag.
  *
- * @param r         Router handle.
- * @param ty        Telemetry data type.
- * @param data      Pointer to bytes (must not be NULL if @p len>0).
- * @param len       Number of bytes at @p data.
- * @return SEDS_OK on success, or a negative @ref SedsResult.
+ * If @p timestamp_ms_opt is NULL, the router’s monotonic clock will be used.
+ * If @p queue is non-zero, the packet is queued instead of sent immediately.
  *
- * @note The router validates that @p len matches the schema for @p ty.
+ * For multi-byte element types, values are encoded in little-endian.
+ * The total bytes (count * elem_size) MUST equal the schema size.
  */
-SedsResult seds_router_log_bytes(SedsRouter * r,
-                                 SedsDataType ty,
-                                 const uint8_t * data,
-                                 size_t len);
+SedsResult seds_router_log_typed_ex(SedsRouter * r,
+                                    SedsDataType ty,
+                                    const void * data,
+                                    size_t count,
+                                    size_t elem_size,
+                                    SedsElemKind elem_kind,
+                                    const uint64_t * timestamp_ms_opt, /* NULL => now */
+                                    int queue /* 0 = immediate, non-zero = queue */);
 
 /**
- * @brief Log an array of 32-bit floats for @p ty.
+ * @brief String/byte logger that pads or truncates to the schema’s size.
  *
- * @param r         Router handle.
- * @param ty        Telemetry data type.
- * @param vals      Pointer to @p n_vals f32 values.
- * @param n_vals    Number of float values (bytes = n_vals * 4).
- * @return SEDS_OK on success, or a negative @ref SedsResult.
+ * Copies at most @p len bytes from @p bytes into an internal buffer sized to the
+ * schema’s fixed size for @p ty. If @p len < schema, remaining bytes are zeroed.
+ * If @p len > schema, input is truncated.
+ *
+ * This avoids SEDS_SIZE_MISMATCH for fixed-size “message” types while preserving
+ * the Router’s size invariants.
  */
-SedsResult seds_router_log_f32(SedsRouter * r,
-                               SedsDataType ty,
-                               const float * vals,
-                               size_t n_vals);
+SedsResult seds_router_log_string_ex(SedsRouter * r,
+                                     SedsDataType ty,
+                                     const char * bytes,
+                                     size_t len,
+                                     const uint64_t * timestamp_ms_opt, /* NULL => now */
+                                     int queue /* 0 = immediate, non-zero = queue */);
 
+/* ==============================
+   Legacy convenience (still supported)
+   ============================== */
 
-// ==============================
-// Wire receive / helpers
-// ==============================
+SedsResult seds_router_receive_serialized(SedsRouter * r, const uint8_t * bytes, size_t len);
 
-/**
- * @brief Deserialize a serialized packet and deliver/queue it as appropriate.
- *
- * @param r     Router handle.
- * @param bytes Pointer to serialized bytes (must not be NULL if @p len>0).
- * @param len   Number of bytes.
- * @return SEDS_OK on success, or a negative @ref SedsResult.
- *
- * @retval SEDS_DESERIALIZE If decoding fails.
- */
-SedsResult seds_router_receive_serialized(SedsRouter * r,
-                                          const uint8_t * bytes,
-                                          size_t len);
+SedsResult seds_router_receive(SedsRouter * r, const SedsPacketView * view);
 
-/**
- * @brief Deliver a packet already represented as a @ref SedsPacketView.
- *
- * @param r    Router handle.
- * @param view Pointer to a view describing the packet.
- * @return SEDS_OK on success, or a negative @ref SedsResult.
- *
- * @note The router copies the data it needs; ownership of @p view remains with the caller.
- */
-SedsResult seds_router_receive(SedsRouter * r,
-                               SedsPacketView * view);
-
-/**
- * @brief Process all packets in the TX queue: serialize and send them out.
- *
- * If a transmit callback was provided at router creation, it is invoked for each
- * packet. If the callback returns an error, processing stops and the error is returned.
- *
- * If no transmit callback was provided, this function is a no-op that returns SEDS_OK.
- *
- * @param r Router handle.
- * @return SEDS_OK if all packets were sent (or no TX callback was set),
- *         or a negative @ref SedsResult (e.g., callback failure).
- */
 SedsResult seds_router_process_send_queue(SedsRouter * r);
 
-/**
- * @brief Queue a packet for transmission.
- *
- * @param r    Router handle.
- * @param view Packet view to enqueue for TX.
- * @return SEDS_OK on success, or a negative @ref SedsResult.
- *
- * @note Use @ref seds_router_process_send_queue to flush the queue.
- */
-SedsResult seds_router_queue_tx_message(SedsRouter * r,
-                                        const SedsPacketView * view);
+SedsResult seds_router_queue_tx_message(SedsRouter * r, const SedsPacketView * view);
 
-/* ---------------------- RX (receive) side helpers --------------------- */
-
-/**
- * @brief Process all received packets in the RX queue, invoking local handlers.
- *
- * @param r Router handle.
- * @return SEDS_OK on success, or a negative @ref SedsResult.
- *
- * @note If a handler returns an error, processing stops and that error is returned.
- */
 SedsResult seds_router_process_received_queue(SedsRouter * r);
 
-/**
- * @brief Deserialize and queue a serialized packet into the RX queue (do not process).
- *
- * @param r     Router handle.
- * @param bytes Serialized bytes.
- * @param len   Number of bytes.
- * @return SEDS_OK on success, or a negative @ref SedsResult (e.g., SEDS_DESERIALIZE).
- *
- * @note Use @ref seds_router_process_received_queue to deliver queued RX packets.
- */
-SedsResult seds_router_rx_serialized_packet_to_queue(SedsRouter * r,
-                                                     const uint8_t * bytes,
-                                                     size_t len);
+SedsResult seds_router_rx_serialized_packet_to_queue(SedsRouter * r, const uint8_t * bytes, size_t len);
 
-/**
- * @brief Queue a packet view into the RX queue (do not process).
- *
- * @param r    Router handle.
- * @param view Packet view to enqueue.
- * @return SEDS_OK on success, or a negative @ref SedsResult.
- */
-SedsResult seds_router_rx_packet_to_queue(SedsRouter * r,
-                                          const SedsPacketView * view);
+SedsResult seds_router_rx_packet_to_queue(SedsRouter * r, const SedsPacketView * view);
 
+SedsResult seds_router_process_tx_queue_with_timeout(SedsRouter * r, uint32_t timeout_ms);
 
-// ==============================
-// Monotonic clock + timeout processing
-// ==============================
+SedsResult seds_router_process_rx_queue_with_timeout(SedsRouter * r, uint32_t timeout_ms);
 
-/**
- * @brief Process the TX queue until empty or until @p timeout_ms elapses.
- *
- * @param r           Router handle.
- * @param timeout_ms  Maximum processing time in milliseconds.
- * @return SEDS_OK if processing completed within the timeout or there was nothing to send;
- *         otherwise a negative @ref SedsResult (e.g., callback error).
- *
- * @note Time measurement uses the router’s @ref SedsNowMsFn.
- * @note Timeout is not guaranteed to exit at the timeout specified, function will return as soon as the current action
- * has finished after the timeout has elapsed. An example is if the current action takes 50ms but the timeout is 5ms,
- * one item will be handled in 50ms and the function will return leaving any other items to be handled later.
- */
-SedsResult seds_router_process_tx_queue_with_timeout(
-    SedsRouter * r,
-    uint32_t timeout_ms
-);
+SedsResult seds_router_process_all_queues_with_timeout(SedsRouter * r, uint32_t timeout_ms);
 
-/**
- * @brief Process the RX queue until empty or until @p timeout_ms elapses.
- *
- * @param r           Router handle.
- * @param timeout_ms  Maximum processing time in milliseconds.
- * @return SEDS_OK on success; a negative @ref SedsResult if a handler fails.
- * @note Timeout is not guaranteed to exit at the timeout specified, function will return as soon as the current action
- * has finished after the timeout has elapsed. An example is if the current action takes 50ms but the timeout is 5ms,
- * one item will be handled in 50ms and the function will return leaving any other items to be handled later.
- */
-SedsResult seds_router_process_rx_queue_with_timeout(
-    SedsRouter * r,
-    uint32_t timeout_ms
-);
-
-/**
- * @brief Process both RX and TX queues until empty or until @p timeout_ms elapses.
- *
- * @param r           Router handle.
- * @param timeout_ms  Maximum processing time in milliseconds.
- * @return SEDS_OK on success; otherwise a negative @ref SedsResult.
- * @note Timeout is not guaranteed to exit at the timeout specified, function will return as soon as the current action
- * has finished after the timeout has elapsed. An example is if the current action takes 50ms but the timeout is 5ms,
- * one item will be handled in 50ms and the function will return leaving any other items to be handled later.
- */
-SedsResult seds_router_process_all_queues_with_timeout(
-    SedsRouter * r,
-    uint32_t timeout_ms
-);
-
-
-// ==============================
-// Queue utilities
-// ==============================
-
-/**
- * @brief Process both RX and TX queues fully (no time limit).
- *
- * @param r Router handle.
- * @return SEDS_OK on success; otherwise a negative @ref SedsResult.
- */
 SedsResult seds_router_process_all_queues(SedsRouter * r);
 
-/**
- * @brief Clear both RX and TX queues without processing.
- *
- * @param r Router handle.
- * @return SEDS_OK on success; otherwise a negative @ref SedsResult.
- */
 SedsResult seds_router_clear_queues(SedsRouter * r);
 
-/**
- * @brief Clear the RX queue without processing.
- *
- * @param r Router handle.
- * @return SEDS_OK on success; otherwise a negative @ref SedsResult.
- */
 SedsResult seds_router_clear_rx_queue(SedsRouter * r);
 
-/**
- * @brief Clear the TX queue without processing.
- *
- * @param r Router handle.
- * @return SEDS_OK on success; otherwise a negative @ref SedsResult.
- */
 SedsResult seds_router_clear_tx_queue(SedsRouter * r);
 
-// ==============================
-// Payload extraction helpers
-// ==============================
+/* ==============================
+   Payload extraction / serialization helpers
+   ============================== */
 
-/**
- * @brief Extract up to @p n floats from @p pkt's payload into @p out.
- *
- * @param pkt Pointer to packet view.
- * @param out Destination buffer for floats (must hold @p n elements).
- * @param n   Number of floats to extract.
- * @return SEDS_OK on success; a negative @ref SedsResult on error.
- *
- * @retval SEDS_SIZE_MISMATCH If the payload size is not a multiple of sizeof(float) or
- *         does not match the schema for the packet’s type.
- */
-SedsResult seds_pkt_get_f32(const SedsPacketView * pkt, float * out, size_t n);
-
-/**
- * @brief Get a direct pointer to the raw payload bytes.
- *
- * @param pkt     Packet view (must not be NULL).
- * @param out_len Optional; if non-NULL, receives the payload length in bytes.
- * @return Pointer to the payload bytes, or NULL on error.
- *
- * @warning The returned pointer is only valid for the lifetime of @p pkt (i.e., during the
- *          callback that provided the view). Do not retain it after the callback returns.
- */
 const void * seds_pkt_bytes_ptr(const SedsPacketView * pkt, size_t * out_len);
 
-/**
- * @brief Get a direct pointer to the payload, validated as an array of fixed-size elements.
- *
- * Validates that @p elem_size is one of {1,2,4,8} and that payload_len is an exact multiple
- * of @p elem_size. If validation passes, returns the same underlying pointer as
- * @ref seds_pkt_bytes_ptr and (optionally) the element count.
- *
- * @param pkt        Packet view (must not be NULL).
- * @param elem_size  Element size in bytes (must be 1, 2, 4, or 8).
- * @param out_count  Optional; if non-NULL, receives payload_len / elem_size on success (0 on fail).
- * @return Pointer to the payload bytes, or NULL if arguments are invalid or sizes don’t divide evenly.
- *
- * @note No endianness conversion is performed. If interpreting multi-byte scalars on a
- *       big-endian host, convert from little-endian after casting.
- * @warning The returned pointer is only valid for the lifetime of @p pkt (see warning above).
- */
 const void * seds_pkt_data_ptr(const SedsPacketView * pkt, size_t elem_size, size_t * out_count);
 
-/**
- * @brief Copy the raw payload bytes into a caller-provided buffer.
- *
- * Copies the entire payload of @p pkt into @p dst if the buffer is large enough.
- * If @p dst is NULL, @p dst_len is 0, or the buffer is too small, the required
- * number of bytes is returned without copying.
- *
- * @param pkt      Packet view (must not be NULL).
- * @param dst      Destination buffer for payload bytes.
- * @param dst_len  Capacity of @p dst in bytes.
- * @return On success, returns the number of bytes copied.
- *         If @p dst is NULL, @p dst_len is 0, or too small, returns the required size.
- *         On invalid arguments, returns a negative status code (see @ref seds_error_to_string()).
- */
 int32_t seds_pkt_copy_bytes(const SedsPacketView * pkt, void * dst, size_t dst_len);
 
-/**
- * @brief Copy the payload into a typed buffer of fixed-size elements.
- *
- * Validates that @p elem_size is one of {1,2,4,8} and that payload_len is an exact
- * multiple of @p elem_size. Copies the data into @p dst if there is sufficient space.
- * If @p dst is NULL, @p dst_elems is 0, or the buffer is too small, the required
- * number of elements is returned without copying.
- *
- * @param pkt        Packet view (must not be NULL).
- * @param elem_size  Size of each element in bytes (1, 2, 4, or 8).
- * @param dst        Destination buffer for the elements.
- * @param dst_elems  Number of elements available in @p dst.
- * @return On success, returns the number of elements copied.
- *         If @p dst is NULL, @p dst_elems is 0, or too small, returns the required element count.
- *         On invalid arguments, returns a negative status code.
- *
- * @note No endianness conversion is performed; if your host is big-endian, convert values
- *       from little-endian after copying.
- */
 int32_t seds_pkt_copy_data(const SedsPacketView * pkt, size_t elem_size, void * dst, size_t dst_elems);
 
-/**
- * @brief Extract a typed slice from @p pkt into @p out.
- *
- * @param pkt       Packet view.
- * @param out       Destination buffer for elements (must hold @p count elements).
- * @param count     Number of elements to extract.
- * @param elem_size Element size in bytes (1,2,4,8).
- * @param elem_kind Element kind (unsigned/signed/float).
- * @return SEDS_OK on success; a negative @ref SedsResult on error.
- *
- * @retval SEDS_SIZE_MISMATCH If (count * elem_size) does not match the payload length
- *         or the schema for the packet’s @p ty.
- * @note Elements are read in little-endian order from the payload.
- */
 SedsResult seds_pkt_get_typed(const SedsPacketView * pkt,
                               void * out,
                               size_t count,
                               size_t elem_size,
                               SedsElemKind elem_kind);
 
-
-/**
- * @brief Get required size in bytes to serialize @p view into the wire format.
- * @return Required size in bytes, or negative SedsResult on error.
- */
 int32_t seds_pkt_serialize_len(const SedsPacketView * view);
 
-/**
- * @brief Serialize @p view into @p out.
- * If @p out is NULL or @p out_len==0 or too small, returns required size (not success).
- * @return Number of bytes written (or required), or negative SedsResult on error.
- */
 int32_t seds_pkt_serialize(const SedsPacketView * view, uint8_t * out, size_t out_len);
 
 typedef struct SedsOwnedPacket SedsOwnedPacket;
 
-/** Deserialize bytes into an owned packet handle (NULL on failure). */
 SedsOwnedPacket * seds_pkt_deserialize_owned(const uint8_t * bytes, size_t len);
 
-/** Fill a view that borrows data from the owned packet (valid until free). */
 SedsResult seds_owned_pkt_view(const SedsOwnedPacket * pkt, SedsPacketView * out_view);
 
-/** Free an owned packet obtained from seds_pkt_deserialize_owned. */
 void seds_owned_pkt_free(SedsOwnedPacket * pkt);
 
-/** Optional: validate a serialized buffer without allocating. */
 SedsResult seds_pkt_validate_serialized(const uint8_t * bytes, size_t len);
 
 typedef struct SedsOwnedHeader SedsOwnedHeader;
 
-/** Parse only the header/envelope (type, endpoints, sender, timestamp), no payload. */
 SedsOwnedHeader * seds_pkt_deserialize_header_owned(const uint8_t * bytes, size_t len);
 
-/** Produce a SedsPacketView that borrows from the owned header (payload is NULL/0). */
 SedsResult seds_owned_header_view(const SedsOwnedHeader * h, SedsPacketView * out_view);
 
-/** Free an owned header created by seds_pkt_deserialize_header_owned. */
 void seds_owned_header_free(SedsOwnedHeader * h);
 
 #ifdef __cplusplus
-} // extern "C"
+} /* extern "C" */
 #endif
 
-
-// ============================================================================
-// Header-only helpers for nicer C++ call sites (MUST NOT be in extern "C")
-// ============================================================================
+/* ============================================================================
+   Header-only helpers for C++ call sites (no extern "C")
+   ============================================================================ */
 #if defined(__cplusplus)
-
 namespace seds_detail
 {
     template < typename
     T >
     struct elem_traits;
-
     template<>
     struct elem_traits<uint8_t>
     {
         static constexpr SedsElemKind kind = SEDS_EK_UNSIGNED;
         static constexpr size_t size = 1;
     };
-
     template<>
     struct elem_traits<uint16_t>
     {
         static constexpr SedsElemKind kind = SEDS_EK_UNSIGNED;
         static constexpr size_t size = 2;
     };
-
     template<>
     struct elem_traits<uint32_t>
     {
         static constexpr SedsElemKind kind = SEDS_EK_UNSIGNED;
         static constexpr size_t size = 4;
     };
-
     template<>
     struct elem_traits<uint64_t>
     {
         static constexpr SedsElemKind kind = SEDS_EK_UNSIGNED;
         static constexpr size_t size = 8;
     };
-
     template<>
     struct elem_traits<int8_t>
     {
         static constexpr SedsElemKind kind = SEDS_EK_SIGNED;
         static constexpr size_t size = 1;
     };
-
     template<>
     struct elem_traits<int16_t>
     {
         static constexpr SedsElemKind kind = SEDS_EK_SIGNED;
         static constexpr size_t size = 2;
     };
-
     template<>
     struct elem_traits<int32_t>
     {
         static constexpr SedsElemKind kind = SEDS_EK_SIGNED;
         static constexpr size_t size = 4;
     };
-
     template<>
     struct elem_traits<int64_t>
     {
         static constexpr SedsElemKind kind = SEDS_EK_SIGNED;
         static constexpr size_t size = 8;
     };
-
     template<>
     struct elem_traits<float>
     {
         static constexpr SedsElemKind kind = SEDS_EK_FLOAT;
         static constexpr size_t size = 4;
     };
-
     template<>
     struct elem_traits<double>
     {
@@ -756,61 +307,77 @@ namespace seds_detail
     };
 }
 
-/**
- * @brief C++ convenience wrapper that deduces element kind/size from @p T and logs immediately.
- */
 template<typename T>
-static SedsResult seds_router(SedsRouter * router,
-                              SedsDataType datatype,
-                              const T * data,
-                              size_t count)
+static inline SedsResult seds_router_log(SedsRouter * r, SedsDataType ty, const T * data, size_t count)
 {
-    return seds_router_log_typed(router,
-                                 datatype,
-                                 static_cast<const void *>(data),
-                                 count,
-                                 seds_detail::elem_traits<T>::size,
-                                 seds_detail::elem_traits<T>::kind);
+    return seds_router_log_typed_ex(r, ty, data, count,
+                                    seds_detail::elem_traits<T>::size,
+                                    seds_detail::elem_traits<T>::kind,
+                                    /*ts*/NULL, /*queue*/0);
 }
 
-/**
- * @brief C++ convenience wrapper that deduces element kind/size from @p T and queues the log.
- */
 template<typename T>
-static SedsResult seds_router_queue(SedsRouter * router,
-                                    SedsDataType datatype,
-                                    const T * data,
-                                    size_t count)
+static inline SedsResult seds_router_log_queue(SedsRouter * r, SedsDataType ty, const T * data, size_t count)
 {
-    return seds_router_log_queue_typed(router,
-                                       datatype,
-                                       static_cast<const void *>(data),
-                                       count,
-                                       seds_detail::elem_traits<T>::size,
-                                       seds_detail::elem_traits<T>::kind);
+    return seds_router_log_typed_ex(r, ty, data, count,
+                                    seds_detail::elem_traits<T>::size,
+                                    seds_detail::elem_traits<T>::kind,
+                                    /*ts*/NULL, /*queue*/1);
 }
 
-/**
- * @brief C++ convenience extractor that deduces element kind/size from @p T.
- */
 template<typename T>
-static SedsResult seds_pkt_get(const SedsPacketView * pkt, T * out, size_t count)
+static inline SedsResult seds_router_log_ts(SedsRouter * r, SedsDataType ty, uint64_t ts_ms, const T * data,
+                                            size_t count)
 {
-    return seds_pkt_get_typed(pkt,
-                              static_cast<void *>(out),
-                              count,
+    return seds_router_log_typed_ex(r, ty, data, count,
+                                    seds_detail::elem_traits<T>::size,
+                                    seds_detail::elem_traits<T>::kind,
+                                    &ts_ms, /*queue*/0);
+}
+
+template<typename T>
+static inline SedsResult seds_router_log_queue_ts(SedsRouter * r, SedsDataType ty, uint64_t ts_ms, const T * data,
+                                                  size_t count)
+{
+    return seds_router_log_typed_ex(r, ty, data, count,
+                                    seds_detail::elem_traits<T>::size,
+                                    seds_detail::elem_traits<T>::kind,
+                                    &ts_ms, /*queue*/1);
+}
+
+/* String convenience for C++ */
+static inline SedsResult seds_router_log_cstr(SedsRouter * r, SedsDataType ty, const char * s)
+{
+    return seds_router_log_string_ex(r, ty, s, s ? strlen(s) : 0, NULL, 0);
+}
+static inline SedsResult seds_router_log_cstr_ts(SedsRouter * r, SedsDataType ty, uint64_t ts, const char * s)
+{
+    return seds_router_log_string_ex(r, ty, s, s ? strlen(s) : 0, &ts, 0);
+}
+static inline SedsResult seds_router_log_cstr_queue(SedsRouter * r, SedsDataType ty, const char * s)
+{
+    return seds_router_log_string_ex(r, ty, s, s ? strlen(s) : 0, NULL, 1);
+}
+static inline SedsResult seds_router_log_cstr_queue_ts(SedsRouter * r, SedsDataType ty, uint64_t ts, const char * s)
+{
+    return seds_router_log_string_ex(r, ty, s, s ? strlen(s) : 0, &ts, 1);
+}
+
+/* Extractor remains the same */
+template<typename T>
+static inline SedsResult seds_pkt_get(const SedsPacketView * pkt, T * out, size_t count)
+{
+    return seds_pkt_get_typed(pkt, out, count,
                               seds_detail::elem_traits<T>::size,
                               seds_detail::elem_traits<T>::kind);
 }
-#endif // defined(__cplusplus)
+#endif /* __cplusplus */
 
-
-// ---------- C11 _Generic convenience macros ----------
+/* ============================================================================
+   C11 _Generic convenience macros (string-safe)
+   ============================================================================ */
 #if !defined(__cplusplus) && defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 
-/**
- * @brief Internal: infer (kind,size) from pointer expression @p x.
- */
 #define SEDS__KIND_SIZE(x, KIND_OUT, SIZE_OUT) do {                                    \
     _Static_assert(sizeof(*(x))==1 || sizeof(*(x))==2 ||                                \
                    sizeof(*(x))==4 || sizeof(*(x))==8,                                  \
@@ -827,52 +394,100 @@ static SedsResult seds_pkt_get(const SedsPacketView * pkt, T * out, size_t count
         int64_t:       SEDS_EK_SIGNED,                                                  \
         float:         SEDS_EK_FLOAT,                                                   \
         double:        SEDS_EK_FLOAT,                                                   \
-        default:       SEDS_EK_UNSIGNED /* fallback for custom integer-like data */     \
+        default:       SEDS_EK_UNSIGNED                                                 \
     );                                                                                  \
 } while(0)
 
-/**
- * @brief C11 convenience wrapper that deduces element kind/size from @p data and logs immediately.
- */
-#define seds_router_log(router, datatype, data, count)                       \
+/* === Generic typed (non-string) shortcuts === */
+#define seds_router_log(router, datatype, data, count)                                  \
     (__extension__({                                                                    \
-        const void   *_seds_data  = (const void*)(data);                                \
-        size_t        _seds_count = (size_t)(count);                                    \
-        size_t        _seds_esize;                                                      \
-        SedsElemKind  _seds_kind;                                                       \
-        SEDS__KIND_SIZE((data), _seds_kind, _seds_esize);                               \
-        seds_router_log_typed((router), (datatype), _seds_data, _seds_count,            \
-                              _seds_esize, _seds_kind);                    \
+        const void   *_s_data  = (const void*)(data);                                   \
+        size_t        _s_count = (size_t)(count);                                       \
+        size_t        _s_esize;                                                         \
+        SedsElemKind  _s_kind;                                                          \
+        SEDS__KIND_SIZE((data), _s_kind, _s_esize);                                      \
+        seds_router_log_typed_ex((router), (datatype), _s_data, _s_count,               \
+                                 _s_esize, _s_kind, NULL, 0);                            \
     }))
 
-/**
- * @brief C11 convenience wrapper that deduces element kind/size from @p data and queues it.
- */
-#define seds_router_log_queue(router, datatype, data, count)                 \
+#define seds_router_log_queue(router, datatype, data, count)                            \
     (__extension__({                                                                    \
-        const void   *_seds_data  = (const void*)(data);                                \
-        size_t        _seds_count = (size_t)(count);                                    \
-        size_t        _seds_esize;                                                      \
-        SedsElemKind  _seds_kind;                                                       \
-        SEDS__KIND_SIZE((data), _seds_kind, _seds_esize);                               \
-        seds_router_log_queue_typed((router), (datatype), _seds_data, _seds_count,      \
-                                    _seds_esize, _seds_kind);              \
+        const void   *_s_data  = (const void*)(data);                                   \
+        size_t        _s_count = (size_t)(count);                                       \
+        size_t        _s_esize;                                                         \
+        SedsElemKind  _s_kind;                                                          \
+        SEDS__KIND_SIZE((data), _s_kind, _s_esize);                                      \
+        seds_router_log_typed_ex((router), (datatype), _s_data, _s_count,               \
+                                 _s_esize, _s_kind, NULL, 1);                            \
     }))
 
-/**
- * @brief C11 convenience extractor that deduces element kind/size from @p out.
+#define seds_router_log_ts(router, datatype, ts_ms, data, count)                        \
+    (__extension__({                                                                    \
+        const void   *_s_data  = (const void*)(data);                                   \
+        size_t        _s_count = (size_t)(count);                                       \
+        size_t        _s_esize;                                                         \
+        SedsElemKind  _s_kind;                                                          \
+        const uint64_t _s_ts = (uint64_t)(ts_ms);                                       \
+        SEDS__KIND_SIZE((data), _s_kind, _s_esize);                                      \
+        seds_router_log_typed_ex((router), (datatype), _s_data, _s_count,               \
+                                 _s_esize, _s_kind, &_s_ts, 0);                          \
+    }))
+
+#define seds_router_log_queue_ts(router, datatype, ts_ms, data, count)                  \
+    (__extension__({                                                                    \
+        const void   *_s_data  = (const void*)(data);                                   \
+        size_t        _s_count = (size_t)(count);                                       \
+        size_t        _s_esize;                                                         \
+        SedsElemKind  _s_kind;                                                          \
+        const uint64_t _s_ts = (uint64_t)(ts_ms);                                       \
+        SEDS__KIND_SIZE((data), _s_kind, _s_esize);                                      \
+        seds_router_log_typed_ex((router), (datatype), _s_data, _s_count,               \
+                                 _s_esize, _s_kind, &_s_ts, 1);                          \
+    }))
+
+/* === STRING-SAFE shortcuts (no size mismatch) ===
+ * These macros are for NUL-terminated strings (char* / const char*).
+ * They compute strlen and call the string-aware EX function which pads/truncates
+ * to the schema’s fixed size behind the scenes.
  */
+#define seds_router_log_cstr(router, datatype, cstr)                                    \
+    (__extension__({                                                                    \
+        const char *_s = (const char*)(cstr);                                           \
+        seds_router_log_string_ex((router), (datatype), _s, (_s?strlen(_s):0), NULL, 0);\
+    }))
+
+#define seds_router_log_cstr_queue(router, datatype, cstr)                              \
+    (__extension__({                                                                    \
+        const char *_s = (const char*)(cstr);                                           \
+        seds_router_log_string_ex((router), (datatype), _s, (_s?strlen(_s):0), NULL, 1);\
+    }))
+
+#define seds_router_log_cstr_ts(router, datatype, ts_ms, cstr)                          \
+    (__extension__({                                                                    \
+        const char *_s = (const char*)(cstr);                                           \
+        const uint64_t _s_ts = (uint64_t)(ts_ms);                                       \
+        seds_router_log_string_ex((router), (datatype), _s, (_s?strlen(_s):0), &_s_ts, 0);\
+    }))
+
+#define seds_router_log_cstr_queue_ts(router, datatype, ts_ms, cstr)                    \
+    (__extension__({                                                                    \
+        const char *_s = (const char*)(cstr);                                           \
+        const uint64_t _s_ts = (uint64_t)(ts_ms);                                       \
+        seds_router_log_string_ex((router), (datatype), _s, (_s?strlen(_s):0), &_s_ts, 1);\
+    }))
+
+/* Typed extractor unchanged */
 #define SEDS__PKT_KIND_SIZE(x, KIND_OUT, SIZE_OUT) SEDS__KIND_SIZE(x, KIND_OUT, SIZE_OUT)
 
 #define seds_pkt_get(pkt, out, count)                                                   \
     (__extension__({                                                                    \
-        void       *_s_out     = (void*)(out);                                          \
-        size_t      _s_count   = (size_t)(count);                                       \
-        size_t      _s_esize;                                                           \
-        SedsElemKind _s_kind;                                                            \
-        SEDS__PKT_KIND_SIZE((out), _s_kind, _s_esize);                                  \
+        void        *_s_out   = (void*)(out);                                           \
+        size_t       _s_count = (size_t)(count);                                        \
+        size_t       _s_esize;                                                          \
+        SedsElemKind _s_kind;                                                           \
+        SEDS__PKT_KIND_SIZE((out), _s_kind, _s_esize);                                   \
         seds_pkt_get_typed((pkt), _s_out, _s_count, _s_esize, _s_kind);                 \
     }))
-#endif // C11 generic
+#endif /* C11 generic */
 
-#endif // SEDSPRINTF_C_H
+#endif /* SEDSPRINTF_C_H */

@@ -3,11 +3,12 @@
 use crate::config::{MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE};
 use crate::macros::ReprU32Enum;
 use crate::telemetry_packet::{DataEndpoint, TelemetryPacket};
-use crate::{try_enum_from_u32, TelemetryError, TelemetryResult};
 use crate::{config::DataType, impl_repr_u32_enum};
+use crate::{try_enum_from_u32, TelemetryError, TelemetryResult};
 use alloc::{sync::Arc, vec::Vec};
 use core::convert::TryInto;
 use core::mem::size_of;
+
 
 pub const TYPE_SIZE: usize = size_of::<u32>();
 pub const DATA_SIZE_SIZE: usize = size_of::<u32>();
@@ -86,9 +87,7 @@ fn get_eps(
     Ok(())
 }
 
-pub fn deserialize_packet_header_only(
-    buf: &[u8],
-) -> Result<TelemetryEnvelope, TelemetryError> {
+pub fn deserialize_packet_header_only(buf: &[u8]) -> Result<TelemetryEnvelope, TelemetryError> {
     let mut r = ByteReader::new(buf);
 
     if r.remaining() < header_size_bytes() {

@@ -75,11 +75,11 @@ SedsResult radio_handler(const SedsPacketView * pkt, void * user)
     const SedsResult s = seds_pkt_to_string(pkt, buf, sizeof(buf));
     if (s != SEDS_OK)
     {
-        fprintf(stderr, "[RADIO] to_string failed: {%d}\n", s);
+        fprintf(stderr, "[RADIO] to_string failed: %d\n", s);
         return s;
     }
     if (self) self->radio_hits++;
-    printf("[RADIO] {%s}\n", buf);
+    printf("[RADIO] %s\n", buf);
     return SEDS_OK;
 }
 
@@ -90,11 +90,11 @@ SedsResult sdcard_handler(const SedsPacketView * pkt, void * user)
     const SedsResult s = seds_pkt_to_string(pkt, buf, sizeof(buf));
     if (s != SEDS_OK)
     {
-        fprintf(stderr, "[SD] to_string failed: {%d}\n", s);
+        fprintf(stderr, "[SD] to_string failed: %d\n", s);
         return s;
     }
     if (self) self->sd_hits++;
-    printf("[SD] wrote: {%s}\n", buf);
+    printf("[SD] wrote: %s\n", buf);
     return SEDS_OK;
 }
 

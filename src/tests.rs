@@ -117,7 +117,7 @@ mod tests {
                 .unwrap();
         let text = pkt.to_string();
         assert!(text.starts_with(
-            "Type: GPS_DATA, Size: 12, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, RADIO], Timestamp: 0 (0s 000ms), Data: "
+            "{Type: GPS_DATA, Size: 12, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, RADIO], Timestamp: 0 (0s 000ms), Data: "
         ));
         assert!(text.contains("1"));
         assert!(text.contains("2.5"));
@@ -262,9 +262,7 @@ mod tests {
         router.log_queue(DataType::GpsData, &data).unwrap();
 
         let data = [10.0_f32, 10.25, 10.5, 12.3];
-        router
-            .log_queue(DataType::BatteryStatus, &data)
-            .unwrap();
+        router.log_queue(DataType::BatteryStatus, &data).unwrap();
 
         let data = [10.0_f32, 10.25, 10.5];
         router.log_queue(DataType::GpsData, &data).unwrap();
@@ -317,8 +315,8 @@ unsafe fn copy_telemetry_packet_raw(
         // same object → OK no-op
         return Ok(());
     }
-    let s = unsafe{&*src};
-    let d = unsafe{&mut *dest};
+    let s = unsafe { &*src };
+    let d = unsafe { &mut *dest };
     // Deep copy
     *d = TelemetryPacket {
         ty: s.ty,
@@ -360,7 +358,7 @@ fn helpers_copy_telemetry_packet() {
 
     // (3) distinct objects → deep copy and equal fields
     let mut dest = TelemetryPacket {
-        ty: src.ty,                    // seed; will be overwritten
+        ty: src.ty, // seed; will be overwritten
         data_size: 0,
         sender: std::sync::Arc::clone(&src.sender), // <-- CLONE, not move
         endpoints: std::sync::Arc::clone(&src.endpoints),
@@ -429,7 +427,9 @@ mod handler_failure_tests {
         let failing = EndpointHandler {
             endpoint: failing_ep,
             // No explicit return type -> infers crate::Result<()>
-            handler: router::EndpointHandlerFn::Packet(Box::new(|_pkt: &TelemetryPacket| Err(TelemetryError::BadArg))),
+            handler: router::EndpointHandlerFn::Packet(Box::new(|_pkt: &TelemetryPacket| {
+                Err(TelemetryError::BadArg)
+            })),
         };
 
         let capturing = EndpointHandler {
@@ -469,7 +469,7 @@ mod handler_failure_tests {
 
         // Verify exact payload text produced by handle_callback_error(Some(dest), e)
         let expected = format!(
-            "Type: TELEMETRY_ERROR, Size: {:?}, Sender: TEST_PLATFORM, Endpoints: [RADIO], Timestamp: 0 (0s 000ms), Error: Handler for endpoint {:?} failed on device {:?}: {:?}",
+            "{{Type: TELEMETRY_ERROR, Size: {:?}, Sender: TEST_PLATFORM, Endpoints: [RADIO], Timestamp: 0 (0s 000ms), Error: (\"Handler for endpoint {:?} failed on device {:?}: {:?}\")}}",
             MAX_STRING_LENGTH,
             failing_ep,
             DEVICE_IDENTIFIER,
@@ -529,7 +529,7 @@ mod handler_failure_tests {
 
         // Exact text from handle_callback_error(None, e)
         let expected = format!(
-            "Type: TELEMETRY_ERROR, Size: {:?}, Sender: TEST_PLATFORM, Endpoints: [SD_CARD], Timestamp: 0 (0s 000ms), Error: TX Handler failed on device {:?}: {:?}",
+            "{{Type: TELEMETRY_ERROR, Size: {:?}, Sender: TEST_PLATFORM, Endpoints: [SD_CARD], Timestamp: 0 (0s 000ms), Error: (\"TX Handler failed on device {:?}: {:?}\")}}",
             MAX_STRING_LENGTH,
             DEVICE_IDENTIFIER,
             TelemetryError::Io("boom")
@@ -594,7 +594,10 @@ mod handler_failure_tests {
 mod timeout_tests {
     use crate::config::DataEndpoint;
     use crate::tests::get_handler;
-    use crate::{router, router::BoardConfig, router::Clock, router::Router, telemetry_packet::DataType, telemetry_packet::TelemetryPacket, TelemetryResult};
+    use crate::{
+        router, router::BoardConfig, router::Clock, router::Router, telemetry_packet::DataType,
+        telemetry_packet::TelemetryPacket, TelemetryResult,
+    };
     use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     use std::sync::Arc;
 
