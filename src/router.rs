@@ -99,11 +99,11 @@ fn fallback_stdout(msg: &str) {
 // -------------------- Router --------------------
 
 pub struct Router {
-    transmit: Option<Box<dyn Fn(&[u8]) -> TelemetryResult<()> + Send + Sync + 'static>>,
+    transmit: Option<Box<dyn Fn(&[u8]) -> TelemetryResult<()>>>,
     cfg: BoardConfig,
     received_queue: VecDeque<RxItem>,
     transmit_queue: VecDeque<TelemetryPacket>,
-    clock: Box<dyn Clock + Send + Sync>,
+    clock: Box<dyn Clock>,
 }
 
 impl Router {
@@ -301,42 +301,50 @@ impl Router {
         dest: DataEndpoint,
         handler: &EndpointHandler,
         data: &RxItem,
-        pkt_for_ctx: Option<&TelemetryPacket>, // may be None if we didn’t deserialize
+        pkt_for_ctx: Option<&TelemetryPacket>,        // may be None if we didn’t deserialize
         env_for_ctx: Option<&serialize::TelemetryEnvelope>, // header-only context
     ) -> TelemetryResult<()> {
+        // --- Shared helper function for retry + error handling ---
+        fn with_retries<F>(
+            this: &Router,
+            dest: DataEndpoint,
+            pkt_for_ctx: Option<&TelemetryPacket>,
+            env_for_ctx: Option<&serialize::TelemetryEnvelope>,
+            mut run: F,
+        ) -> TelemetryResult<()>
+            where
+                F: FnMut() -> TelemetryResult<()>,
+        {
+            this.retry(MAX_NUMBER_OF_RETRYS, || run()).map_err(|e| {
+                if let Some(pkt) = pkt_for_ctx {
+                    let _ = this.handle_callback_error(pkt, Some(dest), e);
+                } else if let Some(env) = env_for_ctx {
+                    let _ = this.handle_callback_error_from_env(env, Some(dest), e);
+                }
+                TelemetryError::HandlerError("local handler failed")
+            })
+        }
+
+        // --- Dispatch based on handler kind ---
         match (&handler.handler, data) {
             (EndpointHandlerFn::Packet(f), _) => {
                 let pkt = pkt_for_ctx.expect("Packet handler requires TelemetryPacket context");
-                self.retry(MAX_NUMBER_OF_RETRYS, || f(pkt)).map_err(|e| {
-                    // prefer packet context; fall back to envelope if needed
-                    if let Some(pkt) = pkt_for_ctx {
-                        let _ = self.handle_callback_error(pkt, Some(dest), e);
-                    } else if let Some(env) = env_for_ctx {
-                        let _ = self.handle_callback_error_from_env(env, Some(dest), e);
-                    }
-                    TelemetryError::HandlerError("local handler failed")
-                })
+                with_retries(self, dest, pkt_for_ctx, env_for_ctx, || f(pkt))
             }
+
             (EndpointHandlerFn::Serialized(f), RxItem::Serialized(bytes)) => {
-                self.retry(MAX_NUMBER_OF_RETRYS, || f(bytes)).map_err(|e| {
-                    if let Some(pkt) = pkt_for_ctx {
-                        let _ = self.handle_callback_error(pkt, Some(dest), e);
-                    } else if let Some(env) = env_for_ctx {
-                        let _ = self.handle_callback_error_from_env(env, Some(dest), e);
-                    }
-                    TelemetryError::HandlerError("local handler failed")
-                })
+                with_retries(self, dest, pkt_for_ctx, env_for_ctx, || f(bytes))
             }
+
             (EndpointHandlerFn::Serialized(f), RxItem::Packet(pkt)) => {
-                // Only serialize here if caller didn’t provide bytes (receive(path with Packet))
-                let owned = serialize::serialize_packet(pkt);
-                self.retry(MAX_NUMBER_OF_RETRYS, || f(&owned)).map_err(|e| {
-                    let _ = self.handle_callback_error(pkt, Some(dest), e);
-                    TelemetryError::HandlerError("local handler failed")
+                with_retries(self, dest, pkt_for_ctx, env_for_ctx, || {
+                    let owned = serialize::serialize_packet(pkt);
+                    f(&owned)
                 })
             }
         }
     }
+
 
     /// Error helper when we only have an envelope (no full packet).
     fn handle_callback_error_from_env(
@@ -347,7 +355,7 @@ impl Router {
     ) -> TelemetryResult<()> {
         // Decide which local endpoints to target for the error packet:
         // filter to local endpoints; if dest provided, exclude it from the re-broadcast.
-        let mut locals: alloc::vec::Vec<DataEndpoint> = env
+        let mut locals: Vec<DataEndpoint> = env
             .endpoints
             .iter()
             .copied()
