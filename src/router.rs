@@ -9,7 +9,7 @@ use crate::{
 };
 use alloc::{boxed::Box, collections::VecDeque, sync::Arc, vec::Vec};
 
-enum RxQueueItem {
+pub enum RxItem {
     Packet(TelemetryPacket),
     Serialized(Vec<u8>),
 }
@@ -17,9 +17,14 @@ enum RxQueueItem {
 // -------------------- endpoint + board config --------------------
 const MAX_NUMBER_OF_RETRYS: usize = 3;
 
+pub(crate) enum EndpointHandlerFn {
+    Packet(Box<dyn Fn(&TelemetryPacket) -> TelemetryResult<()>>),
+    Serialized(Box<dyn Fn(&[u8]) -> TelemetryResult<()>>),
+}
+
 pub struct EndpointHandler {
     pub endpoint: DataEndpoint,
-    pub handler: Box<dyn Fn(&TelemetryPacket) -> TelemetryResult<()> + Send + Sync + 'static>,
+    pub handler: EndpointHandlerFn,
 }
 
 pub trait Clock {
@@ -96,7 +101,7 @@ fn fallback_stdout(msg: &str) {
 pub struct Router {
     transmit: Option<Box<dyn Fn(&[u8]) -> TelemetryResult<()> + Send + Sync + 'static>>,
     cfg: BoardConfig,
-    received_queue: VecDeque<RxQueueItem>,
+    received_queue: VecDeque<RxItem>,
     transmit_queue: VecDeque<TelemetryPacket>,
     clock: Box<dyn Clock + Send + Sync>,
 }
@@ -207,11 +212,8 @@ impl Router {
         Ok(())
     }
 
-    fn handle_rx_queue_item(&mut self, item: RxQueueItem) -> TelemetryResult<()> {
-        match item {
-            RxQueueItem::Packet(pkt) => self.receive(&pkt),
-            RxQueueItem::Serialized(bytes) => self.receive_serialized(&bytes),
-        }
+    fn handle_rx_queue_item(&mut self, item: RxItem) -> TelemetryResult<()> {
+        self.receive_item(&item)
     }
 
     pub fn process_rx_queue_with_timeout(&mut self, timeout_ms: u32) -> TelemetryResult<()> {
@@ -262,13 +264,13 @@ impl Router {
     }
 
     pub fn rx_serialized_packet_to_queue(&mut self, bytes: &[u8]) -> TelemetryResult<()> {
-        self.received_queue.push_back(RxQueueItem::Serialized(bytes.to_vec()));
+        self.received_queue.push_back(RxItem::Serialized(bytes.to_vec()));
         Ok(())
     }
 
     pub fn rx_packet_to_queue(&mut self, pkt: TelemetryPacket) -> TelemetryResult<()> {
         pkt.validate()?;
-        self.received_queue.push_back(RxQueueItem::Packet(pkt));
+        self.received_queue.push_back(RxItem::Packet(pkt));
         Ok(())
     }
 
@@ -286,57 +288,221 @@ impl Router {
         Err(last_err.expect("times > 0"))
     }
 
-    /// Log (send) a packet.
+    fn endpoint_has_packet_handler(&self, ep: DataEndpoint) -> bool {
+        self.cfg.handlers.iter().any(|h| h.endpoint == ep && matches!(h.handler, EndpointHandlerFn::Packet(_)))
+    }
+
+    fn endpoint_has_serialized_handler(&self, ep: DataEndpoint) -> bool {
+        self.cfg.handlers.iter().any(|h| h.endpoint == ep && matches!(h.handler, EndpointHandlerFn::Serialized(_)))
+    }
+
+    fn call_handler_with_retries(
+        &self,
+        dest: DataEndpoint,
+        handler: &EndpointHandler,
+        data: &RxItem,
+        pkt_for_ctx: Option<&TelemetryPacket>, // may be None if we didn’t deserialize
+        env_for_ctx: Option<&serialize::TelemetryEnvelope>, // header-only context
+    ) -> TelemetryResult<()> {
+        match (&handler.handler, data) {
+            (EndpointHandlerFn::Packet(f), _) => {
+                let pkt = pkt_for_ctx.expect("Packet handler requires TelemetryPacket context");
+                self.retry(MAX_NUMBER_OF_RETRYS, || f(pkt)).map_err(|e| {
+                    // prefer packet context; fall back to envelope if needed
+                    if let Some(pkt) = pkt_for_ctx {
+                        let _ = self.handle_callback_error(pkt, Some(dest), e);
+                    } else if let Some(env) = env_for_ctx {
+                        let _ = self.handle_callback_error_from_env(env, Some(dest), e);
+                    }
+                    TelemetryError::HandlerError("local handler failed")
+                })
+            }
+            (EndpointHandlerFn::Serialized(f), RxItem::Serialized(bytes)) => {
+                self.retry(MAX_NUMBER_OF_RETRYS, || f(bytes)).map_err(|e| {
+                    if let Some(pkt) = pkt_for_ctx {
+                        let _ = self.handle_callback_error(pkt, Some(dest), e);
+                    } else if let Some(env) = env_for_ctx {
+                        let _ = self.handle_callback_error_from_env(env, Some(dest), e);
+                    }
+                    TelemetryError::HandlerError("local handler failed")
+                })
+            }
+            (EndpointHandlerFn::Serialized(f), RxItem::Packet(pkt)) => {
+                // Only serialize here if caller didn’t provide bytes (receive(path with Packet))
+                let owned = serialize::serialize_packet(pkt);
+                self.retry(MAX_NUMBER_OF_RETRYS, || f(&owned)).map_err(|e| {
+                    let _ = self.handle_callback_error(pkt, Some(dest), e);
+                    TelemetryError::HandlerError("local handler failed")
+                })
+            }
+        }
+    }
+
+    /// Error helper when we only have an envelope (no full packet).
+    fn handle_callback_error_from_env(
+        &self,
+        env: &serialize::TelemetryEnvelope,
+        dest: Option<DataEndpoint>,
+        e: TelemetryError,
+    ) -> TelemetryResult<()> {
+        // Decide which local endpoints to target for the error packet:
+        // filter to local endpoints; if dest provided, exclude it from the re-broadcast.
+        let mut locals: alloc::vec::Vec<DataEndpoint> = env
+            .endpoints
+            .iter()
+            .copied()
+            .filter(|&ep| self.cfg.is_local_endpoint(ep))
+            .collect();
+        locals.sort_unstable();
+        locals.dedup();
+        if let Some(failed) = dest {
+            locals.retain(|&ep| ep != failed);
+        }
+
+        let error_msg = alloc::format!(
+            "Handler for endpoint {:?} failed on device {:?}: {:?}",
+            dest, DEVICE_IDENTIFIER, e
+        );
+        if locals.is_empty() {
+            fallback_stdout(&error_msg);
+            return Ok(());
+        }
+
+        let meta = message_meta(DataType::TelemetryError);
+        let mut buf = alloc::vec![0u8; meta.data_size];
+        let msg_bytes = error_msg.as_bytes();
+        let n = core::cmp::min(buf.len(), msg_bytes.len());
+        if n > 0 { buf[..n].copy_from_slice(&msg_bytes[..n]); }
+
+        // Build a minimal error packet using envelope fields for sender/timestamp.
+        let error_pkt = TelemetryPacket::new(
+            DataType::TelemetryError,
+            &locals,
+            env.sender.clone(),
+            env.timestamp_ms,
+            alloc::sync::Arc::<[u8]>::from(buf),
+        )?;
+        self.send(&error_pkt)
+    }
+
+    pub fn receive_item(&self, item: &RxItem) -> TelemetryResult<()> {
+        match item {
+            RxItem::Packet(pkt) => {
+                pkt.validate()?;
+                // No pre-serialization; serialize only if a Serialized handler exists.
+                for dest in pkt.endpoints.iter().copied() {
+                    for h in self.cfg.handlers.iter().filter(|h| h.endpoint == dest) {
+                        self.call_handler_with_retries(dest, h, item, Some(pkt), None)?;
+                    }
+                }
+                Ok(())
+            }
+            RxItem::Serialized(bytes) => {
+                // 1) Peek envelope to know endpoints (cheap, no payload copy).
+                let env = serialize::peek_envelope(bytes)?;
+
+                // 2) Determine if ANY packet handler exists for the addressed endpoints.
+                let any_packet_needed = env
+                    .endpoints
+                    .iter()
+                    .copied()
+                    .any(|ep| self.endpoint_has_packet_handler(ep));
+
+                // 3) Deserialize ONCE only if at least one packet-handler is present.
+                let pkt_opt = if any_packet_needed {
+                    let pkt = serialize::deserialize_packet(bytes)?;
+                    pkt.validate()?;
+                    Some(pkt)
+                } else {
+                    None
+                };
+
+                // 4) Route to all handlers; for serialized-handlers pass bytes;
+                //    for packet-handlers pass the (maybe) deserialized packet.
+                for dest in env.endpoints.iter().copied() {
+                    for h in self.cfg.handlers.iter().filter(|h| h.endpoint == dest) {
+                        match (&h.handler, &pkt_opt) {
+                            (EndpointHandlerFn::Packet(_), Some(pkt)) => {
+                                self.call_handler_with_retries(dest, h, item, Some(pkt), Some(&env))?;
+                            }
+                            (EndpointHandlerFn::Packet(_), None) => {
+                                // Shouldn’t happen because any_packet_needed would be true.
+                                // But guard anyway with a fast path: deserialize just-in-time.
+                                let pkt = serialize::deserialize_packet(bytes)?;
+                                pkt.validate()?;
+                                self.call_handler_with_retries(dest, h, item, Some(&pkt), Some(&env))?;
+                            }
+                            (EndpointHandlerFn::Serialized(_), _) => {
+                                self.call_handler_with_retries(dest, h, item, pkt_opt.as_ref(), Some(&env))?;
+                            }
+                        }
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+
+    // send() stays efficient: we already have a packet and must serialize once for
+    // remote TX and for any local Serialized handlers. If *no* remote and *no*
+    // local Serialized handlers exist, you can skip serialization:
     pub fn send(&self, pkt: &TelemetryPacket) -> TelemetryResult<()> {
         pkt.validate()?;
 
+        let has_serialized_local = pkt.endpoints.iter().copied()
+                                      .any(|ep| self.endpoint_has_serialized_handler(ep));
         let send_remote = pkt.endpoints.iter().any(|e| !self.cfg.is_local_endpoint(*e));
 
-        let bytes = serialize::serialize_packet(pkt);
+        // Only serialize if needed.
+        let bytes_opt = if has_serialized_local || send_remote {
+            Some(serialize::serialize_packet(pkt))
+        } else {
+            None
+        };
 
         if send_remote {
-            if let Some(tx) = &self.transmit {
-                if let Err(e) = self.retry(MAX_NUMBER_OF_RETRYS, || tx(&bytes)) {
+            if let (Some(tx), Some(bytes)) = (&self.transmit, &bytes_opt) {
+                if let Err(e) = self.retry(MAX_NUMBER_OF_RETRYS, || tx(bytes)) {
                     let _ = self.handle_callback_error(pkt, None, e);
                     return Err(TelemetryError::HandlerError("TX failed"));
                 }
             }
         }
 
-        pkt.endpoints
-           .iter()
-           .copied()
-           .flat_map(|dest| {
-               self.cfg.handlers.iter()
-                   .filter(move |h| h.endpoint == dest)
-                   .map(move |h| (dest, h))
-           })
-           .try_for_each(|(dest, h)| {
-               self.retry(MAX_NUMBER_OF_RETRYS, || (h.handler)(pkt)).map_err(|e| {
-                   let _ = self.handle_callback_error(pkt, Some(dest), e);
-                   TelemetryError::HandlerError("local handler failed")
-               })
-           })?;
-        Ok(())
-    }
-
-    pub fn receive_serialized(&self, bytes: &[u8]) -> TelemetryResult<()> {
-        let pkt = serialize::deserialize_packet(bytes)?;
-        pkt.validate()?;
-        self.receive(&pkt)
-    }
-
-    pub fn receive(&self, pkt: &TelemetryPacket) -> TelemetryResult<()> {
-        pkt.validate()?;
-        pkt.endpoints.iter().copied().for_each(|dest| {
-            self.cfg.handlers.iter().filter(|h| h.endpoint == dest).for_each(|h| {
-                if let Err(e) = self.retry(MAX_NUMBER_OF_RETRYS, || (h.handler)(&pkt)) {
-                    let _ = self.handle_callback_error(&pkt, Some(dest), e);
+        // Local dispatch using the best available representation.
+        for dest in pkt.endpoints.iter().copied() {
+            for h in self.cfg.handlers.iter().filter(|h| h.endpoint == dest) {
+                match (&h.handler, &bytes_opt) {
+                    (EndpointHandlerFn::Serialized(_), Some(bytes)) => {
+                        let item = RxItem::Serialized(bytes.clone());
+                        self.call_handler_with_retries(dest, h, &item, Some(pkt), None)?;
+                    }
+                    (EndpointHandlerFn::Serialized(_), None) => {
+                        // Serialize only for this handler (rare path).
+                        let bytes = serialize::serialize_packet(pkt);
+                        let item = RxItem::Serialized(bytes);
+                        self.call_handler_with_retries(dest, h, &item, Some(pkt), None)?;
+                    }
+                    (EndpointHandlerFn::Packet(_), _) => {
+                        let item = RxItem::Packet(pkt.clone());
+                        self.call_handler_with_retries(dest, h, &item, Some(pkt), None)?;
+                    }
                 }
-            });
-        });
+            }
+        }
         Ok(())
     }
+
+    // receive_serialized / receive can stay as thin wrappers:
+    pub fn receive_serialized(&self, bytes: &[u8]) -> TelemetryResult<()> {
+        let item = RxItem::Serialized(bytes.to_vec());
+        self.receive_item(&item)
+    }
+    pub fn receive(&self, pkt: &TelemetryPacket) -> TelemetryResult<()> {
+        let item = RxItem::Packet(pkt.clone());
+        self.receive_item(&item)
+    }
+
 
     /// Build a packet then send.
     pub fn log<T: LeBytes>(&self, ty: DataType, data: &[T]) -> TelemetryResult<()> {

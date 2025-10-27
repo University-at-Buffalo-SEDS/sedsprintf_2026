@@ -90,7 +90,7 @@ SedsResult init_telemetry_router(void)
 
     // Local endpoint table
     const SedsLocalEndpointDesc locals[] = {
-        {.endpoint = SEDS_EP_RADIO, .handler = on_radio_packet, .user = NULL},
+        {.endpoint = SEDS_EP_RADIO, .packet_handler = on_radio_packet, .user = NULL},
     };
 
     SedsRouter * r = seds_router_new(

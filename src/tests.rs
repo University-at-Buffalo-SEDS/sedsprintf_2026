@@ -1,7 +1,7 @@
 use crate::config::{get_needed_message_size, MESSAGE_ELEMENTS};
 use crate::router::EndpointHandler;
 use crate::telemetry_packet::{DataEndpoint, DataType, TelemetryPacket};
-use crate::TelemetryError;
+use crate::{router, TelemetryError};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -9,17 +9,17 @@ use std::sync::{Arc, Mutex};
 fn get_handler(rx_count_c: Arc<AtomicUsize>) -> EndpointHandler {
     EndpointHandler {
         endpoint: DataEndpoint::SdCard,
-        handler: Box::new(move |_pkt: &TelemetryPacket| {
+        handler: router::EndpointHandlerFn::Packet(Box::new(move |_pkt: &TelemetryPacket| {
             rx_count_c.fetch_add(1, Ordering::SeqCst);
             Ok(())
-        }),
+        })),
     }
 }
 
 fn get_sd_card_handler(sd_seen_c: Arc<Mutex<Option<(DataType, Vec<f32>)>>>) -> EndpointHandler {
     EndpointHandler {
         endpoint: DataEndpoint::SdCard,
-        handler: Box::new(move |pkt: &TelemetryPacket| {
+        handler: router::EndpointHandlerFn::Packet(Box::new(move |pkt: &TelemetryPacket| {
             // sanity: element sizing must be 4 bytes (f32) for GPS_DATA
             let elems = MESSAGE_ELEMENTS[pkt.ty as usize].max(1);
             let per_elem = get_needed_message_size(pkt.ty) / elems;
@@ -34,7 +34,7 @@ fn get_sd_card_handler(sd_seen_c: Arc<Mutex<Option<(DataType, Vec<f32>)>>>) -> E
 
             *sd_seen_c.lock().unwrap() = Some((pkt.ty, vals));
             Ok(())
-        }),
+        })),
     }
 }
 
@@ -429,18 +429,18 @@ mod handler_failure_tests {
         let failing = EndpointHandler {
             endpoint: failing_ep,
             // No explicit return type -> infers crate::Result<()>
-            handler: Box::new(|_pkt: &TelemetryPacket| Err(TelemetryError::BadArg)),
+            handler: router::EndpointHandlerFn::Packet(Box::new(|_pkt: &TelemetryPacket| Err(TelemetryError::BadArg))),
         };
 
         let capturing = EndpointHandler {
             endpoint: other_ep,
-            handler: Box::new(move |pkt: &TelemetryPacket| {
+            handler: router::EndpointHandlerFn::Packet(Box::new(move |pkt: &TelemetryPacket| {
                 if pkt.ty == DataType::TelemetryError {
                     *last_payload_c.lock().unwrap() = pkt.to_string();
                 }
                 recv_count_c.fetch_add(1, Ordering::SeqCst);
                 Ok(())
-            }),
+            })),
         };
         let box_clock = StepClock::new_default_box();
 
@@ -495,13 +495,13 @@ mod handler_failure_tests {
 
         let capturing = EndpointHandler {
             endpoint: local_ep,
-            handler: Box::new(move |pkt: &TelemetryPacket| {
+            handler: router::EndpointHandlerFn::Packet(Box::new(move |pkt: &TelemetryPacket| {
                 if pkt.ty == DataType::TelemetryError {
                     *last_payload_c.lock().unwrap() = pkt.to_string();
                     saw_error_c.fetch_add(1, Ordering::SeqCst);
                 }
                 Ok(())
-            }),
+            })),
         };
 
         let tx_fail =
@@ -594,10 +594,7 @@ mod handler_failure_tests {
 mod timeout_tests {
     use crate::config::DataEndpoint;
     use crate::tests::get_handler;
-    use crate::{
-        router::BoardConfig, router::Clock, router::Router, telemetry_packet::DataType,
-        telemetry_packet::TelemetryPacket, TelemetryResult,
-    };
+    use crate::{router, router::BoardConfig, router::Clock, router::Router, telemetry_packet::DataType, telemetry_packet::TelemetryPacket, TelemetryResult};
     use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     use std::sync::Arc;
 
@@ -661,12 +658,12 @@ mod timeout_tests {
 
         let rx_count = Arc::new(AtomicUsize::new(0));
         let rx_count_c = rx_count.clone();
-        let handler = crate::router::EndpointHandler {
+        let handler = router::EndpointHandler {
             endpoint: DataEndpoint::SdCard,
-            handler: Box::new(move |_pkt: &TelemetryPacket| {
+            handler: router::EndpointHandlerFn::Packet(Box::new(move |_pkt: &TelemetryPacket| {
                 rx_count_c.fetch_add(1, Ordering::SeqCst);
                 Ok(())
-            }),
+            })),
         };
 
         let box_clock = StepClock::new_default_box();

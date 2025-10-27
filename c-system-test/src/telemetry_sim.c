@@ -119,7 +119,7 @@ SedsResult node_init(SimNode * n, SimBus * bus, const char * name, int radio, in
     {
         locals[num++] = (SedsLocalEndpointDesc){
             .endpoint = SEDS_EP_RADIO,
-            .handler = radio_handler,
+            .packet_handler = radio_handler,
             .user = (void *) n
         };
     }
@@ -127,7 +127,7 @@ SedsResult node_init(SimNode * n, SimBus * bus, const char * name, int radio, in
     {
         locals[num++] = (SedsLocalEndpointDesc){
             .endpoint = SEDS_EP_SD, // <-- use your actual enum name
-            .handler = sdcard_handler,
+            .packet_handler = sdcard_handler,
             .user = (void *) n
         };
     }
