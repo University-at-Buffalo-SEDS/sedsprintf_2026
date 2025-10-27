@@ -673,6 +673,76 @@ pub extern "C" fn seds_pkt_data_ptr(
     view.payload as *const c_void
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_pkt_copy_data_bytes(
+    pkt: *const SedsPacketView,
+    dst: *mut u8,
+    dst_len: usize,
+) -> i32 {
+    if pkt.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let view = unsafe { &*pkt };
+    let needed = view.payload_len;
+
+    // Query mode or too-small -> return required size (bytes)
+    if dst.is_null() || dst_len == 0 || dst_len < needed {
+        return needed as i32;
+    }
+
+    if needed > 0 && view.payload.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+
+    unsafe {
+        core::ptr::copy_nonoverlapping(view.payload, dst, needed);
+    }
+    needed as i32
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_pkt_copy_data(
+    pkt: *const SedsPacketView,
+    elem_size: usize,   // must be 1,2,4,8
+    dst: *mut core::ffi::c_void,
+    dst_elems: usize,   // number of elements available in dst
+) -> i32 {
+    if pkt.is_null() || !matches!(elem_size, 1 | 2 | 4 | 8) {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let view = unsafe { &*pkt };
+
+    // Validate divisibility
+    if elem_size == 0 || view.payload_len % elem_size != 0 {
+        return status_from_err(TelemetryError::BadArg);
+    }
+
+    let count = view.payload_len / elem_size;
+
+    // Query mode or too-small -> return required size (elements)
+    if dst.is_null() || dst_elems == 0 || dst_elems < count {
+        return count as i32;
+    }
+
+    if count > 0 && view.payload.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+
+    // Compute total byte size, guarding overflow
+    let total_bytes = match count.checked_mul(elem_size) {
+        Some(n) => n,
+        None => return status_from_err(TelemetryError::BadArg),
+    };
+
+    unsafe {
+        core::ptr::copy_nonoverlapping(
+            view.payload as *const u8,
+            dst as *mut u8,
+            total_bytes,
+        );
+    }
+    count as i32
+}
 // ============================ typed extractors (optional) ============================
 
 #[derive(Debug)]
