@@ -262,9 +262,7 @@ mod tests {
         router.log_queue(DataType::GpsData, &data).unwrap();
 
         let data = [10.0_f32, 10.25, 10.5, 12.3];
-        router
-            .log_queue(DataType::BatteryStatus, &data)
-            .unwrap();
+        router.log_queue(DataType::BatteryStatus, &data).unwrap();
 
         let data = [10.0_f32, 10.25, 10.5];
         router.log_queue(DataType::GpsData, &data).unwrap();
@@ -317,8 +315,8 @@ unsafe fn copy_telemetry_packet_raw(
         // same object → OK no-op
         return Ok(());
     }
-    let s = unsafe{&*src};
-    let d = unsafe{&mut *dest};
+    let s = unsafe { &*src };
+    let d = unsafe { &mut *dest };
     // Deep copy
     *d = TelemetryPacket {
         ty: s.ty,
@@ -360,7 +358,7 @@ fn helpers_copy_telemetry_packet() {
 
     // (3) distinct objects → deep copy and equal fields
     let mut dest = TelemetryPacket {
-        ty: src.ty,                    // seed; will be overwritten
+        ty: src.ty, // seed; will be overwritten
         data_size: 0,
         sender: std::sync::Arc::clone(&src.sender), // <-- CLONE, not move
         endpoints: std::sync::Arc::clone(&src.endpoints),
@@ -429,7 +427,9 @@ mod handler_failure_tests {
         let failing = EndpointHandler {
             endpoint: failing_ep,
             // No explicit return type -> infers crate::Result<()>
-            handler: router::EndpointHandlerFn::Packet(Box::new(|_pkt: &TelemetryPacket| Err(TelemetryError::BadArg))),
+            handler: router::EndpointHandlerFn::Packet(Box::new(|_pkt: &TelemetryPacket| {
+                Err(TelemetryError::BadArg)
+            })),
         };
 
         let capturing = EndpointHandler {
@@ -594,7 +594,10 @@ mod handler_failure_tests {
 mod timeout_tests {
     use crate::config::DataEndpoint;
     use crate::tests::get_handler;
-    use crate::{router, router::BoardConfig, router::Clock, router::Router, telemetry_packet::DataType, telemetry_packet::TelemetryPacket, TelemetryResult};
+    use crate::{
+        router, router::BoardConfig, router::Clock, router::Router, telemetry_packet::DataType,
+        telemetry_packet::TelemetryPacket, TelemetryResult,
+    };
     use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     use std::sync::Arc;
 

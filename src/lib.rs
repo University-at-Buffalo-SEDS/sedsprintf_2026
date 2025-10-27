@@ -38,10 +38,10 @@ mod embedded_alloc {
 
     unsafe impl GlobalAlloc for FreeRtosAlloc {
         unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-            unsafe{pvPortMalloc(layout.size()) as *mut u8}
+            unsafe { pvPortMalloc(layout.size()) as *mut u8 }
         }
         unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
-            unsafe{vPortFree(ptr as *mut _)}
+            unsafe { vPortFree(ptr as *mut _) }
         }
     }
 
@@ -92,7 +92,6 @@ pub enum TelemetryError {
     Io(&'static str),
 }
 
-
 impl TelemetryError {
     pub fn to_error_code(&self) -> TelemetryErrorCode {
         match self {
@@ -124,31 +123,33 @@ pub enum TelemetryErrorCode {
     Io = -11,
 }
 
-impl_repr_i32_enum!(TelemetryErrorCode, TelemetryErrorCode::MAX, TelemetryErrorCode::MIN);
+impl_repr_i32_enum!(
+    TelemetryErrorCode,
+    TelemetryErrorCode::MAX,
+    TelemetryErrorCode::MIN
+);
 impl TelemetryErrorCode {
     pub const MAX: i32 = TelemetryErrorCode::InvalidType as i32;
     pub const MIN: i32 = TelemetryErrorCode::Io as i32;
     pub fn to_string(&self) -> &'static str {
         match self {
-            TelemetryErrorCode::InvalidType      => "Invalid Type",
-            TelemetryErrorCode::SizeMismatch     => "Size Mismatch",
-            TelemetryErrorCode::SizeMismatchError=> "Size Mismatch Error",
-            TelemetryErrorCode::EmptyEndpoints   => "Empty Endpoints",
+            TelemetryErrorCode::InvalidType => "Invalid Type",
+            TelemetryErrorCode::SizeMismatch => "Size Mismatch",
+            TelemetryErrorCode::SizeMismatchError => "Size Mismatch Error",
+            TelemetryErrorCode::EmptyEndpoints => "Empty Endpoints",
             TelemetryErrorCode::TimestampInvalid => "Timestamp Invalid",
-            TelemetryErrorCode::MissingPayload   => "Missing Payload",
-            TelemetryErrorCode::HandlerError     => "Handler Error",
-            TelemetryErrorCode::BadArg           => "Bad Arg",
-            TelemetryErrorCode::Deserialize      => "Deserialize Error",
-            TelemetryErrorCode::Io               => "IO Error",
+            TelemetryErrorCode::MissingPayload => "Missing Payload",
+            TelemetryErrorCode::HandlerError => "Handler Error",
+            TelemetryErrorCode::BadArg => "Bad Arg",
+            TelemetryErrorCode::Deserialize => "Deserialize Error",
+            TelemetryErrorCode::Io => "IO Error",
         }
     }
 
-    pub fn try_from_i32(x: i32)  -> Option<Self> {
+    pub fn try_from_i32(x: i32) -> Option<Self> {
         try_enum_from_i32(x)
     }
 }
-
-
 
 pub type Result<T, E> = core::result::Result<T, E>;
 pub type TelemetryResult<T> = Result<T, TelemetryError>;

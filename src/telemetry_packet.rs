@@ -1,14 +1,16 @@
 #![allow(dead_code)]
 
+
 pub use crate::config::{
-    get_info_type, message_meta, DataEndpoint, DataType, MessageDataType,
-    MessageType, DEVICE_IDENTIFIER, MESSAGE_DATA_TYPES,
+    get_info_type, message_meta, DataEndpoint, DataType, MessageDataType, MessageType,
+    DEVICE_IDENTIFIER, MESSAGE_DATA_TYPES,
 };
 // ---- core/alloc imports usable in both std and no_std ----
 use crate::{TelemetryError, TelemetryResult};
 use alloc::{string::String, string::ToString, sync::Arc, vec::Vec};
 use core::{convert::TryInto, fmt::Write};
 use time::OffsetDateTime;
+
 
 const EPOCH_MS_THRESHOLD: u64 = 1_000_000_000_000; // clearly not an uptime counter
 
@@ -175,7 +177,10 @@ impl TelemetryPacket {
 
             let mut s = String::new();
             if hours > 0 {
-                let _ = write!(s, "{hours}h {minutes:02}m {seconds:02}s {milliseconds:03}ms");
+                let _ = write!(
+                    s,
+                    "{hours}h {minutes:02}m {seconds:02}s {milliseconds:03}ms"
+                );
             } else if minutes > 0 {
                 let _ = write!(s, "{minutes}m {seconds:02}s {milliseconds:03}ms");
             } else {
@@ -190,7 +195,7 @@ impl TelemetryPacket {
             "Type: {}, Size: {}, Sender: {}, Endpoints: [{}], Timestamp: {} ({})",
             self.ty.as_str(),
             self.data_size,
-            self.sender.as_ref(),            // <-- Arc<str> to &str
+            self.sender.as_ref(), // <-- Arc<str> to &str
             endpoints,
             self.timestamp,
             human_time

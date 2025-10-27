@@ -4,11 +4,20 @@
 
 
 use crate::router::{Clock, LeBytes};
-use crate::{config::DataEndpoint, router, router::{BoardConfig, EndpointHandler, Router}, telemetry_packet::{DataType, TelemetryPacket}, TelemetryError, TelemetryErrorCode, TelemetryResult, serialize::serialize_packet, serialize::packet_wire_size, serialize::deserialize_packet};
+use crate::{
+    config::DataEndpoint, router, router::{BoardConfig, EndpointHandler, Router},
+    serialize::deserialize_packet,
+    serialize::packet_wire_size,
+    serialize::serialize_packet,
+    telemetry_packet::{DataType, TelemetryPacket},
+    TelemetryError,
+    TelemetryErrorCode,
+    TelemetryResult,
+};
 
-use alloc::{boxed::Box, sync::Arc, vec::Vec, string::String};
-use core::{ffi::c_char, ffi::c_void, mem::size_of, ptr, slice, str::from_utf8};
 use crate::serialize::peek_envelope;
+use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
+use core::{ffi::c_char, ffi::c_void, mem::size_of, ptr, slice, str::from_utf8};
 // ============================ status / error helpers ============================
 
 const SEDS_EK_UNSIGNED: u32 = 0;
@@ -99,12 +108,13 @@ pub struct SedsPacketView {
 
 type CTransmit = Option<extern "C" fn(bytes: *const u8, len: usize, user: *mut c_void) -> i32>;
 type CEndpointHandler = Option<extern "C" fn(pkt: *const SedsPacketView, user: *mut c_void) -> i32>;
-type CSerializedHandler = Option<extern "C" fn(bytes: *const u8, len: usize, user: *mut c_void) -> i32>;
+type CSerializedHandler =
+    Option<extern "C" fn(bytes: *const u8, len: usize, user: *mut c_void) -> i32>;
 
 #[repr(C)]
 pub struct SedsHandlerDesc {
-    pub endpoint: u32,                 // DataEndpoint as u32
-    pub packet_handler: CEndpointHandler,      // optional
+    pub endpoint: u32,                          // DataEndpoint as u32
+    pub packet_handler: CEndpointHandler,       // optional
     pub serialized_handler: CSerializedHandler, // optional
     pub user: *mut c_void,
 }
@@ -136,7 +146,9 @@ fn view_to_packet(view: &SedsPacketView) -> Result<TelemetryPacket, ()> {
 
     let eps_u32 = unsafe { slice::from_raw_parts(view.endpoints, view.num_endpoints) };
     let mut eps = Vec::with_capacity(eps_u32.len());
-    for &e in eps_u32 { eps.push(DataEndpoint::try_from_u32(e).ok_or(())?); }
+    for &e in eps_u32 {
+        eps.push(DataEndpoint::try_from_u32(e).ok_or(())?);
+    }
     let endpoints = Arc::<[DataEndpoint]>::from(eps);
 
     // OWNED sender (Arc<str>) — no leak
@@ -302,7 +314,11 @@ struct FfiClock {
 impl Clock for FfiClock {
     #[inline(always)]
     fn now_ms(&self) -> u64 {
-        if let Some(f) = self.cb { f(self.user_addr as *mut c_void) } else { 0 }
+        if let Some(f) = self.cb {
+            f(self.user_addr as *mut c_void)
+        } else {
+            0
+        }
     }
 }
 
@@ -349,49 +365,51 @@ pub extern "C" fn seds_router_new(
             if let Some(cb_fn) = desc.packet_handler {
                 let eh = EndpointHandler {
                     endpoint,
-                    handler: router::EndpointHandlerFn::Packet(Box::new(move |pkt: &TelemetryPacket| {
-                        // Fast path: up to 8 endpoints, no heap allocation
-                        let mut stack_eps: [u32; STACK_EPS] = [0; STACK_EPS];
+                    handler: router::EndpointHandlerFn::Packet(Box::new(
+                        move |pkt: &TelemetryPacket| {
+                            // Fast path: up to 8 endpoints, no heap allocation
+                            let mut stack_eps: [u32; STACK_EPS] = [0; STACK_EPS];
 
-                        let (endpoints_ptr, num_endpoints, _owned_vec);
-                        if pkt.endpoints.len() <= STACK_EPS {
-                            for (i, e) in pkt.endpoints.iter().enumerate() {
-                                stack_eps[i] = *e as u32;
+                            let (endpoints_ptr, num_endpoints, _owned_vec);
+                            if pkt.endpoints.len() <= STACK_EPS {
+                                for (i, e) in pkt.endpoints.iter().enumerate() {
+                                    stack_eps[i] = *e as u32;
+                                }
+                                endpoints_ptr = stack_eps.as_ptr();
+                                num_endpoints = pkt.endpoints.len();
+                                _owned_vec = None::<Vec<u32>>; // keep a same-scope binding for lifetime symmetry
+                            } else {
+                                // Rare path: heap
+                                let mut eps_u32 = Vec::with_capacity(pkt.endpoints.len());
+                                for e in pkt.endpoints.iter() {
+                                    eps_u32.push(*e as u32);
+                                }
+                                endpoints_ptr = eps_u32.as_ptr();
+                                num_endpoints = eps_u32.len();
+                                _owned_vec = Some(eps_u32); // ensure vec lives until after callback
                             }
-                            endpoints_ptr = stack_eps.as_ptr();
-                            num_endpoints = pkt.endpoints.len();
-                            _owned_vec = None::<Vec<u32>>; // keep a same-scope binding for lifetime symmetry
-                        } else {
-                            // Rare path: heap
-                            let mut eps_u32 = Vec::with_capacity(pkt.endpoints.len());
-                            for e in pkt.endpoints.iter() {
-                                eps_u32.push(*e as u32);
+
+                            let sender_bytes = pkt.sender.as_bytes();
+                            let view = SedsPacketView {
+                                ty: pkt.ty as u32,
+                                data_size: pkt.data_size,
+                                sender: sender_bytes.as_ptr() as *const c_char,
+                                sender_len: sender_bytes.len(),
+                                endpoints: endpoints_ptr,
+                                num_endpoints,
+                                timestamp: pkt.timestamp,
+                                payload: pkt.payload.as_ptr(),
+                                payload_len: pkt.payload.len(),
+                            };
+
+                            let code = cb_fn(&view as *const _, user_addr as *mut c_void);
+                            if code == status_from_result_code(SedsResult::SedsOk) {
+                                Ok(())
+                            } else {
+                                Err(TelemetryError::Io("handler error"))
                             }
-                            endpoints_ptr = eps_u32.as_ptr();
-                            num_endpoints = eps_u32.len();
-                            _owned_vec = Some(eps_u32); // ensure vec lives until after callback
-                        }
-
-                        let sender_bytes = pkt.sender.as_bytes();
-                        let view = SedsPacketView {
-                            ty: pkt.ty as u32,
-                            data_size: pkt.data_size,
-                            sender: sender_bytes.as_ptr() as *const c_char,
-                            sender_len: sender_bytes.len(),
-                            endpoints: endpoints_ptr,
-                            num_endpoints,
-                            timestamp: pkt.timestamp,
-                            payload: pkt.payload.as_ptr(),
-                            payload_len: pkt.payload.len(),
-                        };
-
-                        let code = cb_fn(&view as *const _, user_addr as *mut c_void);
-                        if code == status_from_result_code(SedsResult::SedsOk) {
-                            Ok(())
-                        } else {
-                            Err(TelemetryError::Io("handler error"))
-                        }
-                    })),
+                        },
+                    )),
                 };
                 v.push(eh);
             }
@@ -400,20 +418,21 @@ pub extern "C" fn seds_router_new(
             if let Some(cb_fn) = desc.serialized_handler {
                 let eh = EndpointHandler {
                     endpoint,
-                    handler: router::EndpointHandlerFn::Serialized(Box::new(move |bytes: &[u8]| {
-                        let code = cb_fn(bytes.as_ptr(), bytes.len(), user_addr as *mut c_void);
-                        if code == status_from_result_code(SedsResult::SedsOk) {
-                            Ok(())
-                        } else {
-                            Err(TelemetryError::Io("handler error"))
-                        }
-                    })),
+                    handler: router::EndpointHandlerFn::Serialized(Box::new(
+                        move |bytes: &[u8]| {
+                            let code = cb_fn(bytes.as_ptr(), bytes.len(), user_addr as *mut c_void);
+                            if code == status_from_result_code(SedsResult::SedsOk) {
+                                Ok(())
+                            } else {
+                                Err(TelemetryError::Io("handler error"))
+                            }
+                        },
+                    )),
                 };
                 v.push(eh);
             }
         }
     }
-
 
     let clock = FfiClock {
         cb: now_ms_cb,
@@ -695,26 +714,36 @@ pub extern "C" fn seds_pkt_copy_data_bytes(
     dst: *mut u8,
     dst_len: usize,
 ) -> i32 {
-    if pkt.is_null() { return status_from_err(TelemetryError::BadArg); }
+    if pkt.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
     let view = unsafe { &*pkt };
     let needed = view.payload_len;
 
-    if needed == 0 { return 0; }              // fast path
-    if view.payload.is_null() { return status_from_err(TelemetryError::BadArg); }
+    if needed == 0 {
+        return 0;
+    } // fast path
+    if view.payload.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
 
     // Query/too-small
-    if dst.is_null() || dst_len < needed { return needed as i32; }
+    if dst.is_null() || dst_len < needed {
+        return needed as i32;
+    }
 
-    unsafe { ptr::copy_nonoverlapping(view.payload, dst, needed); }
+    unsafe {
+        ptr::copy_nonoverlapping(view.payload, dst, needed);
+    }
     needed as i32
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn seds_pkt_copy_data(
     pkt: *const SedsPacketView,
-    elem_size: usize,   // must be 1,2,4,8
+    elem_size: usize, // must be 1,2,4,8
     dst: *mut c_void,
-    dst_elems: usize,   // number of elements available in dst
+    dst_elems: usize, // number of elements available in dst
 ) -> i32 {
     if pkt.is_null() || !matches!(elem_size, 1 | 2 | 4 | 8) {
         return status_from_err(TelemetryError::BadArg);
@@ -728,7 +757,9 @@ pub extern "C" fn seds_pkt_copy_data(
     }
 
     let count = view.payload_len / elem_size;
-    if count == 0 { return 0; } // after computing `count = view.payload_len / elem_size`
+    if count == 0 {
+        return 0;
+    } // after computing `count = view.payload_len / elem_size`
 
     // Query mode or too-small -> return required size (elements)
     if dst.is_null() || dst_elems == 0 || dst_elems < count {
@@ -746,11 +777,7 @@ pub extern "C" fn seds_pkt_copy_data(
     };
 
     unsafe {
-        ptr::copy_nonoverlapping(
-            view.payload,
-            dst as *mut u8,
-            total_bytes,
-        );
+        ptr::copy_nonoverlapping(view.payload, dst as *mut u8, total_bytes);
     }
     count as i32
 }
@@ -771,12 +798,21 @@ fn vectorize_data<T: LeBytes + Copy>(
     elem_size: usize,
     tmp: &mut Vec<T>,
 ) -> Result<(), VectorizeError> {
-    if base.is_null() { return Err(VectorizeError::NullBasePtr); }
-    if elem_size != size_of::<T>() {
-        return Err(VectorizeError::ElemSizeMismatch { elem_size, expected: size_of::<T>() });
+    if base.is_null() {
+        return Err(VectorizeError::NullBasePtr);
     }
-    if count == 0 { return Err(VectorizeError::ZeroCount); }
-    let _ = count.checked_mul(elem_size).ok_or(VectorizeError::Overflow)?;
+    if elem_size != size_of::<T>() {
+        return Err(VectorizeError::ElemSizeMismatch {
+            elem_size,
+            expected: size_of::<T>(),
+        });
+    }
+    if count == 0 {
+        return Err(VectorizeError::ZeroCount);
+    }
+    let _ = count
+        .checked_mul(elem_size)
+        .ok_or(VectorizeError::Overflow)?;
 
     // allocate once; then fill with ptr writes
     tmp.reserve_exact(count);
@@ -953,10 +989,7 @@ pub extern "C" fn seds_pkt_serialize(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn seds_pkt_deserialize_owned(
-    bytes: *const u8,
-    len: usize,
-) -> *mut SedsOwnedPacket {
+pub extern "C" fn seds_pkt_deserialize_owned(bytes: *const u8, len: usize) -> *mut SedsOwnedPacket {
     if len > 0 && bytes.is_null() {
         return ptr::null_mut();
     }
@@ -971,7 +1004,10 @@ pub extern "C" fn seds_pkt_deserialize_owned(
     }
 
     let endpoints_u32: Vec<u32> = tpkt.endpoints.iter().map(|e| *e as u32).collect();
-    let owned = SedsOwnedPacket { inner: tpkt, endpoints_u32 };
+    let owned = SedsOwnedPacket {
+        inner: tpkt,
+        endpoints_u32,
+    };
     Box::into_raw(Box::new(owned))
 }
 
@@ -980,7 +1016,9 @@ pub extern "C" fn seds_owned_pkt_free(p: *mut SedsOwnedPacket) {
     if p.is_null() {
         return;
     }
-    unsafe { drop(Box::from_raw(p)); }
+    unsafe {
+        drop(Box::from_raw(p));
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -1009,15 +1047,14 @@ pub extern "C" fn seds_owned_pkt_view(
         payload_len: inner.payload.len(),
     };
 
-    unsafe { *out_view = view; }
+    unsafe {
+        *out_view = view;
+    }
     status_from_result_code(SedsResult::SedsOk)
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn seds_pkt_validate_serialized(
-    bytes: *const u8,
-    len: usize,
-) -> i32 {
+pub extern "C" fn seds_pkt_validate_serialized(bytes: *const u8, len: usize) -> i32 {
     if len > 0 && bytes.is_null() {
         return status_from_err(TelemetryError::BadArg);
     }
@@ -1062,7 +1099,9 @@ pub extern "C" fn seds_owned_header_free(h: *mut SedsOwnedHeader) {
     if h.is_null() {
         return;
     }
-    unsafe { drop(Box::from_raw(h)); }
+    unsafe {
+        drop(Box::from_raw(h));
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -1088,6 +1127,8 @@ pub extern "C" fn seds_owned_header_view(
         payload_len: 0,
     };
 
-    unsafe { *out_view = view; }
+    unsafe {
+        *out_view = view;
+    }
     status_from_result_code(SedsResult::SedsOk)
 }
