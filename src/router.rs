@@ -92,6 +92,7 @@ fn encode_slice_le<T: LeBytes>(data: &[T]) -> Arc<[u8]> {
 }
 
 fn log_raw<T, F>(
+    sender: Arc<str>,
     ty: DataType,
     data: &[T],
     timestamp: u64,
@@ -114,7 +115,7 @@ where
     let pkt = TelemetryPacket::new(
         ty,
         &meta.endpoints,
-        Arc::<str>::from(DEVICE_IDENTIFIER),
+        sender,
         timestamp,
         Arc::<[u8]>::from(payload_vec),
     )?;
@@ -136,6 +137,7 @@ fn fallback_stdout(msg: &str) {
 // -------------------- Router --------------------
 
 pub struct Router {
+    sender: Arc<str>,
     transmit: Option<Box<dyn Fn(&[u8]) -> TelemetryResult<()>>>,
     cfg: BoardConfig,
     received_queue: VecDeque<RxItem>,
@@ -153,6 +155,7 @@ impl Router {
         Tx: Fn(&[u8]) -> TelemetryResult<()> + Send + Sync + 'static,
     {
         Self {
+            sender: DEVICE_IDENTIFIER.into(),
             transmit: transmit.map(|t| Box::new(t) as _),
             cfg,
             received_queue: VecDeque::new(),
@@ -214,7 +217,7 @@ impl Router {
         let error_pkt = TelemetryPacket::new(
             DataType::TelemetryError,
             &locals,
-            Arc::<str>::from(DEVICE_IDENTIFIER), // <-- owned sender
+            self.sender.clone(),
             self.clock.now_ms(),
             Arc::<[u8]>::from(buf),
         )?;
@@ -570,7 +573,7 @@ impl Router {
             for h in self.cfg.handlers.iter().filter(|h| h.endpoint == dest) {
                 match (&h.handler, &bytes_opt) {
                     (EndpointHandlerFn::Serialized(_), Some(bytes)) => {
-                        let item = RxItem::Serialized(Arc::<[u8]>::from(bytes.clone()));
+                        let item = RxItem::Serialized(bytes.clone());
                         self.call_handler_with_retries(dest, h, &item, Some(pkt), None)?;
                     }
                     (EndpointHandlerFn::Serialized(_), None) => {
@@ -601,11 +604,13 @@ impl Router {
 
     /// Build a packet then send.
     pub fn log<T: LeBytes>(&self, ty: DataType, data: &[T]) -> TelemetryResult<()> {
-        log_raw(ty, data, self.clock.now_ms(), |pkt| self.send(&pkt))
+        log_raw(self.sender.clone(), ty, data, self.clock.now_ms(), |pkt| {
+            self.send(&pkt)
+        })
     }
 
     pub fn log_queue<T: LeBytes>(&mut self, ty: DataType, data: &[T]) -> TelemetryResult<()> {
-        log_raw(ty, data, self.clock.now_ms(), |pkt| {
+        log_raw(self.sender.clone(), ty, data, self.clock.now_ms(), |pkt| {
             self.queue_tx_message(pkt)
         })
     }
@@ -616,7 +621,9 @@ impl Router {
         timestamp: u64,
         data: &[T],
     ) -> TelemetryResult<()> {
-        log_raw(ty, data, timestamp, |pkt| self.send(&pkt))
+        log_raw(self.sender.clone(), ty, data, timestamp, |pkt| {
+            self.send(&pkt)
+        })
     }
 
     pub fn log_queue_ts<T: LeBytes>(
@@ -625,7 +632,9 @@ impl Router {
         timestamp: u64,
         data: &[T],
     ) -> TelemetryResult<()> {
-        log_raw(ty, data, timestamp, |pkt| self.queue_tx_message(pkt))
+        log_raw(self.sender.clone(), ty, data, timestamp, |pkt| {
+            self.queue_tx_message(pkt)
+        })
     }
 
     #[inline]

@@ -318,7 +318,7 @@ fn error_code_to_string(error_code: i32) -> &'static str {
     let result = TelemetryErrorCode::try_from_i32(error_code);
 
     match result {
-        Some(s) => s.to_string(),
+        Some(s) => s.as_str(),
         None => {
             if error_code == SedsResult::SedsOk as i32 {
                 "SEDS OK"

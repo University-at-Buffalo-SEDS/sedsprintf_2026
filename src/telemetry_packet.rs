@@ -49,7 +49,7 @@ impl TelemetryPacket {
             ty,
             data_size: meta.data_size,
             sender: sender.into(),
-            endpoints: Arc::<[DataEndpoint]>::from(endpoints.to_vec()),
+            endpoints: Arc::<[DataEndpoint]>::from(endpoints),
             timestamp,
             payload,
         })
@@ -88,23 +88,25 @@ impl TelemetryPacket {
         let meta = message_meta(ty);
         let need = values.len() * 4;
         if need != meta.data_size {
-            return Err(TelemetryError::SizeMismatch {
-                expected: meta.data_size,
-                got: need,
-            });
+            return Err(TelemetryError::SizeMismatch { expected: meta.data_size, got: need });
         }
         let mut bytes = Vec::with_capacity(need);
-        for v in values {
-            bytes.extend_from_slice(&v.to_le_bytes());
+        // Safe: we write every byte below
+        unsafe { bytes.set_len(need); }
+        for (i, v) in values.iter().copied().enumerate() {
+            let b = v.to_le_bytes();
+            let off = i * 4;
+            bytes[off..off + 4].copy_from_slice(&b);
         }
         Self::new(
             ty,
             endpoints,
-            Arc::<str>::from(DEVICE_IDENTIFIER), // <-- no leak
+            Arc::<str>::from(DEVICE_IDENTIFIER),
             timestamp,
             Arc::<[u8]>::from(bytes),
         )
     }
+
 
     /// Validate internal invariants (size, endpoints, etc.).
     pub fn validate(&self) -> TelemetryResult<()> {
@@ -138,92 +140,72 @@ impl TelemetryPacket {
 
     /// Header line without data payload.
     pub fn header_string(&self) -> String {
-        // Build endpoints list
-        let mut endpoints = String::new();
-        self.build_endpoint_string(&mut endpoints);
+        // Rough capacity guess: adjust if you want
+        let mut out = String::with_capacity(96);
 
+        // Type/Size/Sender prefix
+        let _ = write!(
+            &mut out,
+            "Type: {}, Size: {}, Sender: {}, Endpoints: [",
+            self.ty.as_str(),
+            self.data_size,
+            self.sender.as_ref(),
+        );
+
+        // Endpoints list
+        for (i, ep) in self.endpoints.iter().enumerate() {
+            if i != 0 { out.push_str(", "); }
+            out.push_str(ep.as_str());
+        }
+        out.push_str("], Timestamp: ");
+        let _ = write!(&mut out, "{}", self.timestamp);
+
+        // Human time
+        out.push_str(" (");
         let total_ms = self.timestamp;
-        let human_time = if total_ms >= EPOCH_MS_THRESHOLD {
-            // Unix epoch (ms) → UTC "YYYY-MM-DD HH:MM:SS.mmmZ" (manual formatting)
+        if total_ms >= EPOCH_MS_THRESHOLD {
             let secs = (total_ms / 1_000) as i64;
             let sub_ms = (total_ms % 1_000) as u32;
-
-            let mut s = String::new();
-            match OffsetDateTime::from_unix_timestamp(secs) {
-                Ok(dt) => {
-                    let _ = write!(
-                        s,
-                        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03}Z",
-                        dt.year(),
-                        dt.month() as u8,
-                        dt.day(),
-                        dt.hour(),
-                        dt.minute(),
-                        dt.second(),
-                        sub_ms
-                    );
-                }
-                Err(_) => {
-                    let _ = write!(s, "Invalid epoch ({})", total_ms);
-                }
+            if let Ok(dt) = OffsetDateTime::from_unix_timestamp(secs) {
+                let _ = write!(
+                    &mut out,
+                    "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03}Z",
+                    dt.year(), dt.month() as u8, dt.day(),
+                    dt.hour(), dt.minute(), dt.second(), sub_ms
+                );
+            } else {
+                let _ = write!(&mut out, "Invalid epoch ({})", total_ms);
             }
-            s
         } else {
-            // Uptime in ms since boot
             let hours = total_ms / 3_600_000;
             let minutes = (total_ms % 3_600_000) / 60_000;
             let seconds = (total_ms % 60_000) / 1_000;
             let milliseconds = total_ms % 1_000;
-
-            let mut s = String::new();
             if hours > 0 {
-                let _ = write!(
-                    s,
-                    "{hours}h {minutes:02}m {seconds:02}s {milliseconds:03}ms"
-                );
+                let _ = write!(&mut out, "{hours}h {minutes:02}m {seconds:02}s {milliseconds:03}ms");
             } else if minutes > 0 {
-                let _ = write!(s, "{minutes}m {seconds:02}s {milliseconds:03}ms");
+                let _ = write!(&mut out, "{minutes}m {seconds:02}s {milliseconds:03}ms");
             } else {
-                let _ = write!(s, "{seconds}s {milliseconds:03}ms");
+                let _ = write!(&mut out, "{seconds}s {milliseconds:03}ms");
             }
-            s
-        };
-
-        let mut out = String::new();
-        let _ = write!(
-            out,
-            "Type: {}, Size: {}, Sender: {}, Endpoints: [{}], Timestamp: {} ({})",
-            self.ty.as_str(),
-            self.data_size,
-            self.sender.as_ref(), // <-- Arc<str> to &str
-            endpoints,
-            self.timestamp,
-            human_time
-        );
+        }
+        out.push(')');
         out
     }
 
-    pub fn data_as_utf8(&self) -> Option<String> {
+    /// Borrow the payload as UTF-8 without trailing NULs (no allocation).
+    pub fn data_as_utf8_ref(&self) -> Option<&str> {
         if MESSAGE_DATA_TYPES[self.ty as usize] != MessageDataType::String {
             return None;
         }
-        // trim trailing NULs
         let bytes = &self.payload;
-        let end = bytes
-            .iter()
-            .rposition(|&b| b != 0)
-            .map(|i| i + 1)
-            .unwrap_or(0);
-        self.trimmed_str(&bytes[..end])
+        let end = bytes.iter().rposition(|&b| b != 0).map(|i| i + 1)?;
+        core::str::from_utf8(&bytes[..end]).ok()
     }
 
-    fn trimmed_str(&self, bytes: &[u8]) -> Option<String> {
-        // only for TelemetryError
-        let end = bytes.iter().rposition(|&b| b != 0).map(|i| i + 1);
-        match end {
-            Some(e) => Some(core::str::from_utf8(&bytes[..e]).unwrap_or("").to_string()),
-            None => None,
-        }
+    /// Back-compat helper if you truly need an owned String.
+    pub fn data_as_utf8(&self) -> Option<String> {
+        self.data_as_utf8_ref().map(|s| s.to_string())
     }
 
     #[inline]
@@ -233,13 +215,13 @@ impl TelemetryPacket {
 
     /// Full pretty string including decoded data portion.
     pub fn to_string(&self) -> String {
-        const MAX_PRECISION: usize = 12;
-        let mut s = String::new();
-        s.push_str("{");
+        const MAX_PRECISION: usize = 8; // 12 is expensive; tune as needed
+
+        let mut s = String::from("{");
         s.push_str(&self.header_string());
 
         if self.payload.is_empty() {
-            s.push_str(", Data: (<empty>)");
+            s.push_str(", Data: (<empty>)}");
             return s;
         }
 
@@ -248,75 +230,61 @@ impl TelemetryPacket {
         } else {
             s.push_str(", Data: (");
         }
-        // Strings first
-        if let Some(msg) = self.data_as_utf8() {
-            s.push_str("\"");
-            s.push_str(&msg);
+
+        if let Some(msg) = self.data_as_utf8_ref() {
+            s.push('"');
+            s.push_str(msg);
             s.push_str("\")}");
             return s;
         }
 
-        // Non-string payloads
         match self.msg_ty() {
             MessageDataType::Float32 => {
-                for (i, chunk) in self.payload.chunks_exact(4).enumerate() {
+                let mut it = self.payload.chunks_exact(4).peekable();
+                while let Some(chunk) = it.next() {
                     let v = f32::from_le_bytes(chunk.try_into().unwrap());
                     let _ = write!(s, "{v:.prec$}", prec = MAX_PRECISION);
-                    if i + 1 < self.payload.len() / 4 {
-                        s.push_str(", ");
-                    }
+                    if it.peek().is_some() { s.push_str(", "); }
                 }
             }
             MessageDataType::UInt32 => {
-                for (i, chunk) in self.payload.chunks_exact(4).enumerate() {
+                let mut it = self.payload.chunks_exact(4).peekable();
+                while let Some(chunk) = it.next() {
                     let v = u32::from_le_bytes(chunk.try_into().unwrap());
                     let _ = write!(s, "{v}");
-                    if i + 1 < self.payload.len() / 4 {
-                        s.push_str(", ");
-                    }
+                    if it.peek().is_some() { s.push_str(", "); }
                 }
             }
             MessageDataType::UInt8 => {
-                for (i, b) in self.payload.iter().enumerate() {
+                let mut it = self.payload.iter().peekable();
+                while let Some(b) = it.next() {
                     let _ = write!(s, "{}", *b);
-                    if i + 1 < self.payload.len() {
-                        s.push_str(", ");
-                    }
+                    if it.peek().is_some() { s.push_str(", "); }
                 }
             }
-            MessageDataType::String => s.push_str(""),
+            MessageDataType::String => { /* handled above */ }
             MessageDataType::Hex => return self.to_hex_string(),
         }
         s.push_str(")}");
         s
     }
 
-    pub fn to_hex_string(&self) -> String {
-        let mut s = self.header_string();
 
-        let mut hex = String::with_capacity(self.payload.len().saturating_mul(5));
-        if !self.payload.is_empty() {
-            match self.msg_ty() {
-                // Dump raw bytes for numeric payloads (grouping can be added if desired)
-                MessageDataType::Float32 | MessageDataType::UInt32 | MessageDataType::UInt8 => {
-                    for &b in self.payload.iter() {
-                        let _ = write!(&mut hex, " 0x{:02x}", b);
-                    }
-                }
-                _ => {
-                    // Fallback: raw bytes
-                    for &b in self.payload.iter() {
-                        let _ = write!(&mut hex, " 0x{:02x}", b);
-                    }
-                }
-            };
-        }
+    pub fn to_hex_string(&self) -> String {
+        // Header first
+        let mut s = self.header_string();
         s.push_str(", Data (hex):");
-        if !hex.is_empty() {
-            s.push_str(&hex);
+
+        if !self.payload.is_empty() {
+            // Reserve roughly 5 chars per byte: " 0xNN"
+            s.reserve(self.payload.len().saturating_mul(5));
+            for &b in self.payload.iter() {
+                let _ = write!(&mut s, " 0x{:02x}", b);
+            }
         }
         s
     }
+
 }
 
 // ---- Optional: Display so we can `format!("{pkt}")` ----

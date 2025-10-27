@@ -38,12 +38,15 @@ mod embedded_alloc {
 
     unsafe impl GlobalAlloc for FreeRtosAlloc {
         unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-            unsafe { pvPortMalloc(layout.size()) as *mut u8 }
+            let p = unsafe{pvPortMalloc(layout.size()) as *mut u8};
+            debug_assert!(p.is_null() || (p as usize) % layout.align() == 0);
+            p
         }
         unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
-            unsafe { vPortFree(ptr as *mut _) }
+            unsafe{ vPortFree(ptr as *mut _)}
         }
     }
+
 
     #[global_allocator]
     static A: FreeRtosAlloc = FreeRtosAlloc;
@@ -93,7 +96,8 @@ pub enum TelemetryError {
 }
 
 impl TelemetryError {
-    pub fn to_error_code(&self) -> TelemetryErrorCode {
+    #[inline(always)]
+    pub const fn to_error_code(&self) -> TelemetryErrorCode {
         match self {
             TelemetryError::InvalidType => TelemetryErrorCode::InvalidType,
             TelemetryError::SizeMismatch { .. } => TelemetryErrorCode::SizeMismatch,
@@ -131,7 +135,7 @@ impl_repr_i32_enum!(
 impl TelemetryErrorCode {
     pub const MAX: i32 = TelemetryErrorCode::InvalidType as i32;
     pub const MIN: i32 = TelemetryErrorCode::Io as i32;
-    pub fn to_string(&self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             TelemetryErrorCode::InvalidType => "{Invalid Type}",
             TelemetryErrorCode::SizeMismatch => "{Size Mismatch}",
@@ -151,24 +155,18 @@ impl TelemetryErrorCode {
     }
 }
 
-pub type Result<T, E> = core::result::Result<T, E>;
 pub type TelemetryResult<T> = Result<T, TelemetryError>;
 pub fn try_enum_from_u32<E: ReprU32Enum>(x: u32) -> Option<E> {
-    if x > E::MAX {
-        return None;
-    }
+    if x > E::MAX { return None; }
+
     // SAFETY: `E` is promised to be a fieldless #[repr(u32)] enum (thus 4 bytes, Copy).
     let e = unsafe { (&x as *const u32 as *const E).read() };
     Some(e)
 }
 
 pub fn try_enum_from_i32<E: ReprI32Enum>(x: i32) -> Option<E> {
-    if x > E::MAX {
-        return None;
-    }
-    if x < E::MIN {
-        return None;
-    }
+    if x < E::MIN || x > E::MAX { return None; }
+
     // SAFETY: `E` is promised to be a fieldless #[repr(u32)] enum (thus 4 bytes, Copy).
     let e = unsafe { (&x as *const i32 as *const E).read() };
     Some(e)
