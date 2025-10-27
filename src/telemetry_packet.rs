@@ -17,7 +17,7 @@ const EPOCH_MS_THRESHOLD: u64 = 1_000_000_000_000; // clearly not an uptime coun
 pub struct TelemetryPacket {
     pub ty: DataType,
     pub data_size: usize,
-    pub sender: Arc<str>,                 // <-- OWNED (was &'static str)
+    pub sender: Arc<str>,
     pub endpoints: Arc<[DataEndpoint]>,
     pub timestamp: u64,
     pub payload: Arc<[u8]>,
@@ -29,7 +29,7 @@ impl TelemetryPacket {
     pub fn new(
         ty: DataType,
         endpoints: &[DataEndpoint],
-        sender: impl Into<Arc<str>>,      // <-- accept &str/String/Arc<str>
+        sender: impl Into<Arc<str>>,
         timestamp: u64,
         payload: Arc<[u8]>,
     ) -> TelemetryResult<Self> {

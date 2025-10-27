@@ -14,6 +14,7 @@ use crate::serialize::peek_envelope;
 const SEDS_EK_UNSIGNED: u32 = 0;
 const SEDS_EK_SIGNED: u32 = 1;
 const SEDS_EK_FLOAT: u32 = 2;
+const STACK_EPS: usize = 16; // number of endpoints to store on stack for callback
 
 const SIZE_OF_U8: usize = 1;
 const SIZE_OF_U16: usize = 2;
@@ -52,12 +53,12 @@ fn status_from_result_code(e: SedsResult) -> i32 {
     }
 }
 
-#[inline]
+#[inline(always)]
 fn status_from_err(e: TelemetryError) -> i32 {
     e.to_error_code() as i32
 }
 
-#[inline]
+#[inline(always)]
 fn ok_or_status(r: TelemetryResult<()>) -> i32 {
     match r {
         Ok(()) => status_from_result_code(SedsResult::SedsOk),
@@ -135,9 +136,8 @@ fn view_to_packet(view: &SedsPacketView) -> Result<TelemetryPacket, ()> {
 
     let eps_u32 = unsafe { slice::from_raw_parts(view.endpoints, view.num_endpoints) };
     let mut eps = Vec::with_capacity(eps_u32.len());
-    for &e in eps_u32 {
-        eps.push(DataEndpoint::try_from_u32(e).ok_or(())?);
-    }
+    for &e in eps_u32 { eps.push(DataEndpoint::try_from_u32(e).ok_or(())?); }
+    let endpoints = Arc::<[DataEndpoint]>::from(eps);
 
     // OWNED sender (Arc<str>) — no leak
     let sender_owned: Arc<str> = if view.sender.is_null() || view.sender_len == 0 {
@@ -154,9 +154,9 @@ fn view_to_packet(view: &SedsPacketView) -> Result<TelemetryPacket, ()> {
         ty,
         data_size: view.data_size,
         sender: sender_owned,
-        endpoints: Arc::<[DataEndpoint]>::from(eps),
+        endpoints,
         timestamp: view.timestamp,
-        payload: Arc::<[u8]>::from(bytes.to_vec()),
+        payload: Arc::<[u8]>::from(bytes), // (already optimal)
     })
 }
 
@@ -300,13 +300,9 @@ struct FfiClock {
 }
 
 impl Clock for FfiClock {
-    #[inline]
+    #[inline(always)]
     fn now_ms(&self) -> u64 {
-        if let Some(f) = self.cb {
-            f(self.user_addr as *mut c_void)
-        } else {
-            status_from_result_code(SedsResult::SedsOk) as u64
-        }
+        if let Some(f) = self.cb { f(self.user_addr as *mut c_void) } else { 0 }
     }
 }
 
@@ -338,6 +334,7 @@ pub extern "C" fn seds_router_new(
     // Build handler vector
     let mut v: Vec<EndpointHandler> = Vec::new();
     if n_handlers > 0 && !handlers.is_null() {
+        v.reserve(n_handlers.saturating_mul(2));
         let slice = unsafe { slice::from_raw_parts(handlers, n_handlers) };
         for desc in slice {
             let endpoint = match endpoint_from_u32(desc.endpoint) {
@@ -353,17 +350,36 @@ pub extern "C" fn seds_router_new(
                 let eh = EndpointHandler {
                     endpoint,
                     handler: router::EndpointHandlerFn::Packet(Box::new(move |pkt: &TelemetryPacket| {
-                        // Stack-owned, ephemeral view that borrows pkt members
-                        let eps_u32: Vec<u32> = pkt.endpoints.iter().map(|e| *e as u32).collect();
-                        let sender_bytes = pkt.sender.as_bytes();
+                        // Fast path: up to 8 endpoints, no heap allocation
+                        let mut stack_eps: [u32; STACK_EPS] = [0; STACK_EPS];
 
+                        let (endpoints_ptr, num_endpoints, _owned_vec);
+                        if pkt.endpoints.len() <= STACK_EPS {
+                            for (i, e) in pkt.endpoints.iter().enumerate() {
+                                stack_eps[i] = *e as u32;
+                            }
+                            endpoints_ptr = stack_eps.as_ptr();
+                            num_endpoints = pkt.endpoints.len();
+                            _owned_vec = None::<Vec<u32>>; // keep a same-scope binding for lifetime symmetry
+                        } else {
+                            // Rare path: heap
+                            let mut eps_u32 = Vec::with_capacity(pkt.endpoints.len());
+                            for e in pkt.endpoints.iter() {
+                                eps_u32.push(*e as u32);
+                            }
+                            endpoints_ptr = eps_u32.as_ptr();
+                            num_endpoints = eps_u32.len();
+                            _owned_vec = Some(eps_u32); // ensure vec lives until after callback
+                        }
+
+                        let sender_bytes = pkt.sender.as_bytes();
                         let view = SedsPacketView {
                             ty: pkt.ty as u32,
                             data_size: pkt.data_size,
                             sender: sender_bytes.as_ptr() as *const c_char,
                             sender_len: sender_bytes.len(),
-                            endpoints: eps_u32.as_ptr(),
-                            num_endpoints: eps_u32.len(),
+                            endpoints: endpoints_ptr,
+                            num_endpoints,
                             timestamp: pkt.timestamp,
                             payload: pkt.payload.as_ptr(),
                             payload_len: pkt.payload.len(),
@@ -679,24 +695,17 @@ pub extern "C" fn seds_pkt_copy_data_bytes(
     dst: *mut u8,
     dst_len: usize,
 ) -> i32 {
-    if pkt.is_null() {
-        return status_from_err(TelemetryError::BadArg);
-    }
+    if pkt.is_null() { return status_from_err(TelemetryError::BadArg); }
     let view = unsafe { &*pkt };
     let needed = view.payload_len;
 
-    // Query mode or too-small -> return required size (bytes)
-    if dst.is_null() || dst_len == 0 || dst_len < needed {
-        return needed as i32;
-    }
+    if needed == 0 { return 0; }              // fast path
+    if view.payload.is_null() { return status_from_err(TelemetryError::BadArg); }
 
-    if needed > 0 && view.payload.is_null() {
-        return status_from_err(TelemetryError::BadArg);
-    }
+    // Query/too-small
+    if dst.is_null() || dst_len < needed { return needed as i32; }
 
-    unsafe {
-        core::ptr::copy_nonoverlapping(view.payload, dst, needed);
-    }
+    unsafe { ptr::copy_nonoverlapping(view.payload, dst, needed); }
     needed as i32
 }
 
@@ -704,12 +713,13 @@ pub extern "C" fn seds_pkt_copy_data_bytes(
 pub extern "C" fn seds_pkt_copy_data(
     pkt: *const SedsPacketView,
     elem_size: usize,   // must be 1,2,4,8
-    dst: *mut core::ffi::c_void,
+    dst: *mut c_void,
     dst_elems: usize,   // number of elements available in dst
 ) -> i32 {
     if pkt.is_null() || !matches!(elem_size, 1 | 2 | 4 | 8) {
         return status_from_err(TelemetryError::BadArg);
     }
+
     let view = unsafe { &*pkt };
 
     // Validate divisibility
@@ -718,6 +728,7 @@ pub extern "C" fn seds_pkt_copy_data(
     }
 
     let count = view.payload_len / elem_size;
+    if count == 0 { return 0; } // after computing `count = view.payload_len / elem_size`
 
     // Query mode or too-small -> return required size (elements)
     if dst.is_null() || dst_elems == 0 || dst_elems < count {
@@ -735,8 +746,8 @@ pub extern "C" fn seds_pkt_copy_data(
     };
 
     unsafe {
-        core::ptr::copy_nonoverlapping(
-            view.payload as *const u8,
+        ptr::copy_nonoverlapping(
+            view.payload,
             dst as *mut u8,
             total_bytes,
         );
@@ -760,34 +771,25 @@ fn vectorize_data<T: LeBytes + Copy>(
     elem_size: usize,
     tmp: &mut Vec<T>,
 ) -> Result<(), VectorizeError> {
-    if base.is_null() {
-        return Err(VectorizeError::NullBasePtr);
-    }
+    if base.is_null() { return Err(VectorizeError::NullBasePtr); }
     if elem_size != size_of::<T>() {
-        return Err(VectorizeError::ElemSizeMismatch {
-            elem_size,
-            expected: size_of::<T>(),
-        });
+        return Err(VectorizeError::ElemSizeMismatch { elem_size, expected: size_of::<T>() });
     }
-    if count == 0 {
-        return Err(VectorizeError::ZeroCount);
-    }
+    if count == 0 { return Err(VectorizeError::ZeroCount); }
+    let _ = count.checked_mul(elem_size).ok_or(VectorizeError::Overflow)?;
 
-    let _ = count
-        .checked_mul(elem_size)
-        .ok_or(VectorizeError::Overflow)?;
-    tmp.reserve(count);
-
+    // allocate once; then fill with ptr writes
+    tmp.reserve_exact(count);
     unsafe {
         let mut p = base;
-        for _ in 0..count {
-            let t_ptr = p as *const T;
-            let v = ptr::read_unaligned(t_ptr);
-            tmp.push(v);
+        let dst = tmp.as_mut_ptr().add(tmp.len());
+        for i in 0..count {
+            let v = ptr::read_unaligned(p as *const T);
+            dst.add(i).write(v);
             p = p.add(elem_size);
         }
+        tmp.set_len(tmp.len() + count);
     }
-
     Ok(())
 }
 

@@ -1,17 +1,12 @@
 #![allow(dead_code)]
 
 use crate::config::DEVICE_IDENTIFIER;
-use crate::{
-    config::{message_meta, DataEndpoint, DataType},
-    serialize,
-    telemetry_packet::TelemetryPacket,
-    TelemetryError, TelemetryResult,
-};
+use crate::{config::{message_meta, DataEndpoint, DataType}, impl_letype_num, serialize, telemetry_packet::TelemetryPacket, TelemetryError, TelemetryResult};
 use alloc::{boxed::Box, collections::VecDeque, sync::Arc, vec::Vec};
 
 pub enum RxItem {
     Packet(TelemetryPacket),
-    Serialized(Vec<u8>),
+    Serialized(Arc<[u8]>),
 }
 
 // -------------------- endpoint + board config --------------------
@@ -37,10 +32,16 @@ impl<T: Fn() -> u64> Clock for T {
 
 #[derive(Default)]
 pub struct BoardConfig {
-    pub handlers: Vec<EndpointHandler>,
+    pub handlers: Arc<[EndpointHandler]>,
 }
 impl BoardConfig {
-    pub fn new(handlers: Vec<EndpointHandler>) -> Self { Self { handlers } }
+    pub fn new<H>(handlers: H) -> Self
+        where
+            H: Into<Arc<[EndpointHandler]>>,
+    {
+        Self { handlers: handlers.into() }
+    }
+
     #[inline]
     fn is_local_endpoint(&self, ep: DataEndpoint) -> bool {
         self.handlers.iter().any(|h| h.endpoint == ep)
@@ -54,17 +55,6 @@ pub trait LeBytes: Copy {
     fn write_le(self, out: &mut [u8]);
 }
 
-macro_rules! impl_letype_num {
-    ($t:ty, $w:expr, $to_le_bytes:ident) => {
-        impl LeBytes for $t {
-            const WIDTH: usize = $w;
-            #[inline]
-            fn write_le(self, out: &mut [u8]) {
-                out.copy_from_slice(&self.$to_le_bytes());
-            }
-        }
-    };
-}
 impl_letype_num!(u8, 1, to_le_bytes);
 impl_letype_num!(u16, 2, to_le_bytes);
 impl_letype_num!(u32, 4, to_le_bytes);
@@ -77,15 +67,15 @@ impl_letype_num!(f32, 4, to_le_bytes);
 impl_letype_num!(f64, 8, to_le_bytes);
 
 #[inline]
-fn encode_slice_le<T: LeBytes>(data: &[T]) -> Vec<u8> {
+fn encode_slice_le<T: LeBytes>(data: &[T]) -> Arc<[u8]> {
     let total = data.len() * T::WIDTH;
-    let mut buf = Vec::with_capacity(total);
+    let mut buf = alloc::vec::Vec::with_capacity(total);
     unsafe { buf.set_len(total) };
     for (i, v) in data.iter().copied().enumerate() {
         let start = i * T::WIDTH;
         v.write_le(&mut buf[start..start + T::WIDTH]);
     }
-    buf
+    Arc::<[u8]>::from(buf)
 }
 
 #[inline]
@@ -264,7 +254,7 @@ impl Router {
     }
 
     pub fn rx_serialized_packet_to_queue(&mut self, bytes: &[u8]) -> TelemetryResult<()> {
-        self.received_queue.push_back(RxItem::Serialized(bytes.to_vec()));
+        self.received_queue.push_back(RxItem::Serialized(Arc::<[u8]>::from(bytes)));
         Ok(())
     }
 
@@ -482,13 +472,13 @@ impl Router {
             for h in self.cfg.handlers.iter().filter(|h| h.endpoint == dest) {
                 match (&h.handler, &bytes_opt) {
                     (EndpointHandlerFn::Serialized(_), Some(bytes)) => {
-                        let item = RxItem::Serialized(bytes.clone());
+                        let item = RxItem::Serialized(Arc::<[u8]>::from(bytes.clone()));
                         self.call_handler_with_retries(dest, h, &item, Some(pkt), None)?;
                     }
                     (EndpointHandlerFn::Serialized(_), None) => {
                         // Serialize only for this handler (rare path).
                         let bytes = serialize::serialize_packet(pkt);
-                        let item = RxItem::Serialized(bytes);
+                        let item = RxItem::Serialized(Arc::<[u8]>::from(bytes));
                         self.call_handler_with_retries(dest, h, &item, Some(pkt), None)?;
                     }
                     (EndpointHandlerFn::Packet(_), _) => {
@@ -503,7 +493,7 @@ impl Router {
 
     // receive_serialized / receive can stay as thin wrappers:
     pub fn receive_serialized(&self, bytes: &[u8]) -> TelemetryResult<()> {
-        let item = RxItem::Serialized(bytes.to_vec());
+        let item = RxItem::Serialized(Arc::<[u8]>::from(bytes));
         self.receive_item(&item)
     }
     pub fn receive(&self, pkt: &TelemetryPacket) -> TelemetryResult<()> {

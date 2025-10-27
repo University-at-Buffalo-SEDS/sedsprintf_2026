@@ -34,3 +34,16 @@ macro_rules! impl_repr_i32_enum {
         }
     };
 }
+
+#[macro_export]
+macro_rules! impl_letype_num {
+    ($t:ty, $w:expr, $to_le_bytes:ident) => {
+        impl LeBytes for $t {
+            const WIDTH: usize = $w;
+            #[inline]
+            fn write_le(self, out: &mut [u8]) {
+                out.copy_from_slice(&self.$to_le_bytes());
+            }
+        }
+    };
+}

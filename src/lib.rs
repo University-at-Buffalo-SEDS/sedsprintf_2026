@@ -16,7 +16,7 @@ extern crate core;
 extern crate std;
 
 
-use crate::repr_u32::{ReprI32Enum, ReprU32Enum};
+use crate::macros::{ReprI32Enum, ReprU32Enum};
 
 
 #[cfg(test)]
@@ -73,7 +73,7 @@ mod embedded_alloc {
 // ---------- Portable core logic ----------
 mod c_api;
 mod config;
-mod repr_u32;
+mod macros;
 mod router;
 mod serialize;
 mod telemetry_packet;
