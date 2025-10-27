@@ -80,7 +80,7 @@ impl_letype_num!(f32, 4, to_le_bytes);
 impl_letype_num!(f64, 8, to_le_bytes);
 
 #[inline]
-fn encode_slice_le<T: LeBytes>(data: &[T]) -> Arc<[u8]> {
+pub(crate) fn encode_slice_le<T: LeBytes>(data: &[T]) -> Arc<[u8]> {
     let total = data.len() * T::WIDTH;
     let mut buf = Vec::with_capacity(total);
     unsafe { buf.set_len(total) };
