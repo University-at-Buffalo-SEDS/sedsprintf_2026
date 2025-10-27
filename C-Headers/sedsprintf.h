@@ -574,6 +574,43 @@ const void * seds_pkt_bytes_ptr(const SedsPacketView * pkt, size_t * out_len);
 const void * seds_pkt_data_ptr(const SedsPacketView * pkt, size_t elem_size, size_t * out_count);
 
 /**
+ * @brief Copy the raw payload bytes into a caller-provided buffer.
+ *
+ * Copies the entire payload of @p pkt into @p dst if the buffer is large enough.
+ * If @p dst is NULL, @p dst_len is 0, or the buffer is too small, the required
+ * number of bytes is returned without copying.
+ *
+ * @param pkt      Packet view (must not be NULL).
+ * @param dst      Destination buffer for payload bytes.
+ * @param dst_len  Capacity of @p dst in bytes.
+ * @return On success, returns the number of bytes copied.
+ *         If @p dst is NULL, @p dst_len is 0, or too small, returns the required size.
+ *         On invalid arguments, returns a negative status code (see @ref seds_error_to_string()).
+ */
+int32_t seds_pkt_copy_bytes(const SedsPacketView * pkt, void * dst, size_t dst_len);
+
+/**
+ * @brief Copy the payload into a typed buffer of fixed-size elements.
+ *
+ * Validates that @p elem_size is one of {1,2,4,8} and that payload_len is an exact
+ * multiple of @p elem_size. Copies the data into @p dst if there is sufficient space.
+ * If @p dst is NULL, @p dst_elems is 0, or the buffer is too small, the required
+ * number of elements is returned without copying.
+ *
+ * @param pkt        Packet view (must not be NULL).
+ * @param elem_size  Size of each element in bytes (1, 2, 4, or 8).
+ * @param dst        Destination buffer for the elements.
+ * @param dst_elems  Number of elements available in @p dst.
+ * @return On success, returns the number of elements copied.
+ *         If @p dst is NULL, @p dst_elems is 0, or too small, returns the required element count.
+ *         On invalid arguments, returns a negative status code.
+ *
+ * @note No endianness conversion is performed; if your host is big-endian, convert values
+ *       from little-endian after copying.
+ */
+int32_t seds_pkt_copy_data(const SedsPacketView * pkt, size_t elem_size, void * dst, size_t dst_elems);
+
+/**
  * @brief Extract a typed slice from @p pkt into @p out.
  *
  * @param pkt       Packet view.
