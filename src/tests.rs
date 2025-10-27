@@ -840,3 +840,302 @@ mod timeout_tests {
         assert!(tx_count.load(Ordering::SeqCst) + rx_count.load(Ordering::SeqCst) >= 1);
     }
 }
+
+#[cfg(test)]
+mod tests_extra{
+
+    //! Extra unit tests that cover previously-missing paths and invariants.
+    //!
+    //! These are white-box tests that exercise public APIs (and some
+    //! indirect behavior) to avoid changing visibility in core modules.
+
+    #![cfg(test)]
+
+    use crate::{
+        TelemetryError, TelemetryErrorCode, TelemetryResult,
+        config::{message_meta, DataEndpoint, DataType},
+        router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, Router},
+        serialize,
+        telemetry_packet::TelemetryPacket,
+    };
+    use alloc::{string::String, sync::Arc};
+    use core::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex;
+
+    // A tiny helper clock; we rely on the blanket impl<Fn() -> u64> for Clock.
+    fn zero_clock() -> Box<dyn Clock + Send + Sync> {
+        Box::new(|| 0u64)
+    }
+
+    // --------------------------- Error/Code parity ---------------------------
+
+    #[test]
+    fn error_enum_code_roundtrip_and_strings() {
+        let samples = [
+            TelemetryError::InvalidType,
+            TelemetryError::EmptyEndpoints,
+            TelemetryError::Deserialize("oops"),
+            TelemetryError::Io("disk"),
+            TelemetryError::HandlerError("fail"),
+            TelemetryError::MissingPayload,
+            TelemetryError::TimestampInvalid,
+        ];
+        for e in samples {
+            let code = e.to_error_code();
+            // must have a stable human string (starts with a '{' per current impl)
+            assert!(code.as_str().starts_with('{'));
+            // round-trip numeric space
+            let back = TelemetryErrorCode::try_from_i32(code as i32);
+            assert!(back.is_some(), "roundtrip failed for {code:?}");
+        }
+    }
+
+    // --------------------------- Header-only parsing ---------------------------
+
+    #[test]
+    fn deserialize_header_only_short_buffer_fails() {
+        // Too short to hold the fixed header
+        let tiny = [0u8; 8];
+        let err = serialize::deserialize_packet_header_only(&tiny).unwrap_err();
+        matches_deser_err(err);
+    }
+
+    fn matches_deser_err(e: TelemetryError) {
+        match e {
+            TelemetryError::Deserialize(_) => {}
+            other => panic!("expected Deserialize error, got {other:?}"),
+        }
+    }
+
+    // --------------------------- UTF-8 trimming behavior ---------------------------
+
+    #[test]
+    fn data_as_utf8_ref_trims_trailing_nuls() {
+        // Use a String-typed message kind. TelemetryError is used by the router with
+        // a string payload and typically mapped to MessageDataType::String.
+        let ty = DataType::TelemetryError;
+        let meta = message_meta(ty);
+
+        // Build a payload the exact required size, with "hello\0\0..." suffix zeros.
+        let mut buf = vec![0u8; meta.data_size];
+        let s = b"hello\0\0";
+        buf[..s.len()].copy_from_slice(s);
+
+        let pkt = TelemetryPacket::new(
+            ty,
+            &[DataEndpoint::SdCard],
+            "tester",
+            0,
+            Arc::<[u8]>::from(buf),
+        )
+            .unwrap();
+
+        assert_eq!(pkt.data_as_utf8_ref(), Some("hello"));
+    }
+
+    // --------------------------- Queue clear semantics ---------------------------
+
+    #[test]
+    fn clear_queues_prevents_further_processing() {
+        // Transmit "bus" that counts frames sent.
+        let tx_count = Arc::new(AtomicUsize::new(0));
+        let tx_count_c = tx_count.clone();
+        let tx = move |bytes: &[u8]| -> TelemetryResult<()> {
+            assert!(!bytes.is_empty());
+            tx_count_c.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        };
+
+        // Local handler that counts receives.
+        let rx_count = Arc::new(AtomicUsize::new(0));
+        let rx_count_c = rx_count.clone();
+        let handler = EndpointHandler {
+            endpoint: DataEndpoint::SdCard,
+            handler: EndpointHandlerFn::Packet(Box::new(move |_pkt: &TelemetryPacket| {
+                rx_count_c.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            })),
+        };
+
+        let mut r = Router::new(Some(tx), BoardConfig::new(vec![handler]), zero_clock());
+
+        // Enqueue one TX and one RX
+        let pkt_tx = TelemetryPacket::from_f32_slice(
+            DataType::GpsData,
+            &[1.0_f32, 2.0, 3.0],
+            &[DataEndpoint::SdCard, DataEndpoint::Radio],
+            0,
+        )
+            .unwrap();
+        let pkt_rx = TelemetryPacket::from_f32_slice(
+            DataType::GpsData,
+            &[4.0_f32, 5.0, 6.0],
+            &[DataEndpoint::SdCard], // only local to avoid extra TX during receive
+            0,
+        )
+            .unwrap();
+
+        r.queue_tx_message(pkt_tx).unwrap();
+        r.rx_packet_to_queue(pkt_rx).unwrap();
+
+        // Clearing should drop both queues before any processing.
+        r.clear_queues();
+
+        r.process_all_queues().unwrap();
+        assert_eq!(tx_count.load(Ordering::SeqCst), 0, "should not TX after clear");
+        assert_eq!(rx_count.load(Ordering::SeqCst), 0, "should not RX after clear");
+    }
+
+    // --------------------------- Retry semantics (indirect) ---------------------------
+
+    #[test]
+    fn local_handler_retry_attempts_are_three() {
+        // This test assumes MAX_NUMBER_OF_RETRYS == 3 in router. If that constant changes,
+        // update the expected count below.
+        const EXPECTED_ATTEMPTS: usize = 3; // initial try + retries
+
+        let counter = Arc::new(AtomicUsize::new(0));
+        let counter_c = counter.clone();
+
+        // A handler that always fails but bumps a counter on each attempt.
+        let failing = EndpointHandler {
+            endpoint: DataEndpoint::SdCard,
+            handler: EndpointHandlerFn::Packet(Box::new(move |_pkt: &TelemetryPacket| {
+                counter_c.fetch_add(1, Ordering::SeqCst);
+                Err(TelemetryError::BadArg)
+            })),
+        };
+
+        // Router with no TX (we only care about local handler invocation count).
+        let r = Router::new::<fn(&[u8]) -> TelemetryResult<()>>(
+            None,
+            BoardConfig::new(vec![failing]),
+            zero_clock(),
+        );
+
+        // Build a valid packet addressed to the failing endpoint.
+        let pkt = TelemetryPacket::from_f32_slice(
+            DataType::GpsData,
+            &[1.0_f32, 2.0, 3.0],
+            &[DataEndpoint::SdCard],
+            0,
+        )
+            .unwrap();
+
+        // Sending should surface a HandlerError after all retries.
+        let res = r.send(&pkt);
+        match res {
+            Err(TelemetryError::HandlerError(_)) => {}
+            other => panic!("expected HandlerError after retries, got {other:?}"),
+        }
+
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            EXPECTED_ATTEMPTS,
+            "handler should be invoked exactly {EXPECTED_ATTEMPTS} times"
+        );
+    }
+
+    // --------------------------- from_u8_slice sanity ---------------------------
+
+    #[test]
+    fn from_u8_slice_builds_valid_packet() {
+        // Choose a type with a known 12-byte payload (3 * f32), e.g., GPS_DATA.
+        let need = message_meta(DataType::GpsData).data_size;
+        assert_eq!(need, 12); // sanity check vs schema
+
+        let bytes = vec![0x11u8; need];
+        let pkt = TelemetryPacket::from_u8_slice(
+            DataType::GpsData,
+            &bytes,
+            &[DataEndpoint::SdCard],
+            12345,
+        )
+            .unwrap();
+
+        assert_eq!(pkt.payload.len(), need);
+        assert_eq!(pkt.data_size, need);
+        assert_eq!(pkt.timestamp, 12345);
+    }
+
+    // --------------------------- Header-only happy path smoke ---------------------------
+
+    #[test]
+    fn deserialize_header_only_then_full_parse_matches() {
+        // Build a normal packet then compare header-only vs full.
+        let endpoints = &[DataEndpoint::SdCard, DataEndpoint::Radio];
+        let pkt = TelemetryPacket::from_f32_slice(
+            DataType::GpsData,
+            &[5.25_f32, 3.5, 1.0],
+            endpoints,
+            42,
+        )
+            .unwrap();
+        let wire = serialize::serialize_packet(&pkt);
+
+        let env = serialize::deserialize_packet_header_only(&wire).unwrap();
+        assert_eq!(env.ty, pkt.ty);
+        assert_eq!(&*env.endpoints, &*pkt.endpoints);
+        assert_eq!(env.sender.as_ref(), pkt.sender.as_ref());
+        assert_eq!(env.timestamp_ms, pkt.timestamp);
+
+        let round = serialize::deserialize_packet(&wire).unwrap();
+        round.validate().unwrap();
+        assert_eq!(round.ty, pkt.ty);
+        assert_eq!(round.data_size, pkt.data_size);
+        assert_eq!(round.timestamp, pkt.timestamp);
+        assert_eq!(&*round.endpoints, &*pkt.endpoints);
+        assert_eq!(&*round.payload, &*pkt.payload);
+    }
+
+    // --------------------------- TX failure -> error to locals (smoke) ---------------------------
+
+    #[test]
+    fn tx_failure_emits_error_to_local_endpoints() {
+        // A transmitter that always fails.
+        let failing_tx = |_bytes: &[u8]| -> TelemetryResult<()> { Err(TelemetryError::Io("boom")) };
+
+        // Capture what the local endpoint sees (should include a TelemetryError).
+        let last_payload = Arc::new(Mutex::new(String::new()));
+        let last_payload_c = last_payload.clone();
+
+        let capturing = EndpointHandler {
+            endpoint: DataEndpoint::SdCard,
+            handler: EndpointHandlerFn::Packet(Box::new(move |pkt: &TelemetryPacket| {
+                if pkt.ty == DataType::TelemetryError {
+                    *last_payload_c.lock().unwrap() = pkt.to_string();
+                }
+                Ok(())
+            })),
+        };
+
+        let r = Router::new(
+            Some(failing_tx),
+            BoardConfig::new(vec![capturing]),
+            zero_clock(),
+        );
+
+        // Include both a local and a non-local endpoint to force remote TX.
+        let pkt = TelemetryPacket::from_f32_slice(
+            DataType::GpsData,
+            &[1.0_f32, 2.0, 3.0],
+            &[DataEndpoint::SdCard, DataEndpoint::Radio],
+            7,
+        )
+            .unwrap();
+
+        let res = r.send(&pkt);
+        match res {
+            Err(TelemetryError::HandlerError(_)) => {} // TX path wraps as HandlerError
+            other => panic!("expected HandlerError from TX failure, got {other:?}"),
+        }
+
+        // Ensure something was captured (exact string is covered elsewhere)
+        let got = last_payload.lock().unwrap().clone();
+        assert!(
+            !got.is_empty(),
+            "expected TelemetryError to be delivered locally after TX failure"
+        );
+    }
+
+}

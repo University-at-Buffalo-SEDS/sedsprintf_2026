@@ -17,7 +17,7 @@ pub enum RxItem {
 }
 
 // -------------------- endpoint + board config --------------------
-const MAX_NUMBER_OF_RETRYS: usize = 3;
+const MAX_NUMBER_OF_RETRIES: usize = 3;
 
 pub(crate) enum EndpointHandlerFn {
     Packet(Box<dyn Fn(&TelemetryPacket) -> TelemetryResult<()>>),
@@ -379,7 +379,7 @@ impl Router {
         where
             F: FnMut() -> TelemetryResult<()>,
         {
-            this.retry(MAX_NUMBER_OF_RETRYS, || run()).map_err(|e| {
+            this.retry(MAX_NUMBER_OF_RETRIES, || run()).map_err(|e| {
                 if let Some(pkt) = pkt_for_ctx {
                     let _ = this.handle_callback_error(pkt, Some(dest), e);
                 } else if let Some(env) = env_for_ctx {
@@ -561,7 +561,7 @@ impl Router {
 
         if send_remote {
             if let (Some(tx), Some(bytes)) = (&self.transmit, &bytes_opt) {
-                if let Err(e) = self.retry(MAX_NUMBER_OF_RETRYS, || tx(bytes)) {
+                if let Err(e) = self.retry(MAX_NUMBER_OF_RETRIES, || tx(bytes)) {
                     let _ = self.handle_callback_error(pkt, None, e);
                     return Err(TelemetryError::HandlerError("TX failed"));
                 }
