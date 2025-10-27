@@ -17,7 +17,7 @@ use crate::{
 
 use crate::config::MAX_STRING_LENGTH;
 use crate::serialize::peek_envelope;
-use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec, vec};
 use core::{ffi::c_char, ffi::c_void, mem::size_of, ptr, slice, str::from_utf8};
 // ============================ status / error helpers ============================
 
