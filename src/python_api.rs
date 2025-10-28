@@ -1,6 +1,7 @@
 // src/py_api.rs
 #![allow(dead_code)]
 
+
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList, PyModule, PyTuple};
@@ -8,17 +9,21 @@ use pyo3::types::{PyBytes, PyDict, PyList, PyModule, PyTuple};
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
 use crate::{
-    config::{DataEndpoint, MAX_STRING_LENGTH, message_meta, MAX_VALUE_DATA_TYPE, MAX_VALUE_DATA_ENDPOINT},
-    router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, Router, LeBytes},
+    config::{
+        message_meta, DataEndpoint, MAX_STRING_LENGTH, MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE,
+    }, router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, LeBytes, Router},
     serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet},
     telemetry_packet::{DataType, TelemetryPacket},
-    TelemetryError, TelemetryResult, try_enum_from_u32
+    try_enum_from_u32,
+    TelemetryError,
+    TelemetryResult,
 };
+
 
 // ------------------ helpers ------------------
 const EK_UNSIGNED: u32 = 0;
-const EK_SIGNED:   u32 = 1;
-const EK_FLOAT:    u32 = 2;
+const EK_SIGNED: u32 = 1;
+const EK_FLOAT: u32 = 2;
 fn py_err_from(e: TelemetryError) -> PyErr {
     PyRuntimeError::new_err(format!("Telemetry error: {e:?}"))
 }
@@ -260,7 +265,6 @@ impl PyRouter {
         })
     }
 
-
     /// Log raw bytes for a given DataType.
     ///
     /// If the type expects a fixed payload (e.g., MessageData), it is zero-padded to MAX_STRING_LENGTH.
@@ -288,12 +292,12 @@ impl PyRouter {
         let r = if queue {
             match timestamp_ms {
                 Some(ts) => self.inner.log_queue_ts::<u8>(ty, ts, &buf),
-                None     => self.inner.log_queue::<u8>(ty, &buf),
+                None => self.inner.log_queue::<u8>(ty, &buf),
             }
         } else {
             match timestamp_ms {
                 Some(ts) => self.inner.log_ts::<u8>(ty, ts, &buf),
-                None     => self.inner.log::<u8>(ty, &buf),
+                None => self.inner.log::<u8>(ty, &buf),
             }
         };
         r.map_err(py_err_from)
@@ -390,8 +394,11 @@ impl PyRouter {
 
         // ---- Enforce schema length (pad/truncate) to match C API behavior ----
         if let Some(required) = required_payload_size_for(ty) {
-            if bytes.len() < required { bytes.resize(required, 0); }
-            else if bytes.len() > required { bytes.truncate(required); }
+            if bytes.len() < required {
+                bytes.resize(required, 0);
+            } else if bytes.len() > required {
+                bytes.truncate(required);
+            }
         }
 
         let ts = timestamp_ms;
@@ -401,12 +408,12 @@ impl PyRouter {
             let r = if queue {
                 match ts {
                     Some(t) => self.inner.log_queue_ts::<u8>(ty, t, &bytes),
-                    None    => self.inner.log_queue::<u8>(ty, &bytes),
+                    None => self.inner.log_queue::<u8>(ty, &bytes),
                 }
             } else {
                 match ts {
                     Some(t) => self.inner.log_ts::<u8>(ty, t, &bytes),
-                    None    => self.inner.log::<u8>(ty, &bytes),
+                    None => self.inner.log::<u8>(ty, &bytes),
                 }
             };
             return r.map_err(py_err_from);
@@ -417,7 +424,9 @@ impl PyRouter {
             ($T:ty) => {{
                 let cnt = bytes.len() / elem_size;
                 if cnt == 0 || bytes.len() % elem_size != 0 {
-                    return Err(PyValueError::new_err("buffer length not divisible by elem_size"));
+                    return Err(PyValueError::new_err(
+                        "buffer length not divisible by elem_size",
+                    ));
                 }
                 let mut v: Vec<$T> = Vec::with_capacity(cnt);
                 vectorize_data::<$T>(bytes.as_ptr(), cnt, elem_size, &mut v)
@@ -425,12 +434,12 @@ impl PyRouter {
                 let r = if queue {
                     match ts {
                         Some(t) => self.inner.log_queue_ts::<$T>(ty, t, &v),
-                        None    => self.inner.log_queue::<$T>(ty, &v),
+                        None => self.inner.log_queue::<$T>(ty, &v),
                     }
                 } else {
                     match ts {
                         Some(t) => self.inner.log_ts::<$T>(ty, t, &v),
-                        None    => self.inner.log::<$T>(ty, &v),
+                        None => self.inner.log::<$T>(ty, &v),
                     }
                 };
                 r.map_err(py_err_from)
@@ -442,15 +451,17 @@ impl PyRouter {
             (EK_UNSIGNED, 4) => finish_with!(u32),
             (EK_UNSIGNED, 8) => finish_with!(u64),
 
-            (EK_SIGNED,   1) => finish_with!(i8),
-            (EK_SIGNED,   2) => finish_with!(i16),
-            (EK_SIGNED,   4) => finish_with!(i32),
-            (EK_SIGNED,   8) => finish_with!(i64),
+            (EK_SIGNED, 1) => finish_with!(i8),
+            (EK_SIGNED, 2) => finish_with!(i16),
+            (EK_SIGNED, 4) => finish_with!(i32),
+            (EK_SIGNED, 8) => finish_with!(i64),
 
-            (EK_FLOAT,    4) => finish_with!(f32),
-            (EK_FLOAT,    8) => finish_with!(f64),
+            (EK_FLOAT, 4) => finish_with!(f32),
+            (EK_FLOAT, 8) => finish_with!(f64),
 
-            _ => Err(PyValueError::new_err("unsupported elem_kind/elem_size combination")),
+            _ => Err(PyValueError::new_err(
+                "unsupported elem_kind/elem_size combination",
+            )),
         }
     }
 
@@ -499,7 +510,6 @@ impl PyRouter {
             .process_all_queues_with_timeout(timeout_ms)
             .map_err(py_err_from)
     }
-
 }
 
 // ------------------ Top-level helpers ------------------
@@ -524,7 +534,10 @@ pub fn peek_header_py(py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResult<Py<Py
     out.set_item("sender", env.sender.as_ref())?;
     out.set_item(
         "endpoints",
-        env.endpoints.iter().map(|e| *e as u32).collect::<Vec<u32>>(),
+        env.endpoints
+            .iter()
+            .map(|e| *e as u32)
+            .collect::<Vec<u32>>(),
     )?;
     out.set_item("timestamp_ms", env.timestamp_ms)?;
     Ok(out.unbind().into_any())
@@ -552,9 +565,9 @@ pub fn make_packet(
     let mut buf: Vec<u8> = payload.extract()?;
     if let Some(required) = expected_payload_size_for(ty) {
         if buf.len() < required {
-            buf.resize(required, 0u8);           // pad with zeros
+            buf.resize(required, 0u8); // pad with zeros
         } else if buf.len() > required {
-            buf.truncate(required);              // truncate
+            buf.truncate(required); // truncate
         }
     }
 
@@ -609,10 +622,22 @@ pub fn sedsprintf_rs(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         set_doc("TELEMETRY_ERROR", "Human-readable error message payload.")?;
         set_doc("GPS_DATA", "GPS triple (lat, lon, alt) in f32.")?;
         set_doc("IMU_DATA", "IMU 6-axis (accel xyz, gyro xyz) in f32.")?;
-        set_doc("BATTERY_STATUS", "Battery metrics (voltage, current, etc.) in f32.")?;
-        set_doc("SYSTEM_STATUS", "System health/counters (CPU load, memory usage).")?;
-        set_doc("BAROMETER_DATA", "Barometer triple (pressure, temperature, altitude).")?;
-        set_doc("MESSAGE_DATA", "Fixed-size UTF-8 message string (padded/truncated).")?;
+        set_doc(
+            "BATTERY_STATUS",
+            "Battery metrics (voltage, current, etc.) in f32.",
+        )?;
+        set_doc(
+            "SYSTEM_STATUS",
+            "System health/counters (CPU load, memory usage).",
+        )?;
+        set_doc(
+            "BAROMETER_DATA",
+            "Barometer triple (pressure, temperature, altitude).",
+        )?;
+        set_doc(
+            "MESSAGE_DATA",
+            "Fixed-size UTF-8 message string (padded/truncated).",
+        )?;
 
         // Add to module
         m.add("DataType", dt_enum)?;
