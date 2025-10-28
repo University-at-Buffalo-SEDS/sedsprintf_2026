@@ -4,27 +4,33 @@ version = "0.1.0"
 edition = "2024"
 
 [lib]
-crate-type = ["staticlib"]
+# Only the safe defaults here. We’ll add `cdylib` *dynamically* in build.rs when the
+# `python` feature is enabled, so embedded builds won’t see it.
+crate-type = ["rlib", "staticlib"]
 
 [features]
-# Host/dev convenience: enable std by default so `cargo build` / `cargo test` work.
-default = ["std"]
+default = ["std"]                  # host default; embedded can opt out
 std = []
+python = ["std", "pyo3/extension-module"]  # turn on PyO3 for Python builds
+
+[package.metadata.maturin]
+bindings = "pyo3"                  # force maturin to pick PyO3, not CFFI
 
 [dependencies]
 time = { version = "0.3.44", default-features = false }
-# put common deps here (none required currently)
 
-# Pull cortex-m ONLY for bare-metal builds (target_os = "none")
+# PyO3 is optional and only enabled by the `python` feature
+pyo3 = { version = "0.27.1", optional = true, features = ["auto-initialize"] }
+
 [target.'cfg(target_os = "none")'.dependencies]
 cortex-m = "0.7"
 
 [profile.release]
-opt-level = "z"          # prioritize size ("s" also ok; "z" is smallest)
-lto = true               # full LTO (thin LTO also ok; try both)
-codegen-units = 1        # better inlining/GC across crates => smaller
-panic = "abort"          # you already have this (good)
-strip = "symbols"        # since Rust 1.70+: drop debug symbols from artifacts
-debug = 0                # ensure no DWARF remains
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+debug = 0
 incremental = false
-overflow-checks = false  # off by default in release, make it explicit
+overflow-checks = false
