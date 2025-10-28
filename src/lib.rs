@@ -23,6 +23,7 @@ use crate::macros::{ReprI32Enum, ReprU32Enum};
 mod tests;
 
 #[cfg(feature = "python")]
+#[cfg(feature = "std")]
 mod python_api;
 
 // ---------- Allocator & panic handlers ----------
