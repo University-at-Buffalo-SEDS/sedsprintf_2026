@@ -83,12 +83,18 @@ pub fn serialize_packet_into(pkt: &TelemetryPacket, out: &mut Vec<u8>) {
 }
 
 #[inline(always)]
-fn get_eps(eps: &mut Vec<DataEndpoint>, nep: usize, r: &mut ByteReader) -> Result<(), TelemetryError> {
+fn get_eps(
+    eps: &mut Vec<DataEndpoint>,
+    nep: usize,
+    r: &mut ByteReader,
+) -> Result<(), TelemetryError> {
     eps.reserve(nep);
     for _ in 0..nep {
         let e = r.read_u32()?;
         // Fast checked transmute if you want:
-        if e > MAX_VALUE_DATA_ENDPOINT { return Err(TelemetryError::Deserialize("bad endpoint")); }
+        if e > MAX_VALUE_DATA_ENDPOINT {
+            return Err(TelemetryError::Deserialize("bad endpoint"));
+        }
         // SAFETY: value range checked above
         let ep = unsafe { core::mem::transmute::<u32, DataEndpoint>(e) };
         eps.push(ep);

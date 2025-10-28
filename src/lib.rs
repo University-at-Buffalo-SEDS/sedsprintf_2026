@@ -18,6 +18,7 @@ extern crate std;
 
 use crate::macros::{ReprI32Enum, ReprU32Enum};
 
+
 #[cfg(feature = "std")]
 #[cfg(test)]
 mod tests;
@@ -42,15 +43,14 @@ mod embedded_alloc {
 
     unsafe impl GlobalAlloc for FreeRtosAlloc {
         unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-            let p = unsafe{pvPortMalloc(layout.size()) as *mut u8};
+            let p = unsafe { pvPortMalloc(layout.size()) as *mut u8 };
             debug_assert!(p.is_null() || (p as usize) % layout.align() == 0);
             p
         }
         unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
-            unsafe{ vPortFree(ptr as *mut _)}
+            unsafe { vPortFree(ptr as *mut _) }
         }
     }
-
 
     #[global_allocator]
     static A: FreeRtosAlloc = FreeRtosAlloc;
@@ -161,7 +161,9 @@ impl TelemetryErrorCode {
 
 pub type TelemetryResult<T> = Result<T, TelemetryError>;
 pub fn try_enum_from_u32<E: ReprU32Enum>(x: u32) -> Option<E> {
-    if x > E::MAX { return None; }
+    if x > E::MAX {
+        return None;
+    }
 
     // SAFETY: `E` is promised to be a fieldless #[repr(u32)] enum (thus 4 bytes, Copy).
     let e = unsafe { (&x as *const u32 as *const E).read() };
@@ -169,7 +171,9 @@ pub fn try_enum_from_u32<E: ReprU32Enum>(x: u32) -> Option<E> {
 }
 
 pub fn try_enum_from_i32<E: ReprI32Enum>(x: i32) -> Option<E> {
-    if x < E::MIN || x > E::MAX { return None; }
+    if x < E::MIN || x > E::MAX {
+        return None;
+    }
 
     // SAFETY: `E` is promised to be a fieldless #[repr(u32)] enum (thus 4 bytes, Copy).
     let e = unsafe { (&x as *const i32 as *const E).read() };

@@ -678,7 +678,7 @@ pub extern "C" fn seds_router_log_typed_ex(
         };
     }
 
-    // No fixed-size requirement: fall back to your fast path
+    // No fixed-size requirement: fall back the fast path
     match (elem_kind, elem_size) {
         (SEDS_EK_UNSIGNED, 1) => do_vec_log_typed!(r, ty, ts, queue, data, count, u8),
         (SEDS_EK_UNSIGNED, 2) => do_vec_log_typed!(r, ty, ts, queue, data, count, u16),

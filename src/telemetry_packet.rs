@@ -88,11 +88,16 @@ impl TelemetryPacket {
         let meta = message_meta(ty);
         let need = values.len() * 4;
         if need != meta.data_size {
-            return Err(TelemetryError::SizeMismatch { expected: meta.data_size, got: need });
+            return Err(TelemetryError::SizeMismatch {
+                expected: meta.data_size,
+                got: need,
+            });
         }
         let mut bytes = Vec::with_capacity(need);
         // Safe: we write every byte below
-        unsafe { bytes.set_len(need); }
+        unsafe {
+            bytes.set_len(need);
+        }
         for (i, v) in values.iter().copied().enumerate() {
             let b = v.to_le_bytes();
             let off = i * 4;
@@ -106,7 +111,6 @@ impl TelemetryPacket {
             Arc::<[u8]>::from(bytes),
         )
     }
-
 
     /// Validate internal invariants (size, endpoints, etc.).
     pub fn validate(&self) -> TelemetryResult<()> {
@@ -154,7 +158,9 @@ impl TelemetryPacket {
 
         // Endpoints list
         for (i, ep) in self.endpoints.iter().enumerate() {
-            if i != 0 { out.push_str(", "); }
+            if i != 0 {
+                out.push_str(", ");
+            }
             out.push_str(ep.as_str());
         }
         out.push_str("], Timestamp: ");
@@ -170,8 +176,13 @@ impl TelemetryPacket {
                 let _ = write!(
                     &mut out,
                     "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03}Z",
-                    dt.year(), dt.month() as u8, dt.day(),
-                    dt.hour(), dt.minute(), dt.second(), sub_ms
+                    dt.year(),
+                    dt.month() as u8,
+                    dt.day(),
+                    dt.hour(),
+                    dt.minute(),
+                    dt.second(),
+                    sub_ms
                 );
             } else {
                 let _ = write!(&mut out, "Invalid epoch ({})", total_ms);
@@ -182,7 +193,10 @@ impl TelemetryPacket {
             let seconds = (total_ms % 60_000) / 1_000;
             let milliseconds = total_ms % 1_000;
             if hours > 0 {
-                let _ = write!(&mut out, "{hours}h {minutes:02}m {seconds:02}s {milliseconds:03}ms");
+                let _ = write!(
+                    &mut out,
+                    "{hours}h {minutes:02}m {seconds:02}s {milliseconds:03}ms"
+                );
             } else if minutes > 0 {
                 let _ = write!(&mut out, "{minutes}m {seconds:02}s {milliseconds:03}ms");
             } else {
@@ -244,7 +258,9 @@ impl TelemetryPacket {
                 while let Some(chunk) = it.next() {
                     let v = f32::from_le_bytes(chunk.try_into().unwrap());
                     let _ = write!(s, "{v:.prec$}", prec = MAX_PRECISION);
-                    if it.peek().is_some() { s.push_str(", "); }
+                    if it.peek().is_some() {
+                        s.push_str(", ");
+                    }
                 }
             }
             MessageDataType::UInt32 => {
@@ -252,14 +268,18 @@ impl TelemetryPacket {
                 while let Some(chunk) = it.next() {
                     let v = u32::from_le_bytes(chunk.try_into().unwrap());
                     let _ = write!(s, "{v}");
-                    if it.peek().is_some() { s.push_str(", "); }
+                    if it.peek().is_some() {
+                        s.push_str(", ");
+                    }
                 }
             }
             MessageDataType::UInt8 => {
                 let mut it = self.payload.iter().peekable();
                 while let Some(b) = it.next() {
                     let _ = write!(s, "{}", *b);
-                    if it.peek().is_some() { s.push_str(", "); }
+                    if it.peek().is_some() {
+                        s.push_str(", ");
+                    }
                 }
             }
             MessageDataType::String => { /* handled above */ }
@@ -268,7 +288,6 @@ impl TelemetryPacket {
         s.push_str(")}");
         s
     }
-
 
     pub fn to_hex_string(&self) -> String {
         // Header first
@@ -284,7 +303,6 @@ impl TelemetryPacket {
         }
         s
     }
-
 }
 
 // ---- Optional: Display so we can `format!("{pkt}")` ----
