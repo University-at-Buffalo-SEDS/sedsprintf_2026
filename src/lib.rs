@@ -18,9 +18,12 @@ extern crate std;
 
 use crate::macros::{ReprI32Enum, ReprU32Enum};
 
-
+#[cfg(feature = "std")]
 #[cfg(test)]
 mod tests;
+
+#[cfg(feature = "python")]
+mod python_api;
 
 // ---------- Allocator & panic handlers ----------
 // For EMBEDDED builds (no_std + bare-metal target), provide FreeRTOS allocator + panic.
