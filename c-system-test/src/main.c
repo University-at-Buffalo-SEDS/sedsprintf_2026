@@ -55,26 +55,26 @@ int main(void)
     for (uint8_t i = 0; i < 5; ++i)
     {
         make_series(buf, 3, 10.0f);
-        assert(node_log(&radioBoard, SEDS_DT_GPS, buf, 3, sizeof(buf[0])) == SEDS_OK);
+        assert(node_log(&radioBoard, SEDS_DT_GPS_DATA, buf, 3, sizeof(buf[0])) == SEDS_OK);
         usleep(gen_random_num_ms());
 
         // B logs IMU (6 floats)
         make_series(buf, 6, 0.5f);
-        assert(node_log(&flightControllerBoard, SEDS_DT_IMU, buf, 6, sizeof(buf[0])) == SEDS_OK);
+        assert(node_log(&flightControllerBoard, SEDS_DT_IMU_DATA, buf, 6, sizeof(buf[0])) == SEDS_OK);
         usleep(gen_random_num_ms());
 
         // C logs BATTERY (2 floats)
         make_series(buf, 4, 3.7f);
-        assert(node_log(&powerBoard, SEDS_DT_BATTERY, buf, 4, sizeof(buf[0])) == SEDS_OK);
+        assert(node_log(&powerBoard, SEDS_DT_BATTERY_STATUS, buf, 4, sizeof(buf[0])) == SEDS_OK);
         usleep(gen_random_num_ms());
 
         char * char_buf = "hello world!";
-        assert(node_log(&powerBoard, SEDS_MESSAGE_DATA, char_buf, strlen(char_buf), sizeof(char_buf[0])) == SEDS_OK);
+        assert(node_log(&powerBoard, SEDS_DT_MESSAGE_DATA, char_buf, strlen(char_buf), sizeof(char_buf[0])) == SEDS_OK);
         usleep(gen_random_num_ms());
         // B logs PRESSURE (1 float)
         make_series(buf, 4, 3.7f);
         assert(
-            node_log(&flightControllerBoard, SEDS_DT_BAROMETER, buf, 3, sizeof(buf[0])) ==
+            node_log(&flightControllerBoard, SEDS_DT_BAROMETER_DATA, buf, 3, sizeof(buf[0])) ==
             SEDS_OK);
 
         seds_router_process_tx_queue_with_timeout(flightControllerBoard.r, 100);

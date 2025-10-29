@@ -7,14 +7,14 @@ int main(void)
     //synchronous code
     init_telemetry_router();
     const float data[3] = {37.7749f, -122.4194f, 30.0f};
-    SedsResult result = log_telemetry_synchronous(SEDS_DT_GPS, data, 3, sizeof(data[0]));
+    SedsResult result = log_telemetry_synchronous(SEDS_DT_GPS_DATA, data, 3, sizeof(data[0]));
     if (result != SEDS_OK)
     {
         print_handle_telemetry_error(result);
     }
     //asynchronous code
     //this would be in send routine of the data collector
-    result = log_telemetry_asynchronous(SEDS_DT_GPS, data, 3, sizeof(data[0]));
+    result = log_telemetry_asynchronous(SEDS_DT_GPS_DATA, data, 3, sizeof(data[0]));
     if (result != SEDS_OK)
     {
         print_handle_telemetry_error(result);
