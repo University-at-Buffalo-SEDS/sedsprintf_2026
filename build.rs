@@ -67,6 +67,7 @@ fn generate_c_header() {
 
     let final_text = tpl.replace(marker, &enums_joined);
     let final_out = PathBuf::from(&crate_dir).join("C-Headers/sedsprintf.h");
+    fs::create_dir_all(final_out.parent().unwrap()).expect("create C-Headers/ failed");
     fs::write(&final_out, final_text)
         .unwrap_or_else(|e| panic!("write final header {}: {e}", final_out.display()));
 
@@ -103,26 +104,12 @@ fn generate_pyi_stub() {
         "DataType",
         r#"Wire-level type tags (generated to match Rust/config.rs)."#,
         &dt_members,
-        // Optional per-member docstrings
-        Some(&[
-            ("TELEMETRY_ERROR", "Human-readable error message payload."),
-            ("GPS_DATA", "GPS triple (lat, lon, alt) in f32."),
-            ("IMU_DATA", "IMU 6-axis (accel xyz, gyro xyz) in f32."),
-            ("BATTERY_STATUS", "Battery metrics (e.g., voltage/current/...) in f32."),
-            ("SYSTEM_STATUS", "System health/counters (e.g., CPU, memory) in u8."),
-            ("BAROMETER_DATA", "Barometer triple (pressure, temp, altitude) in f32."),
-            ("MESSAGE_DATA", "Fixed-size UTF-8 message string (padded/truncated)."),
-        ]),
     );
 
     let ep_enum_text = render_python_intenum(
         "DataEndpoint",
         r#"Routing endpoints for packets."#,
         &ep_members,
-        Some(&[
-            ("SD_CARD", "Persist to local SD card."),
-            ("RADIO", "Transmit over radio link."),
-        ]),
     );
 
     let joined = format!("{dt_enum_text}\n\n{ep_enum_text}\n");
@@ -292,15 +279,9 @@ fn render_python_intenum(
     name: &str,
     doc: &str,
     members: &[(String, String)],
-    doc_overrides: Option<&[(&str, &str)]>,
 ) -> String {
     // Build a quick lookup for per-member comment text
     let mut per_member_doc = std::collections::HashMap::<&str, &str>::new();
-    if let Some(ovr) = doc_overrides {
-        for (k, v) in ovr {
-            per_member_doc.insert(*k, *v);
-        }
-    }
 
     let mut lines = Vec::new();
     lines.push(format!("class {name}(IntEnum):"));
