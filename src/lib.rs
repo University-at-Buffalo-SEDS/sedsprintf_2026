@@ -16,7 +16,7 @@ extern crate core;
 extern crate std;
 
 
-use crate::config::{MAX_HEX_LENGTH, MAX_STRING_LENGTH};
+use crate::config::{MAX_STATIC_HEX_LENGTH, MAX_STATIC_STRING_LENGTH};
 use crate::macros::{ReprI32Enum, ReprU32Enum};
 
 
@@ -116,8 +116,8 @@ pub const fn data_type_size(dt: MessageDataType) -> usize {
         MessageDataType::Int64 => size_of::<i64>(),
         MessageDataType::Int128 => size_of::<i128>(),
         MessageDataType::Bool => size_of::<bool>(),
-        MessageDataType::String => MAX_STRING_LENGTH,
-        MessageDataType::Hex => MAX_HEX_LENGTH,
+        MessageDataType::String => MAX_STATIC_STRING_LENGTH,
+        MessageDataType::Hex => MAX_STATIC_HEX_LENGTH,
     }
 }
 
@@ -140,6 +140,7 @@ pub enum TelemetryError {
     BadArg,
     Deserialize(&'static str),
     Io(&'static str),
+    InvalidUtf8,
 }
 
 impl TelemetryError {
@@ -155,6 +156,7 @@ impl TelemetryError {
             TelemetryError::BadArg => TelemetryErrorCode::BadArg,
             TelemetryError::Deserialize(_) => TelemetryErrorCode::Deserialize,
             TelemetryError::Io(_) => TelemetryErrorCode::Io,
+            TelemetryError::InvalidUtf8 => TelemetryErrorCode::InvalidUtf8,
         }
     }
 }
@@ -171,6 +173,7 @@ pub enum TelemetryErrorCode {
     BadArg = -9,
     Deserialize = -10,
     Io = -11,
+    InvalidUtf8 = -12,
 }
 
 impl_repr_i32_enum!(
@@ -193,6 +196,7 @@ impl TelemetryErrorCode {
             TelemetryErrorCode::BadArg => "{Bad Arg}",
             TelemetryErrorCode::Deserialize => "{Deserialize Error}",
             TelemetryErrorCode::Io => "{IO Error}",
+            TelemetryErrorCode::InvalidUtf8 => "{Invalid UTF-8}",
         }
     }
 

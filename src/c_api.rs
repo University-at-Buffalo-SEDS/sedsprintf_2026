@@ -14,7 +14,7 @@ use crate::{
     TelemetryResult,
 };
 
-use crate::config::{get_data_type, MAX_STRING_LENGTH};
+use crate::config::{get_data_type, MAX_STATIC_STRING_LENGTH};
 use crate::serialize::peek_envelope;
 use alloc::{boxed::Box, string::String, sync::Arc, vec, vec::Vec};
 use core::{ffi::c_char, ffi::c_void, mem::size_of, ptr, slice, str::from_utf8};
@@ -74,8 +74,17 @@ fn ok_or_status(r: TelemetryResult<()>) -> i32 {
 
 fn expected_payload_size_for(ty: DataType) -> Option<usize> {
     match get_data_type(ty) {
-        MessageDataType::String => Some(MAX_STRING_LENGTH),
+        MessageDataType::String => Some(MAX_STATIC_STRING_LENGTH),
         _ => None,
+    }
+}
+use crate::config::{message_meta, MessageSizeType}; // add this if not already imported
+
+#[inline]
+fn fixed_payload_size_if_static(ty: DataType) -> Option<usize> {
+    match message_meta(ty).data_size {
+        MessageSizeType::Static(n) => Some(n),
+        MessageSizeType::Dynamic => None,
     }
 }
 
@@ -548,26 +557,24 @@ pub extern "C" fn seds_router_log_bytes_ex(
     let ts = opt_ts(timestamp_ms_opt);
 
     // If this type has a fixed schema size, pad/truncate to exactly that many bytes.
-    if let Some(required) = expected_payload_size_for(ty) {
+    // If this type has a fixed schema size, pad/truncate to exactly that many bytes.
+    if let Some(required) = fixed_payload_size_if_static(ty) {
         // Fast path: exact match → pass through
         if src.len() == required {
             return ok_or_status(call_log_or_queue::<u8>(r, ty, ts, src, queue));
         }
 
-        // Build a zero-filled buffer of the required size and copy what we have.
-        // (Truncate if src is longer; pad with 0x00 if shorter.)
+        // Build zero-filled buffer of the required size and copy what we have.
         let mut tmp = vec![0u8; required];
         let ncopy = core::cmp::min(src.len(), required);
         if ncopy > 0 {
             tmp[..ncopy].copy_from_slice(&src[..ncopy]);
         }
 
-        // Pass the padded buffer
         return ok_or_status(call_log_or_queue::<u8>(r, ty, ts, &tmp, queue));
-        // (tmp lives until after the call, so the slice is valid)
     }
 
-    // Otherwise, no fixed size known → pass through as-is
+    // Otherwise (Dynamic): pass through as-is
     ok_or_status(call_log_or_queue::<u8>(r, ty, ts, src, queue))
 }
 
@@ -620,15 +627,12 @@ pub extern "C" fn seds_router_log_typed_ex(
     };
     let ts = opt_ts(timestamp_ms_opt);
 
-    // Common padded path: if the type declares a fixed payload size, reshape to it in BYTES
-    // first, then convert to Vec<T>.
-    if let Some(required_bytes) = expected_payload_size_for(ty) {
-        // required_bytes must be divisible by elem_size to be representable as T
+    // Common padded path ONLY if the type declares a fixed payload size
+    if let Some(required_bytes) = fixed_payload_size_if_static(ty) {
         if required_bytes % elem_size != 0 {
             return status_from_err(TelemetryError::BadArg);
         }
 
-        // Build zero-filled buffer of exactly required_bytes and copy from the C buffer
         let src_bytes_len = count.saturating_mul(elem_size);
         let src = unsafe { slice::from_raw_parts(data as *const u8, src_bytes_len) };
 
@@ -638,24 +642,13 @@ pub extern "C" fn seds_router_log_typed_ex(
             padded[..ncopy].copy_from_slice(&src[..ncopy]);
         }
 
-        // Convert padded bytes -> Vec<T> using existing unaligned reader
         let required_elems = required_bytes / elem_size;
 
-        // Use a small generic to avoid duplicating match arms
-
         return match (elem_kind, elem_size) {
-            (SEDS_EK_UNSIGNED, 1) => {
-                finish_with::<u8>(r, ty, ts, queue, &padded, required_elems, 1)
-            }
-            (SEDS_EK_UNSIGNED, 2) => {
-                finish_with::<u16>(r, ty, ts, queue, &padded, required_elems, 2)
-            }
-            (SEDS_EK_UNSIGNED, 4) => {
-                finish_with::<u32>(r, ty, ts, queue, &padded, required_elems, 4)
-            }
-            (SEDS_EK_UNSIGNED, 8) => {
-                finish_with::<u64>(r, ty, ts, queue, &padded, required_elems, 8)
-            }
+            (SEDS_EK_UNSIGNED, 1) => finish_with::<u8>(r, ty, ts, queue, &padded, required_elems, 1),
+            (SEDS_EK_UNSIGNED, 2) => finish_with::<u16>(r, ty, ts, queue, &padded, required_elems, 2),
+            (SEDS_EK_UNSIGNED, 4) => finish_with::<u32>(r, ty, ts, queue, &padded, required_elems, 4),
+            (SEDS_EK_UNSIGNED, 8) => finish_with::<u64>(r, ty, ts, queue, &padded, required_elems, 8),
 
             (SEDS_EK_SIGNED, 1) => finish_with::<i8>(r, ty, ts, queue, &padded, required_elems, 1),
             (SEDS_EK_SIGNED, 2) => finish_with::<i16>(r, ty, ts, queue, &padded, required_elems, 2),
@@ -668,7 +661,7 @@ pub extern "C" fn seds_router_log_typed_ex(
         };
     }
 
-    // No fixed-size requirement: fall back the fast path
+    // No fixed-size requirement (Dynamic): fast path, no resizing
     match (elem_kind, elem_size) {
         (SEDS_EK_UNSIGNED, 1) => do_vec_log_typed!(r, ty, ts, queue, data, count, u8),
         (SEDS_EK_UNSIGNED, 2) => do_vec_log_typed!(r, ty, ts, queue, data, count, u16),

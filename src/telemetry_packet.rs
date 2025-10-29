@@ -9,6 +9,7 @@ pub use crate::config::{
 use crate::{MessageDataType, MessageType, TelemetryError, TelemetryResult};
 use alloc::{string::String, string::ToString, sync::Arc, vec::Vec};
 use core::{fmt::Write};
+use crate::config::{MessageSizeType, MAX_STATIC_HEX_LENGTH, MAX_STATIC_STRING_LENGTH};
 use crate::router::LeBytes;
 
 
@@ -95,6 +96,63 @@ fn print_bools(bytes: &[u8], s: &mut String) {
         let _ = write!(s, "{}", *b != 0);
     }
 }
+
+#[inline(always)]
+const fn element_width(dt: MessageDataType) -> usize {
+    match dt {
+        MessageDataType::UInt8 | MessageDataType::Int8 | MessageDataType::Bool => 1,
+        MessageDataType::UInt16 | MessageDataType::Int16 => 2,
+        MessageDataType::UInt32 | MessageDataType::Int32 | MessageDataType::Float32 => 4,
+        MessageDataType::UInt64 | MessageDataType::Int64 | MessageDataType::Float64 => 8,
+        MessageDataType::UInt128 | MessageDataType::Int128 => 16,
+        // For String/Hex we treat width as 1 (byte granularity) when checking dynamic multiples.
+        MessageDataType::String | MessageDataType::Hex => 1,
+    }
+}
+
+#[inline]
+fn validate_dynamic_len_and_content(ty: DataType, bytes: &[u8]) -> TelemetryResult<()> {
+    let dt = get_data_type(ty);
+    match dt {
+        MessageDataType::String => {
+            // Trim trailing NULs for validation, but do not copy.
+            let end = bytes.iter().rposition(|&b| b != 0).map(|i| i + 1).unwrap_or(0);
+            if end > MAX_STATIC_STRING_LENGTH {
+                return Err(TelemetryError::SizeMismatch {
+                    expected: MAX_STATIC_STRING_LENGTH,
+                    got: end,
+                });
+            }
+            // Empty string is OK; otherwise ensure valid UTF-8.
+            if end > 0 {
+                core::str::from_utf8(&bytes[..end]).map_err(|_| TelemetryError::InvalidUtf8)?;
+            }
+            Ok(())
+        }
+        MessageDataType::Hex => {
+            // No UTF-8 requirement. Optionally bound the size:
+            if bytes.len() > MAX_STATIC_HEX_LENGTH {
+                return Err(TelemetryError::SizeMismatch {
+                    expected: MAX_STATIC_HEX_LENGTH,
+                    got: bytes.len(),
+                });
+            }
+            Ok(())
+        }
+        _ => {
+            // Numeric / bool: length must be a multiple of the element width
+            let w = element_width(dt);
+            if w == 0 || bytes.len() % w != 0 {
+                return Err(TelemetryError::SizeMismatch {
+                    expected: w,
+                    got: bytes.len(),
+                });
+            }
+            Ok(())
+        }
+    }
+}
+
 // -------------------- TelemetryPacket impl --------------------
 impl TelemetryPacket {
     /// Create a packet from a raw payload (validated against `message_meta(ty)`).
@@ -105,19 +163,25 @@ impl TelemetryPacket {
         timestamp: u64,
         payload: Arc<[u8]>,
     ) -> TelemetryResult<Self> {
-        let meta = message_meta(ty);
         if endpoints.is_empty() {
             return Err(TelemetryError::EmptyEndpoints);
         }
-        if payload.len() != meta.data_size {
-            return Err(TelemetryError::SizeMismatch {
-                expected: meta.data_size,
-                got: payload.len(),
-            });
+
+        let meta = message_meta(ty);
+        match meta.data_size {
+            MessageSizeType::Static(need) => {
+                if payload.len() != need {
+                    return Err(TelemetryError::SizeMismatch { expected: need, got: payload.len() });
+                }
+            }
+            MessageSizeType::Dynamic => {
+                validate_dynamic_len_and_content(ty, &payload)?;
+            }
         }
+
         Ok(Self {
             ty,
-            data_size: meta.data_size,
+            data_size: payload.len(),
             sender: sender.into(),
             endpoints: Arc::<[DataEndpoint]>::from(endpoints),
             timestamp,
@@ -132,17 +196,10 @@ impl TelemetryPacket {
         endpoints: &[DataEndpoint],
         timestamp: u64,
     ) -> TelemetryResult<Self> {
-        let meta = message_meta(ty);
-        if bytes.len() != meta.data_size {
-            return Err(TelemetryError::SizeMismatch {
-                expected: meta.data_size,
-                got: bytes.len(),
-            });
-        }
         Self::new(
             ty,
             endpoints,
-            Arc::<str>::from(DEVICE_IDENTIFIER), // <-- no leak
+            Arc::<str>::from(DEVICE_IDENTIFIER),
             timestamp,
             Arc::<[u8]>::from(bytes.to_vec()),
         )
@@ -157,22 +214,32 @@ impl TelemetryPacket {
     ) -> TelemetryResult<Self> {
         let meta = message_meta(ty);
         let need = values.len() * 4;
-        if need != meta.data_size {
-            return Err(TelemetryError::SizeMismatch {
-                expected: meta.data_size,
-                got: need,
-            });
+
+        match meta.data_size {
+            // Static: exact byte count must match
+            MessageSizeType::Static(exact) => {
+                if need != exact {
+                    return Err(TelemetryError::SizeMismatch { expected: exact, got: need });
+                }
+            }
+            // Dynamic: just ensure it's a multiple of element width (4 for f32)
+            MessageSizeType::Dynamic => {
+                if need % 4 != 0 {
+                    return Err(TelemetryError::SizeMismatch { expected: 4, got: need });
+                }
+            }
         }
+
+        // Build LE bytes
         let mut bytes = Vec::with_capacity(need);
-        // Safe: we write every byte below
-        unsafe {
-            bytes.set_len(need);
-        }
+        unsafe { bytes.set_len(need) }; // we fill every byte below
         for (i, v) in values.iter().copied().enumerate() {
             let b = v.to_le_bytes();
             let off = i * 4;
             bytes[off..off + 4].copy_from_slice(&b);
         }
+
+        // Let `new()` run the final validation (incl. any dynamic rules)
         Self::new(
             ty,
             endpoints,
@@ -182,15 +249,9 @@ impl TelemetryPacket {
         )
     }
 
+
     /// Validate internal invariants (size, endpoints, etc.).
     pub fn validate(&self) -> TelemetryResult<()> {
-        let meta = message_meta(self.ty);
-        if self.data_size != meta.data_size {
-            return Err(TelemetryError::SizeMismatch {
-                expected: meta.data_size,
-                got: self.data_size,
-            });
-        }
         if self.endpoints.is_empty() {
             return Err(TelemetryError::EmptyEndpoints);
         }
@@ -200,8 +261,21 @@ impl TelemetryPacket {
                 got: self.payload.len(),
             });
         }
+
+        let meta = message_meta(self.ty);
+        match meta.data_size {
+            MessageSizeType::Static(need) => {
+                if self.data_size != need {
+                    return Err(TelemetryError::SizeMismatch { expected: need, got: self.data_size });
+                }
+            }
+            MessageSizeType::Dynamic => {
+                validate_dynamic_len_and_content(self.ty, &self.payload)?;
+            }
+        }
         Ok(())
     }
+
 
     fn build_endpoint_string(&self, endpoints: &mut String) {
         for (i, ep) in self.endpoints.iter().enumerate() {
@@ -218,7 +292,7 @@ impl TelemetryPacket {
 
         let _ = write!(
             &mut out,
-            "Type: {}, Size: {}, Sender: {}, Endpoints: [",
+            "Type: {}, Data Size: {}, Sender: {}, Endpoints: [",
             self.ty.as_str(),
             self.data_size,
             self.sender.as_ref(),

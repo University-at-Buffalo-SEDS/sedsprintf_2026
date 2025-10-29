@@ -1,4 +1,5 @@
 // src/py_api.rs
+use crate::config::MessageSizeType;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList, PyModule, PyTuple};
@@ -7,7 +8,8 @@ use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
 use crate::{
     config::{
-        message_meta, DataEndpoint, MAX_STRING_LENGTH, MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE,
+        message_meta, DataEndpoint, MAX_VALUE_DATA_ENDPOINT,
+        MAX_VALUE_DATA_TYPE,
     }, router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, LeBytes, Router},
     serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet},
     telemetry_packet::{DataType, TelemetryPacket},
@@ -33,19 +35,10 @@ fn endpoint_from_u32(x: u32) -> TelemetryResult<DataEndpoint> {
     DataEndpoint::try_from_u32(x).ok_or(TelemetryError::Deserialize("bad endpoint"))
 }
 
-fn expected_payload_size_for(ty: DataType) -> Option<usize> {
-    match ty {
-        DataType::MessageData => Some(MAX_STRING_LENGTH),
-        _ => None,
-    }
-}
-
 fn required_payload_size_for(ty: DataType) -> Option<usize> {
-    let meta = message_meta(ty);
-    if meta.data_size > 0 {
-        Some(meta.data_size)
-    } else {
-        None
+    match message_meta(ty).data_size {
+        MessageSizeType::Static(n) => Some(n),
+        MessageSizeType::Dynamic => None,
     }
 }
 
@@ -277,7 +270,7 @@ impl PyRouter {
         let ty = dtype_from_u32(ty).map_err(py_err_from)?;
         let mut buf: Vec<u8> = data.extract::<&[u8]>()?.to_vec();
 
-        // Pad/truncate to the schema’s required size (C API parity)
+        // Static: enforce exact length (pad/truncate). Dynamic: do nothing.
         if let Some(required) = required_payload_size_for(ty) {
             if buf.len() < required {
                 buf.resize(required, 0u8);
@@ -313,8 +306,8 @@ impl PyRouter {
         let ty = dtype_from_u32(ty).map_err(py_err_from)?;
         let mut vals: Vec<f32> = values.extract()?;
 
-        if let Some(required_bytes) = expected_payload_size_for(ty) {
-            // for f32, element width is 4 bytes
+        // Static: enforce exact byte count via element count. Dynamic: do nothing.
+        if let Some(required_bytes) = required_payload_size_for(ty) {
             if required_bytes % 4 != 0 {
                 return Err(py_err_from(TelemetryError::BadArg));
             }
@@ -361,21 +354,16 @@ impl PyRouter {
         }
         let ty = dtype_from_u32(ty).map_err(py_err_from)?;
 
-        // ---- Robust buffer intake: bytes/bytearray/memoryview/NumPy ----
-        // Fast path: already a bytes-like object
+        // ---- Robust buffer intake: bytes/bytearray/memoryview/NumPy/str ----
         let mut bytes: Vec<u8> = if let Ok(b) = data.extract::<&[u8]>() {
-            // Fast path: already bytes-like (bytes/bytearray/memoryview on itemsize==1)
             b.to_vec()
         } else if let Ok(py_str) = data.cast::<pyo3::types::PyString>() {
-            // NEW: accept Python str -> UTF-8 bytes
             py_str.to_str()?.as_bytes().to_vec()
         } else {
-            // Try bytes(data) first (works for iterable[int] and many buffers)
             let builtins = PyModule::import(py, "builtins")?;
             match builtins.call_method1("bytes", (data.clone(),)) {
                 Ok(pybytes) => pybytes.extract::<Vec<u8>>()?,
                 Err(_) => {
-                    // Fallback: memoryview(data).cast('B').tobytes()
                     let mv = builtins.getattr("memoryview")?.call1((data.clone(),))?;
                     let itemsize: usize = mv.getattr("itemsize")?.extract()?;
                     let mv_bytes = if itemsize != 1 {
@@ -389,7 +377,8 @@ impl PyRouter {
             }
         };
 
-        // ---- Enforce schema length (pad/truncate) to match C API behavior ----
+        // ---- Schema length enforcement ----
+        // Static: enforce exact size; Dynamic: do nothing here.
         if let Some(required) = required_payload_size_for(ty) {
             if bytes.len() < required {
                 bytes.resize(required, 0);
@@ -400,7 +389,7 @@ impl PyRouter {
 
         let ts = timestamp_ms;
 
-        // Fast path for elem_size == 1: no reinterpretation needed
+        // Fast path for 1-byte unsigned: no reinterpretation needed
         if elem_size == 1 && elem_kind == EK_UNSIGNED {
             let r = if queue {
                 match ts {
@@ -558,13 +547,15 @@ pub fn make_packet(
             .collect::<Result<Vec<_>, _>>()?,
     );
 
-    // Extract payload and enforce fixed-size if required
+    // Extract payload
     let mut buf: Vec<u8> = payload.extract()?;
-    if let Some(required) = expected_payload_size_for(ty) {
+
+    // Static: enforce exact; Dynamic: untouched (no cap/pad/truncate)
+    if let Some(required) = required_payload_size_for(ty) {
         if buf.len() < required {
-            buf.resize(required, 0u8); // pad with zeros
+            buf.resize(required, 0u8);
         } else if buf.len() > required {
-            buf.truncate(required); // truncate
+            buf.truncate(required);
         }
     }
 

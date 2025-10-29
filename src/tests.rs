@@ -1,11 +1,36 @@
-use crate::config::{get_needed_message_size, MESSAGE_ELEMENTS};
+use crate::config::{get_data_type, get_needed_message_size, message_meta, MAX_STATIC_HEX_LENGTH, MAX_STATIC_STRING_LENGTH, MESSAGE_ELEMENTS};
 use crate::router::EndpointHandler;
 use crate::telemetry_packet::{DataEndpoint, DataType, TelemetryPacket};
-use crate::{router, TelemetryError};
+use crate::{router, MessageDataType, TelemetryError};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 
+fn test_payload_len_for(ty: DataType) -> usize {
+    match message_meta(ty).data_size {
+        crate::config::MessageSizeType::Static(n) => n,
+        crate::config::MessageSizeType::Dynamic => {
+            // Pick reasonable defaults per data kind
+            match get_data_type(ty) {
+                MessageDataType::String => MAX_STATIC_STRING_LENGTH, // router error-path expects this
+                MessageDataType::Hex    => MAX_STATIC_HEX_LENGTH,    // any bytes; size-bounded
+                // numeric/bool: must be multiple of element width → use “schema element count”
+                other => {
+                    let w = match other {
+                        MessageDataType::UInt8  | MessageDataType::Int8  | MessageDataType::Bool   => 1,
+                        MessageDataType::UInt16 | MessageDataType::Int16                           => 2,
+                        MessageDataType::UInt32 | MessageDataType::Int32 | MessageDataType::Float32 => 4,
+                        MessageDataType::UInt64 | MessageDataType::Int64 | MessageDataType::Float64 => 8,
+                        MessageDataType::UInt128| MessageDataType::Int128                           => 16,
+                        MessageDataType::String | MessageDataType::Hex                               => 1,
+                    };
+                    let elems = MESSAGE_ELEMENTS[ty as usize].max(1);
+                    w * elems
+                }
+            }
+        }
+    }
+}
 fn get_handler(rx_count_c: Arc<AtomicUsize>) -> EndpointHandler {
     EndpointHandler {
         endpoint: DataEndpoint::SdCard,
@@ -105,19 +130,23 @@ mod tests {
         let s = pkt.header_string();
         assert_eq!(
             s,
-            "Type: GPS_DATA, Size: 12, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, RADIO], Timestamp: 0 (0s 000ms)"
+            "Type: GPS_DATA, Data Size: 12, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, RADIO], Timestamp: 0 (0s 000ms)"
         );
     }
 
     #[test]
     fn packet_to_string_formats_floats() {
         let endpoints = &[DataEndpoint::SdCard, DataEndpoint::Radio];
-        let pkt =
-            TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.5, 3.25], endpoints, 0)
-                .unwrap();
+        let pkt = TelemetryPacket::from_f32_slice(
+            DataType::GpsData,
+            &[1.0, 2.5, 3.25],
+            endpoints,
+            0,
+        ).unwrap();
+
         let text = pkt.to_string();
         assert!(text.starts_with(
-            "{Type: GPS_DATA, Size: 12, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, RADIO], Timestamp: 0 (0s 000ms), Data: "
+            "{Type: GPS_DATA, Data Size: 12, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, RADIO], Timestamp: 0 (0s 000ms), Data: "
         ));
         assert!(text.contains("1"));
         assert!(text.contains("2.5"));
@@ -334,11 +363,9 @@ unsafe fn copy_telemetry_packet_raw(
 /// Port of C++: TEST(Helpers, PacketHexToString)
 #[test]
 fn helpers_packet_hex_to_string() {
-    // (2) proper packet → exact expected string
     let pkt = fake_telemetry_packet_bytes();
     let got = pkt.to_hex_string();
-
-    let expect = "Type: GPS_DATA, Size: 12, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, RADIO], Timestamp: 1123581321 (312h 06m 21s 321ms), Data (hex): 0x00 0x00 0x98 0x41 0x00 0x00 0x04 0x42 0x00 0x00 0x50 0x42";
+    let expect = "Type: GPS_DATA, Data Size: 12, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, RADIO], Timestamp: 1123581321 (312h 06m 21s 321ms), Data (hex): 0x00 0x00 0x98 0x41 0x00 0x00 0x04 0x42 0x00 0x00 0x50 0x42";
     assert_eq!(got, expect);
 }
 
@@ -382,10 +409,10 @@ fn helpers_copy_telemetry_packet() {
 #[cfg(test)]
 mod handler_failure_tests {
     use super::*;
-    use crate::config::{DEVICE_IDENTIFIER, MAX_STRING_LENGTH, MAX_VALUE_DATA_TYPE};
+    use crate::config::{DEVICE_IDENTIFIER, MAX_VALUE_DATA_TYPE};
     use crate::router::EndpointHandler;
     use crate::router::{BoardConfig, Router};
-    use crate::telemetry_packet::{message_meta, DataType};
+    use crate::telemetry_packet::DataType;
     use crate::TelemetryError;
     use alloc::{sync::Arc, vec, vec::Vec};
     use core::sync::atomic::{AtomicUsize, Ordering};
@@ -406,8 +433,7 @@ mod handler_failure_tests {
     }
 
     fn payload_for(ty: DataType) -> Vec<u8> {
-        let meta = message_meta(ty);
-        vec![0u8; meta.data_size]
+        vec![0u8; test_payload_len_for(ty)]
     }
 
     #[test]
@@ -469,11 +495,8 @@ mod handler_failure_tests {
 
         // Verify exact payload text produced by handle_callback_error(Some(dest), e)
         let expected = format!(
-            "{{Type: TELEMETRY_ERROR, Size: {:?}, Sender: TEST_PLATFORM, Endpoints: [RADIO], Timestamp: 0 (0s 000ms), Error: (\"Handler for endpoint {:?} failed on device {:?}: {:?}\")}}",
-            MAX_STRING_LENGTH,
-            failing_ep,
-            DEVICE_IDENTIFIER,
-            TelemetryError::BadArg
+            "{{Type: TELEMETRY_ERROR, Data Size: {:?}, Sender: TEST_PLATFORM, Endpoints: [RADIO], Timestamp: 0 (0s 000ms), Error: (\"Handler for endpoint {:?} failed on device {:?}: {:?}\")}}",
+            68, failing_ep, DEVICE_IDENTIFIER, TelemetryError::BadArg
         );
         let got = last_payload.lock().unwrap().clone();
         assert_eq!(got, expected, "mismatch in TelemetryError payload text");
@@ -529,8 +552,8 @@ mod handler_failure_tests {
 
         // Exact text from handle_callback_error(None, e)
         let expected = format!(
-            "{{Type: TELEMETRY_ERROR, Size: {:?}, Sender: TEST_PLATFORM, Endpoints: [SD_CARD], Timestamp: 0 (0s 000ms), Error: (\"TX Handler failed on device {:?}: {:?}\")}}",
-            MAX_STRING_LENGTH,
+            "{{Type: TELEMETRY_ERROR, Data Size: {:?}, Sender: TEST_PLATFORM, Endpoints: [SD_CARD], Timestamp: 0 (0s 000ms), Error: (\"TX Handler failed on device {:?}: {:?}\")}}",
+            55,
             DEVICE_IDENTIFIER,
             TelemetryError::Io("boom")
         );
@@ -852,8 +875,9 @@ mod tests_extra {
     #![cfg(test)]
 
 
+    use crate::tests::test_payload_len_for;
     use crate::{
-        config::{message_meta, DataEndpoint, DataType}, router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, Router}, serialize,
+        config::{DataEndpoint, DataType}, router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, Router}, serialize,
         telemetry_packet::TelemetryPacket,
         TelemetryError,
         TelemetryErrorCode,
@@ -916,10 +940,8 @@ mod tests_extra {
         // Use a String-typed message kind. TelemetryError is used by the router with
         // a string payload and typically mapped to MessageDataType::String.
         let ty = DataType::TelemetryError;
-        let meta = message_meta(ty);
+        let mut buf = vec![0u8; test_payload_len_for(ty)];
 
-        // Build a payload the exact required size, with "hello\0\0..." suffix zeros.
-        let mut buf = vec![0u8; meta.data_size];
         let s = b"hello\0\0";
         buf[..s.len()].copy_from_slice(s);
 
@@ -1050,9 +1072,8 @@ mod tests_extra {
 
     #[test]
     fn from_u8_slice_builds_valid_packet() {
-        // Choose a type with a known 12-byte payload (3 * f32), e.g., GPS_DATA.
-        let need = message_meta(DataType::GpsData).data_size;
-        assert_eq!(need, 12); // sanity check vs schema
+        let need = test_payload_len_for(DataType::GpsData);
+        assert_eq!(need, 12); // schema sanity
 
         let bytes = vec![0x11u8; need];
         let pkt = TelemetryPacket::from_u8_slice(
@@ -1060,8 +1081,7 @@ mod tests_extra {
             &bytes,
             &[DataEndpoint::SdCard],
             12345,
-        )
-        .unwrap();
+        ).unwrap();
 
         assert_eq!(pkt.payload.len(), need);
         assert_eq!(pkt.data_size, need);
@@ -1159,8 +1179,9 @@ mod tests_more {
 
 
     use crate::{
-        config::{message_meta, DataEndpoint, DataType}, router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, Router}, serialize,
+        config::{get_data_type, message_meta, DataEndpoint, DataType, MessageSizeType, MESSAGE_ELEMENTS}, router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, Router}, serialize,
         telemetry_packet::TelemetryPacket,
+        MessageDataType,
         TelemetryError,
         TelemetryErrorCode,
         TelemetryResult,
@@ -1178,15 +1199,44 @@ mod tests_more {
     // TelemetryPacket validation edge cases
     // ---------------------------------------------------------------------------
 
+
+    fn concrete_len_for_test(ty: DataType) -> usize {
+        match message_meta(ty).data_size {
+            MessageSizeType::Static(n) => n,
+            MessageSizeType::Dynamic => {
+                // Choose a reasonable dynamic size for tests:
+                // numeric/bool → element_width * MESSAGE_ELEMENTS
+                // string/hex    → 1 * MESSAGE_ELEMENTS (or any positive size)
+                let w = match get_data_type(ty) {
+                    MessageDataType::UInt8  | MessageDataType::Int8  | MessageDataType::Bool   => 1,
+                    MessageDataType::UInt16 | MessageDataType::Int16                           => 2,
+                    MessageDataType::UInt32 | MessageDataType::Int32 | MessageDataType::Float32 => 4,
+                    MessageDataType::UInt64 | MessageDataType::Int64 | MessageDataType::Float64 => 8,
+                    MessageDataType::UInt128| MessageDataType::Int128                           => 16,
+                    MessageDataType::String | MessageDataType::Hex                               => 1,
+                };
+                let elems = MESSAGE_ELEMENTS[ty as usize].max(1);
+                core::cmp::max(1, w * elems)
+            }
+        }
+    }
+
     #[test]
     fn packet_validate_rejects_empty_endpoints_and_size_mismatch() {
         let ty = DataType::GpsData;
-        let need = message_meta(ty).data_size;
+        let need = concrete_len_for_test(ty);
 
-        let err =
-            TelemetryPacket::new(ty, &[], "x", 0, Arc::<[u8]>::from(vec![0u8; need])).unwrap_err();
+        let err = TelemetryPacket::new(
+            ty,
+            &[],
+            "x",
+            0,
+            Arc::<[u8]>::from(vec![0u8; need]),
+        )
+            .unwrap_err();
         assert!(matches!(err, TelemetryError::EmptyEndpoints));
 
+        // +1 ensures mismatch for both static and dynamic (not a multiple of element width)
         let err = TelemetryPacket::new(
             ty,
             &[DataEndpoint::SdCard],
@@ -1194,7 +1244,7 @@ mod tests_more {
             0,
             Arc::<[u8]>::from(vec![0u8; need + 1]),
         )
-        .unwrap_err();
+            .unwrap_err();
         assert!(matches!(err, TelemetryError::SizeMismatch { .. }));
     }
 
