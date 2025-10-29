@@ -14,7 +14,7 @@ use crate::{
     TelemetryResult,
 };
 
-use crate::config::MAX_STRING_LENGTH;
+use crate::config::{MessageDataType, MAX_STRING_LENGTH, MESSAGE_DATA_TYPES};
 use crate::serialize::peek_envelope;
 use alloc::{boxed::Box, string::String, sync::Arc, vec, vec::Vec};
 use core::{ffi::c_char, ffi::c_void, mem::size_of, ptr, slice, str::from_utf8};
@@ -77,8 +77,8 @@ fn ok_or_status(r: TelemetryResult<()>) -> i32 {
 
 #[inline(always)]
 fn expected_payload_size_for(ty: DataType) -> Option<usize> {
-    match ty {
-        DataType::MessageData => Some(MAX_STRING_LENGTH),
+    match MESSAGE_DATA_TYPES[ty as usize] {
+        MessageDataType::String => Some(MAX_STRING_LENGTH),
         _ => None,
     }
 }
