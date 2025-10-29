@@ -129,6 +129,7 @@ impl DataType {
     pub const COUNT: usize = (MAX_VALUE_DATA_TYPE + 1) as usize;
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub enum MessageSizeType {
     Static(usize),
