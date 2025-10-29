@@ -86,20 +86,40 @@ mod telemetry_packet;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 #[allow(dead_code)]
 pub enum MessageDataType {
+    Float64,
     Float32,
     UInt8,
+    UInt16,
     UInt32,
+    UInt64,
+    UInt128,
+    Int8,
+    Int16,
+    Int32,
+    Int64,
+    Int128,
+    Bool,
     String,
     Hex,
 }
 #[inline(always)]
 pub const fn data_type_size(dt: MessageDataType) -> usize {
     match dt {
+        MessageDataType::Float64 => size_of::<f64>(),
         MessageDataType::Float32 => size_of::<f32>(),
-        MessageDataType::UInt8 => size_of::<u8>(),
-        MessageDataType::UInt32 => size_of::<u32>(),
-        MessageDataType::String => MAX_STRING_LENGTH,
-        MessageDataType::Hex => MAX_HEX_LENGTH,
+        MessageDataType::UInt8   => size_of::<u8>(),
+        MessageDataType::UInt16  => size_of::<u16>(),
+        MessageDataType::UInt32  => size_of::<u32>(),
+        MessageDataType::UInt64  => size_of::<u64>(),
+        MessageDataType::UInt128 => size_of::<u128>(),
+        MessageDataType::Int8    => size_of::<i8>(),
+        MessageDataType::Int16   => size_of::<i16>(),
+        MessageDataType::Int32   => size_of::<i32>(),
+        MessageDataType::Int64   => size_of::<i64>(),
+        MessageDataType::Int128 => size_of::<i128>(),
+        MessageDataType::Bool    => size_of::<bool>(),
+        MessageDataType::String  => MAX_STRING_LENGTH,
+        MessageDataType::Hex     => MAX_HEX_LENGTH,
     }
 }
 

@@ -204,14 +204,36 @@ impl TelemetryPacket {
         }
 
         match get_data_type(self.ty) {
+            MessageDataType::Float64 => {
+                let mut it = self.payload.chunks_exact(8).peekable();
+                while let Some(chunk) = it.next() {
+                    let v = f64::from_le_bytes(chunk.try_into().unwrap());
+                    let _ = write!(s, "{v:.prec$}", prec = MAX_PRECISION);
+                    if it.peek().is_some() { s.push_str(", "); }
+                }
+            }
             MessageDataType::Float32 => {
                 let mut it = self.payload.chunks_exact(4).peekable();
                 while let Some(chunk) = it.next() {
                     let v = f32::from_le_bytes(chunk.try_into().unwrap());
                     let _ = write!(s, "{v:.prec$}", prec = MAX_PRECISION);
-                    if it.peek().is_some() {
-                        s.push_str(", ");
-                    }
+                    if it.peek().is_some() { s.push_str(", "); }
+                }
+            }
+            MessageDataType::UInt128 => {
+                let mut it = self.payload.chunks_exact(16).peekable();
+                while let Some(chunk) = it.next() {
+                    let v = u128::from_le_bytes(chunk.try_into().unwrap());
+                    let _ = write!(s, "{v}");
+                    if it.peek().is_some() { s.push_str(", "); }
+                }
+            }
+            MessageDataType::UInt64 => {
+                let mut it = self.payload.chunks_exact(8).peekable();
+                while let Some(chunk) = it.next() {
+                    let v = u64::from_le_bytes(chunk.try_into().unwrap());
+                    let _ = write!(s, "{v}");
+                    if it.peek().is_some() { s.push_str(", "); }
                 }
             }
             MessageDataType::UInt32 => {
@@ -219,18 +241,70 @@ impl TelemetryPacket {
                 while let Some(chunk) = it.next() {
                     let v = u32::from_le_bytes(chunk.try_into().unwrap());
                     let _ = write!(s, "{v}");
-                    if it.peek().is_some() {
-                        s.push_str(", ");
-                    }
+                    if it.peek().is_some() { s.push_str(", "); }
+                }
+            }
+            MessageDataType::UInt16 => {
+                let mut it = self.payload.chunks_exact(2).peekable();
+                while let Some(chunk) = it.next() {
+                    let v = u16::from_le_bytes(chunk.try_into().unwrap());
+                    let _ = write!(s, "{v}");
+                    if it.peek().is_some() { s.push_str(", "); }
                 }
             }
             MessageDataType::UInt8 => {
                 let mut it = self.payload.iter().peekable();
                 while let Some(b) = it.next() {
                     let _ = write!(s, "{}", *b);
-                    if it.peek().is_some() {
-                        s.push_str(", ");
-                    }
+                    if it.peek().is_some() { s.push_str(", "); }
+                }
+            }
+            MessageDataType::Int128 => {
+                let mut it = self.payload.chunks_exact(16).peekable();
+                while let Some(chunk) = it.next() {
+                    let v = i128::from_le_bytes(chunk.try_into().unwrap());
+                    let _ = write!(s, "{v}");
+                    if it.peek().is_some() { s.push_str(", "); }
+                }
+            }
+            MessageDataType::Int64 => {
+                let mut it = self.payload.chunks_exact(8).peekable();
+                while let Some(chunk) = it.next() {
+                    let v = i64::from_le_bytes(chunk.try_into().unwrap());
+                    let _ = write!(s, "{v}");
+                    if it.peek().is_some() { s.push_str(", "); }
+                }
+            }
+            MessageDataType::Int32 => {
+                let mut it = self.payload.chunks_exact(4).peekable();
+                while let Some(chunk) = it.next() {
+                    let v = i32::from_le_bytes(chunk.try_into().unwrap());
+                    let _ = write!(s, "{v}");
+                    if it.peek().is_some() { s.push_str(", "); }
+                }
+            }
+            MessageDataType::Int16 => {
+                let mut it = self.payload.chunks_exact(2).peekable();
+                while let Some(chunk) = it.next() {
+                    let v = i16::from_le_bytes(chunk.try_into().unwrap());
+                    let _ = write!(s, "{v}");
+                    if it.peek().is_some() { s.push_str(", "); }
+                }
+            }
+            MessageDataType::Int8 => {
+                let mut it = self.payload.iter().copied().peekable();
+                while let Some(b) = it.next() {
+                    let v = b as i8;
+                    let _ = write!(s, "{v}");
+                    if it.peek().is_some() { s.push_str(", "); }
+                }
+            }
+            MessageDataType::Bool => {
+                // Interpret any nonzero as true
+                let mut it = self.payload.iter().peekable();
+                while let Some(b) = it.next() {
+                    let _ = write!(s, "{}", (*b != 0));
+                    if it.peek().is_some() { s.push_str(", "); }
                 }
             }
             MessageDataType::String => { /* handled above */ }
