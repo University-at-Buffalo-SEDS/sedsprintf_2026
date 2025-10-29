@@ -54,7 +54,6 @@ pub struct SedsOwnedHeader {
     timestamp: u64,
 }
 
-#[inline(always)]
 fn status_from_result_code(e: SedsResult) -> i32 {
     match e {
         SedsResult::SedsOk => 0,
@@ -62,12 +61,10 @@ fn status_from_result_code(e: SedsResult) -> i32 {
     }
 }
 
-#[inline(always)]
 fn status_from_err(e: TelemetryError) -> i32 {
     e.to_error_code() as i32
 }
 
-#[inline(always)]
 fn ok_or_status(r: TelemetryResult<()>) -> i32 {
     match r {
         Ok(()) => status_from_result_code(SedsResult::SedsOk),
@@ -75,7 +72,6 @@ fn ok_or_status(r: TelemetryResult<()>) -> i32 {
     }
 }
 
-#[inline(always)]
 fn expected_payload_size_for(ty: DataType) -> Option<usize> {
     match get_data_type(ty) {
         MessageDataType::String => Some(MAX_STRING_LENGTH),
@@ -83,7 +79,6 @@ fn expected_payload_size_for(ty: DataType) -> Option<usize> {
     }
 }
 
-#[inline(always)]
 fn opt_ts(ts_ptr: *const u64) -> Option<u64> {
     if ts_ptr.is_null() {
         None
@@ -92,18 +87,15 @@ fn opt_ts(ts_ptr: *const u64) -> Option<u64> {
     }
 }
 
-#[inline(always)]
 fn dtype_from_u32(x: u32) -> TelemetryResult<DataType> {
     DataType::try_from_u32(x).ok_or(TelemetryError::InvalidType)
 }
 
-#[inline(always)]
 fn endpoint_from_u32(x: u32) -> TelemetryResult<DataEndpoint> {
     DataEndpoint::try_from_u32(x).ok_or(TelemetryError::Deserialize("bad endpoint"))
 }
 
 // Unified helper to dispatch queue vs. immediate and optional timestamp.
-#[inline(always)]
 fn call_log_or_queue<T: LeBytes>(
     router: *mut SedsRouter,
     ty: DataType,
@@ -128,7 +120,6 @@ fn call_log_or_queue<T: LeBytes>(
     }
 }
 
-#[inline(always)]
 fn finish_with<T: LeBytes + Copy>(
     r: *mut SedsRouter,
     ty: DataType,
@@ -387,7 +378,6 @@ struct FfiClock {
 }
 
 impl Clock for FfiClock {
-    #[inline(always)]
     fn now_ms(&self) -> u64 {
         if let Some(f) = self.cb {
             f(self.user_addr as *mut c_void)

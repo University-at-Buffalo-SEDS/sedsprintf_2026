@@ -31,11 +31,10 @@ pub fn peek_envelope(bytes: &[u8]) -> TelemetryResult<TelemetryEnvelope> {
     deserialize_packet_header_only(bytes)
 }
 
-#[inline]
+#[inline(always)]
 pub const fn header_size_bytes() -> usize {
     TYPE_SIZE + DATA_SIZE_SIZE + TIME_SIZE + SENDER_LEN_SIZE + NUM_ENDPOINTS_SIZE
 }
-#[inline]
 pub fn packet_wire_size(pkt: &TelemetryPacket) -> usize {
     // header + endpoints + sender bytes + payload
     header_size_bytes()
@@ -45,14 +44,12 @@ pub fn packet_wire_size(pkt: &TelemetryPacket) -> usize {
 }
 
 /// Build the wire image for a packet. Immutable and shareable.
-#[inline]
 pub fn serialize_packet(pkt: &TelemetryPacket) -> Arc<[u8]> {
     let mut out = Vec::with_capacity(packet_wire_size(pkt));
     serialize_packet_into(pkt, &mut out);
     Arc::<[u8]>::from(out)
 }
 
-#[inline]
 pub fn serialize_packet_into(pkt: &TelemetryPacket, out: &mut Vec<u8>) {
     let need = packet_wire_size(pkt);
     out.clear();
@@ -82,7 +79,6 @@ pub fn serialize_packet_into(pkt: &TelemetryPacket, out: &mut Vec<u8>) {
     debug_assert_eq!(out.len(), need);
 }
 
-#[inline(always)]
 fn get_eps(
     eps: &mut Vec<DataEndpoint>,
     nep: usize,
@@ -201,11 +197,9 @@ impl<'a> ByteReader<'a> {
     pub fn new(buf: &'a [u8]) -> Self {
         Self { buf, off: 0 }
     }
-    #[inline(always)]
     pub fn remaining(&self) -> usize {
         self.buf.len().saturating_sub(self.off)
     }
-    #[inline(always)]
     pub fn read_bytes(&mut self, n: usize) -> Result<&'a [u8], TelemetryError> {
         if self.remaining() < n {
             return Err(TelemetryError::Deserialize("short read"));
@@ -214,12 +208,10 @@ impl<'a> ByteReader<'a> {
         self.off += n;
         Ok(s)
     }
-    #[inline(always)]
     pub fn read_u32(&mut self) -> Result<u32, TelemetryError> {
         let b = self.read_bytes(4)?;
         Ok(u32::from_le_bytes(b.try_into().unwrap()))
     }
-    #[inline(always)]
     pub fn read_u64(&mut self) -> Result<u64, TelemetryError> {
         let b = self.read_bytes(8)?;
         Ok(u64::from_le_bytes(b.try_into().unwrap()))

@@ -17,7 +17,6 @@ pub enum DataEndpoint {
 pub const MAX_VALUE_DATA_ENDPOINT: u32 = DataEndpoint::Radio as u32;
 
 impl DataEndpoint {
-    #[inline]
     pub fn as_str(self) -> &'static str {
         match self {
             DataEndpoint::SdCard => "SD_CARD",
@@ -46,7 +45,6 @@ pub enum DataType {
 pub const MAX_VALUE_DATA_TYPE: u32 = DataType::MessageData as u32;
 
 impl DataType {
-    #[inline]
     pub fn as_str(&self) -> &'static str {
         match self {
             DataType::TelemetryError => "TELEMETRY_ERROR",
