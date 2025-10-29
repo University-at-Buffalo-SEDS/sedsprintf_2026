@@ -2,6 +2,7 @@
 #[allow(dead_code)]
 use core::mem::size_of;
 
+
 #[allow(dead_code)]
 pub const STRING_VALUE_ELEMENTS: usize = 1;
 
@@ -164,15 +165,22 @@ pub struct MessageMeta {
     pub endpoints: &'static [DataEndpoint],
 }
 
-#[inline]
+#[inline(always)]
 pub fn message_meta(ty: DataType) -> &'static MessageMeta {
     &MESSAGE_TYPES[ty as usize]
 }
 
+#[inline(always)]
 pub const fn get_needed_message_size(ty: DataType) -> usize {
-    data_type_size(MESSAGE_DATA_TYPES[ty as usize]) * MESSAGE_ELEMENTS[ty as usize]
+    data_type_size(get_data_type(ty)) * MESSAGE_ELEMENTS[ty as usize]
 }
 
+#[inline(always)]
 pub const fn get_info_type(ty: DataType) -> MessageType {
     MESSAGE_INFO_TYPES[ty as usize]
+}
+
+#[inline(always)]
+pub const fn get_data_type(ty: DataType) -> MessageDataType {
+    MESSAGE_DATA_TYPES[ty as usize]
 }
