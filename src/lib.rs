@@ -131,48 +131,6 @@ pub const fn data_type_size(dt: MessageDataType) -> usize {
     }
 }
 
-impl MessageDataType {
-    #[inline]
-    pub const fn width(self) -> usize {
-        match self {
-            MessageDataType::Float64
-            | MessageDataType::UInt64
-            | MessageDataType::Int64
-            | MessageDataType::Float32
-            | MessageDataType::UInt32
-            | MessageDataType::Int32
-            | MessageDataType::UInt16
-            | MessageDataType::Int16
-            | MessageDataType::UInt128
-            | MessageDataType::Int128
-            | MessageDataType::UInt8
-            | MessageDataType::Int8 => data_type_size(self),
-
-            MessageDataType::Bool | MessageDataType::String | MessageDataType::Hex => 1,
-        }
-    }
-
-    #[inline]
-    pub const fn kind(self) -> NumKind {
-        match self {
-            MessageDataType::Float32 | MessageDataType::Float64 => NumKind::Float,
-            MessageDataType::UInt8
-            | MessageDataType::UInt16
-            | MessageDataType::UInt32
-            | MessageDataType::UInt64
-            | MessageDataType::UInt128 => NumKind::Unsigned,
-            MessageDataType::Int8
-            | MessageDataType::Int16
-            | MessageDataType::Int32
-            | MessageDataType::Int64
-            | MessageDataType::Int128 => NumKind::Signed,
-            MessageDataType::Bool => NumKind::Bool,
-            MessageDataType::String => NumKind::String,
-            MessageDataType::Hex => NumKind::Hex,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 #[allow(dead_code)]
 pub enum MessageType {
