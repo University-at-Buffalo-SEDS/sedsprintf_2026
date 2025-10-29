@@ -1,11 +1,10 @@
 // src/config.rs
 use crate::{data_type_size, MessageDataType, MessageType};
 
-
 //----------------------User Editable----------------------
 pub const DEVICE_IDENTIFIER: &str = "TEST_PLATFORM";
-pub const MAX_STRING_LENGTH: usize = 1024;
-pub const MAX_HEX_LENGTH: usize = 1024;
+pub const MAX_STATIC_STRING_LENGTH: usize = 1024;
+pub const MAX_STATIC_HEX_LENGTH: usize = 1024;
 
 pub const MAX_PRECISION_IN_STRINGS: usize = 8; // 12 is expensive; tune as needed
 
@@ -93,31 +92,31 @@ pub const MESSAGE_ELEMENTS: [usize; DataType::COUNT] = [
 /// All message types with their metadata.
 pub const MESSAGE_TYPES: [MessageMeta; DataType::COUNT] = [
     MessageMeta {
-        data_size: get_needed_message_size(DataType::TelemetryError),
+        data_size: MessageSizeType::Dynamic,
         endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
     },
     MessageMeta {
-        data_size: get_needed_message_size(DataType::GpsData),
+        data_size: MessageSizeType::Static(get_needed_message_size(DataType::GpsData)),
         endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
     },
     MessageMeta {
-        data_size: get_needed_message_size(DataType::ImuData),
+        data_size: MessageSizeType::Static(get_needed_message_size(DataType::ImuData)),
         endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
     },
     MessageMeta {
-        data_size: get_needed_message_size(DataType::BatteryStatus),
+        data_size: MessageSizeType::Static(get_needed_message_size(DataType::BatteryStatus)),
         endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
     },
     MessageMeta {
-        data_size: get_needed_message_size(DataType::SystemStatus),
+        data_size: MessageSizeType::Static(get_needed_message_size(DataType::SystemStatus)),
         endpoints: &[DataEndpoint::SdCard],
     },
     MessageMeta {
-        data_size: get_needed_message_size(DataType::BarometerData),
+        data_size: MessageSizeType::Static(get_needed_message_size(DataType::BarometerData)),
         endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
     },
     MessageMeta {
-        data_size: get_needed_message_size(DataType::MessageData),
+        data_size: MessageSizeType::Dynamic,
         endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
     },
 ];
@@ -129,9 +128,16 @@ pub const STRING_VALUE_ELEMENTS: usize = 1;
 impl DataType {
     pub const COUNT: usize = (MAX_VALUE_DATA_TYPE + 1) as usize;
 }
-#[derive(Debug, Clone, Copy)]
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub enum MessageSizeType {
+    Static(usize),
+    Dynamic,
+
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct MessageMeta {
-    pub data_size: usize,
+    pub data_size: MessageSizeType,
     pub endpoints: &'static [DataEndpoint],
 }
 

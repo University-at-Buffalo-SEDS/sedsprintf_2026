@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 
-use crate::config::DEVICE_IDENTIFIER;
+use crate::config::{MessageSizeType, DEVICE_IDENTIFIER};
 use crate::{
     config::{message_meta, DataEndpoint, DataType}, impl_letype_num,
     serialize,
@@ -93,6 +93,18 @@ pub(crate) fn encode_slice_le<T: LeBytes>(data: &[T]) -> Arc<[u8]> {
     Arc::<[u8]>::from(buf)
 }
 
+fn make_error_vec() -> Vec<u8> {
+    let meta = message_meta(DataType::TelemetryError);
+    match meta.data_size {
+        MessageSizeType::Static(n) => {
+            alloc::vec![0u8; n]
+        }
+        MessageSizeType::Dynamic => {
+            alloc::vec![0u8]
+        }
+    }
+}
+
 fn log_raw<T, F>(
     sender: Arc<str>,
     ty: DataType,
@@ -106,14 +118,28 @@ where
 {
     let meta = message_meta(ty);
     let got = data.len() * T::WIDTH;
-    if got != meta.data_size {
-        return Err(TelemetryError::SizeMismatch {
-            expected: meta.data_size,
-            got,
-        });
-    }
-    let payload_vec = encode_slice_le(data);
 
+    match meta.data_size {
+        MessageSizeType::Static(need) => {
+            if got != need {
+                return Err(TelemetryError::SizeMismatch {
+                    expected: need,
+                    got,
+                });
+            }
+        }
+        MessageSizeType::Dynamic => {
+            // For dynamic numeric/bool payloads, require length to be a multiple of element width.
+            if got % T::WIDTH != 0 {
+                return Err(TelemetryError::SizeMismatch {
+                    expected: T::WIDTH, // “per-element” width
+                    got,
+                });
+            }
+        }
+    }
+
+    let payload_vec = encode_slice_le(data);
     let pkt = TelemetryPacket::new(
         ty,
         &meta.endpoints,
@@ -207,9 +233,9 @@ impl Router {
             return Ok(());
         }
 
-        let meta = message_meta(DataType::TelemetryError);
-        let mut buf = alloc::vec![0u8; meta.data_size];
+        let mut buf = make_error_vec();
         let msg_bytes = error_msg.as_bytes();
+        buf.resize(msg_bytes.len(), 0);
         let n = core::cmp::min(buf.len(), msg_bytes.len());
         if n > 0 {
             buf[..n].copy_from_slice(&msg_bytes[..n]);
@@ -409,7 +435,6 @@ impl Router {
             }
         }
     }
-
     /// Error helper when we only have an envelope (no full packet).
     fn handle_callback_error_from_env(
         &self,
@@ -442,9 +467,10 @@ impl Router {
             return Ok(());
         }
 
-        let meta = message_meta(DataType::TelemetryError);
-        let mut buf = alloc::vec![0u8; meta.data_size];
+        let mut buf = make_error_vec();
+
         let msg_bytes = error_msg.as_bytes();
+        buf.resize(msg_bytes.len(), 0);
         let n = core::cmp::min(buf.len(), msg_bytes.len());
         if n > 0 {
             buf[..n].copy_from_slice(&msg_bytes[..n]);
