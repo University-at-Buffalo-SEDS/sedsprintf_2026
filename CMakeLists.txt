@@ -8,8 +8,8 @@ get_filename_component(RUST_DIR "${SEDSPRINTF_RS_DIR}" REALPATH)
 option(SEDSPRINTF_STM_BUILD "Build sedsprintf_rs for STM32 (thumbv7em)" OFF)
 set(SEDSPRINTF_STM_BUILD OFF)
 if (CMAKE_C_COMPILER MATCHES "arm-none-eabi"
-    OR CMAKE_TOOLCHAIN_FILE MATCHES "stm32"
-    OR DEFINED ENV{STM32CUBEIDE_DIR}
+        OR CMAKE_TOOLCHAIN_FILE MATCHES "stm32"
+        OR DEFINED ENV{STM32CUBEIDE_DIR}
 )
     set(SEDSPRINTF_STM_BUILD ON)
 endif ()
@@ -27,8 +27,8 @@ set(RUST_TRIPLE "${SEDSPRINTF_RS_TRIPLE}")
 set(RUST_PROFILE "$<IF:$<CONFIG:Debug>,debug,release>")
 set(RS_LIB_DBG "${RUST_DIR}/target/${RUST_TRIPLE}debug/libsedsprintf_rs.a")
 set(RS_LIB_REL "${RUST_DIR}/target/${RUST_TRIPLE}release/libsedsprintf_rs.a")
-set(RS_INCLUDE   "${RUST_DIR}/C-Headers")
-set(RS_HEADER    "${RS_INCLUDE}/sedsprintf.h")
+set(RS_INCLUDE "${RUST_DIR}/C-Headers")
+set(RS_HEADER "${RS_INCLUDE}/sedsprintf.h")
 
 set(RS_ARG_REL " $<$<CONFIG:Release>:release>")
 set(RS_ARGS_STR "${RS_ARGS_STR} ${RS_ARG_REL}")
@@ -45,45 +45,45 @@ file(MAKE_DIRECTORY "${RS_INCLUDE}")
 if (NOT EXISTS "${RS_HEADER}")
     message(STATUS "sedsprintf_rs: header not found (${RS_HEADER}); attempting to build once to generate it…")
     execute_process(
-        COMMAND bash -lc "./build.sh ${RS_ARGS_STR}"
-        WORKING_DIRECTORY "${RUST_DIR}"
-        RESULT_VARIABLE _hdr_build_res
+            COMMAND bash -lc "./build.sh ${RS_ARGS_STR}"
+            WORKING_DIRECTORY "${RUST_DIR}"
+            RESULT_VARIABLE _hdr_build_res
     )
     if (NOT _hdr_build_res EQUAL 0)
         message(WARNING "Initial build to generate header failed (exit ${_hdr_build_res}); will rely on custom build step.")
-    endif()
-endif()
+    endif ()
+endif ()
 
 # Track inputs
 file(GLOB_RECURSE RS_SRC CONFIGURE_DEPENDS
-    "${RUST_DIR}/src/*.rs"
-    "${RUST_DIR}/build.rs"
-    "${RUST_DIR}/Cargo.toml"
-    "${RUST_DIR}/Cargo.lock"
+        "${RUST_DIR}/src/*.rs"
+        "${RUST_DIR}/build.rs"
+        "${RUST_DIR}/Cargo.toml"
+        "${RUST_DIR}/Cargo.lock"
 )
 
 # Build rule: produce libs AND the header (so missing header triggers build)
 add_custom_command(
-    OUTPUT
+        OUTPUT
         "${RS_LIB_DBG}" "${RS_LIB_REL}" "${RS_HEADER}"   # <— include header as an output
-    COMMAND ${CMAKE_COMMAND} -E chdir "${RUST_DIR}" bash -lc "./build.sh ${RS_ARGS_STR}"
-    DEPENDS ${RS_SRC}
-    COMMENT "Building sedsprintf_rs (${RUST_PROFILE}) for ${RUST_TRIPLE}"
-    USES_TERMINAL
-    VERBATIM
+        COMMAND ${CMAKE_COMMAND} -E chdir "${RUST_DIR}" bash -lc "./build.sh ${RS_ARGS_STR}"
+        DEPENDS ${RS_SRC}
+        COMMENT "Building sedsprintf_rs (${RUST_PROFILE}) for ${RUST_TRIPLE}"
+        USES_TERMINAL
+        VERBATIM
 )
 
 add_custom_target(sedsprintf_rs_build
-    DEPENDS
+        DEPENDS
         "${RS_LIB_DBG}" "${RS_LIB_REL}" "${RS_HEADER}"
 )
 
 # Imported library the C/C++ links against
 add_library(sedsprintf_rs STATIC IMPORTED GLOBAL)
 set_target_properties(sedsprintf_rs PROPERTIES
-    IMPORTED_LOCATION_DEBUG   "${RS_LIB_DBG}"
-    IMPORTED_LOCATION_RELEASE "${RS_LIB_REL}"
-    INTERFACE_INCLUDE_DIRECTORIES "${RS_INCLUDE}"
+        IMPORTED_LOCATION_DEBUG "${RS_LIB_DBG}"
+        IMPORTED_LOCATION_RELEASE "${RS_LIB_REL}"
+        INTERFACE_INCLUDE_DIRECTORIES "${RS_INCLUDE}"
 )
 add_dependencies(sedsprintf_rs sedsprintf_rs_build)
 
@@ -101,7 +101,7 @@ add_compile_options(-ffunction-sections -fdata-sections -Os)
 add_link_options(-Wl,--gc-sections -Wl,--icf=all)
 
 add_library(sedsprintf_rs::sedsprintf_rs ALIAS sedsprintf_rs)
-set(SEDSPRINTF_RS_LIB_DEBUG   "${RS_LIB_DBG}" PARENT_SCOPE)
+set(SEDSPRINTF_RS_LIB_DEBUG "${RS_LIB_DBG}" PARENT_SCOPE)
 set(SEDSPRINTF_RS_LIB_RELEASE "${RS_LIB_REL}" PARENT_SCOPE)
 set(SEDSPRINTF_RS_INCLUDE_DIR "${RS_INCLUDE}" PARENT_SCOPE)
 
