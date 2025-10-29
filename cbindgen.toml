@@ -1,6 +1,6 @@
 language = "C"
 no_includes = true
-style = "both"            # <— important: emits `typedef enum Name { … } Name;`
+style = "both"
 
 [parse]
 parse_deps = false

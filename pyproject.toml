@@ -5,23 +5,19 @@ build-backend = "maturin"
 [project]
 name = "sedsprintf_rs"
 version = "0.1.0"
-description = "Rust + PyO3 telemetry/serialization library"
+description = "Rust telemetry/serialization library"
 authors = [{ name = "Rylan Meilutis", email = "rylan.meilutis@gmail.com" }]
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.8"
 
-# maturin automatically detects the extension module, so you don’t list packages here.
-# The .pyi file will sit alongside the compiled extension in the wheel.
 
 [tool.maturin]
-# Tell maturin to include additional files (stubs, type markers, etc.)
 include = [
     "python-files/sedsprintf_rs.pyi",
     "python-files/py.typed"
 ]
-bindings = "pyo3"  # ensures maturin treats this as a PyO3 extension crate
-features = ["python"]  # enable the Python feature when building with maturin
+bindings = "pyo3"
+features = ["python"]
 
-# Optional but recommended to make sure the crate is built as cdylib for Python
-compatibility = "manylinux2014"  # safe default for Linux wheels
+compatibility = "manylinux2014"

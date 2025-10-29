@@ -7,7 +7,6 @@ pub use crate::config::{get_info_type, message_meta, DataEndpoint, DataType, DEV
 use crate::{MessageDataType, MessageType, TelemetryError, TelemetryResult};
 use alloc::{string::String, string::ToString, sync::Arc, vec::Vec};
 use core::{convert::TryInto, fmt::Write};
-use time::OffsetDateTime;
 
 
 const EPOCH_MS_THRESHOLD: u64 = 1_000_000_000_000; // clearly not an uptime counter
@@ -142,10 +141,8 @@ impl TelemetryPacket {
 
     /// Header line without data payload.
     pub fn header_string(&self) -> String {
-        // Rough capacity guess: adjust if you want
         let mut out = String::with_capacity(96);
 
-        // Type/Size/Sender prefix
         let _ = write!(
             &mut out,
             "Type: {}, Size: {}, Sender: {}, Endpoints: [",
@@ -153,54 +150,15 @@ impl TelemetryPacket {
             self.data_size,
             self.sender.as_ref(),
         );
-
-        // Endpoints list
         for (i, ep) in self.endpoints.iter().enumerate() {
-            if i != 0 {
-                out.push_str(", ");
-            }
+            if i != 0 { out.push_str(", "); }
             out.push_str(ep.as_str());
         }
         out.push_str("], Timestamp: ");
         let _ = write!(&mut out, "{}", self.timestamp);
 
-        // Human time
         out.push_str(" (");
-        let total_ms = self.timestamp;
-        if total_ms >= EPOCH_MS_THRESHOLD {
-            let secs = (total_ms / 1_000) as i64;
-            let sub_ms = (total_ms % 1_000) as u32;
-            if let Ok(dt) = OffsetDateTime::from_unix_timestamp(secs) {
-                let _ = write!(
-                    &mut out,
-                    "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03}Z",
-                    dt.year(),
-                    dt.month() as u8,
-                    dt.day(),
-                    dt.hour(),
-                    dt.minute(),
-                    dt.second(),
-                    sub_ms
-                );
-            } else {
-                let _ = write!(&mut out, "Invalid epoch ({})", total_ms);
-            }
-        } else {
-            let hours = total_ms / 3_600_000;
-            let minutes = (total_ms % 3_600_000) / 60_000;
-            let seconds = (total_ms % 60_000) / 1_000;
-            let milliseconds = total_ms % 1_000;
-            if hours > 0 {
-                let _ = write!(
-                    &mut out,
-                    "{hours}h {minutes:02}m {seconds:02}s {milliseconds:03}ms"
-                );
-            } else if minutes > 0 {
-                let _ = write!(&mut out, "{minutes}m {seconds:02}s {milliseconds:03}ms");
-            } else {
-                let _ = write!(&mut out, "{seconds}s {milliseconds:03}ms");
-            }
-        }
+        append_human_time(&mut out, self.timestamp);
         out.push(')');
         out
     }
@@ -295,6 +253,69 @@ impl TelemetryPacket {
             }
         }
         s
+    }
+}
+// --- drop `use time::OffsetDateTime;` ---
+// core-only UTC conversion, ~0 deps, small code size
+
+#[inline]
+fn div_mod_u64(n: u64, d: u64) -> (u64, u64) {
+    (n / d, n % d)
+}
+
+// Howard Hinnant–style civil-from-days (proleptic Gregorian)
+#[inline]
+fn civil_from_days(mut z: i64) -> (i32, u32, u32) {
+    // epoch (1970-01-01) has days=0
+    z += 719468; // shift to civil base
+    let era = (if z >= 0 { z } else { z - 146096 }) / 146097;
+    let doe = z - era * 146097;                        // [0, 146096]
+    let yoe = (doe - doe/1460 + doe/36524 - doe/146096) / 365; // [0, 399]
+    let y = (yoe as i32) + era as i32 * 400;
+    let doy = (doe - (365*yoe + yoe/4 - yoe/100)) as i32;      // [0, 365]
+    let mp = (5*doy + 2) / 153;                         // [0, 11]
+    let d = doy - (153*mp + 2)/5 + 1;                   // [1, 31]
+    let m = mp + if mp < 10 { 3 } else { -9 };          // [1, 12]
+    let y = y + (m <= 2) as i32;                        // year
+    (y, m as u32, d as u32)
+}
+
+/// Append a human-readable timestamp to `out`, either uptime (hh:mm:ss.mmm)
+/// or UTC epoch like `YYYY-MM-DD HH:MM:SS.mmmZ`, depending on threshold.
+fn append_human_time(out: &mut String, total_ms: u64) {
+    if total_ms >= EPOCH_MS_THRESHOLD {
+        // Unix epoch path
+        let (secs, sub_ms) = div_mod_u64(total_ms, 1_000);
+        let days = (secs / 86_400) as i64;
+        let sod  = (secs % 86_400) as u32; // seconds of day
+        let (year, month, day) = civil_from_days(days);
+        let hour =  sod / 3600;
+        let min  = (sod % 3600) / 60;
+        let sec  =  sod % 60;
+        let _ = Write::write_fmt(
+            out,
+            format_args!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03}Z",
+                         year, month, day, hour, min, sec, sub_ms as u32)
+        );
+    } else {
+        // Uptime path (your original pretty format)
+        let hours = total_ms / 3_600_000;
+        let minutes = (total_ms % 3_600_000) / 60_000;
+        let seconds = (total_ms % 60_000) / 1_000;
+        let milliseconds = total_ms % 1_000;
+        if hours > 0 {
+            let _ = Write::write_fmt(
+                out, format_args!("{hours}h {minutes:02}m {seconds:02}s {milliseconds:03}ms")
+            );
+        } else if minutes > 0 {
+            let _ = Write::write_fmt(
+                out, format_args!("{minutes}m {seconds:02}s {milliseconds:03}ms")
+            );
+        } else {
+            let _ = Write::write_fmt(
+                out, format_args!("{seconds}s {milliseconds:03}ms")
+            );
+        }
     }
 }
 
