@@ -16,6 +16,7 @@ extern crate core;
 extern crate std;
 
 
+use crate::config::{MAX_HEX_LENGTH, MAX_STRING_LENGTH};
 use crate::macros::{ReprI32Enum, ReprU32Enum};
 
 
@@ -93,6 +94,16 @@ pub enum MessageDataType {
     UInt32,
     String,
     Hex,
+}
+#[inline(always)]
+pub const fn data_type_size(dt: MessageDataType) -> usize {
+    match dt {
+        MessageDataType::Float32 => size_of::<f32>(),
+        MessageDataType::UInt8 => size_of::<u8>(),
+        MessageDataType::UInt32 => size_of::<u32>(),
+        MessageDataType::String => MAX_STRING_LENGTH,
+        MessageDataType::Hex => MAX_HEX_LENGTH,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
