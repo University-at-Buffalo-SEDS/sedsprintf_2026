@@ -2,7 +2,7 @@
 #[allow(dead_code)]
 use core::mem::size_of;
 
-
+#[allow(dead_code)]
 pub const STRING_VALUE_ELEMENTS: usize = 1;
 
 //----------------------User Editable----------------------
