@@ -1,7 +1,4 @@
 // src/py_api.rs
-#![allow(dead_code)]
-
-
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList, PyModule, PyTuple};
