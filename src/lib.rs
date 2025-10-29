@@ -63,16 +63,13 @@ mod embedded_alloc {
 
     #[panic_handler]
     fn panic(_info: &PanicInfo) -> ! {
-        // only available when the target dependency `cortex-m` is pulled in
-        cortex_m::asm::bkpt();
         // Halt forever after that
         loop {
-            cortex_m::asm::nop();
         }
     }
 
     // ensure cortex-m only compiles on embedded
-    use cortex_m as _;
+    // use cortex_m as _;
 }
 
 // For HOST builds (std is ON), the system allocator is used automatically.
