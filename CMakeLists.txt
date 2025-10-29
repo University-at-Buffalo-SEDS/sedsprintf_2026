@@ -5,19 +5,17 @@ set(SEDSPRINTF_RS_DIR_DEFAULT "${CMAKE_CURRENT_LIST_DIR}/")
 set(SEDSPRINTF_RS_DIR "${SEDSPRINTF_RS_DIR_DEFAULT}" CACHE PATH "Path to sedsprintf_rs crate root")
 get_filename_component(RUST_DIR "${SEDSPRINTF_RS_DIR}" REALPATH)
 
-# --- Decide whether we're building for STM32 (embedded) or host
 option(SEDSPRINTF_STM_BUILD "Build sedsprintf_rs for STM32 (thumbv7em)" OFF)
 set(SEDSPRINTF_STM_BUILD OFF)
 if (CMAKE_C_COMPILER MATCHES "arm-none-eabi"
-        OR CMAKE_TOOLCHAIN_FILE MATCHES "stm32"
-        OR DEFINED ENV{STM32CUBEIDE_DIR}
+    OR CMAKE_TOOLCHAIN_FILE MATCHES "stm32"
+    OR DEFINED ENV{STM32CUBEIDE_DIR}
 )
     set(SEDSPRINTF_STM_BUILD ON)
 endif ()
-# Derive a host Rust triple
+
 set(HOST_RUST_TRIPLE "")
 set(RS_ARGS_STR "")
-# Final Rust target triple
 if (SEDSPRINTF_STM_BUILD)
     set(SEDSPRINTF_RS_TRIPLE "thumbv7em-none-eabihf/" CACHE STRING "Rust target triple" FORCE)
     set(RS_ARGS_STR "${RS_ARGS_STR} stm-build")
@@ -26,73 +24,76 @@ else ()
 endif ()
 set(RUST_TRIPLE "${SEDSPRINTF_RS_TRIPLE}")
 
-# --- Derived paths
 set(RUST_PROFILE "$<IF:$<CONFIG:Debug>,debug,release>")
 set(RS_LIB_DBG "${RUST_DIR}/target/${RUST_TRIPLE}debug/libsedsprintf_rs.a")
 set(RS_LIB_REL "${RUST_DIR}/target/${RUST_TRIPLE}release/libsedsprintf_rs.a")
-set(RS_INCLUDE "${RUST_DIR}/C-Headers")
+set(RS_INCLUDE   "${RUST_DIR}/C-Headers")
+set(RS_HEADER    "${RS_INCLUDE}/sedsprintf.h")   # <— header we expect
 
 set(RS_ARG_REL " $<$<CONFIG:Release>:release>")
-
 set(RS_ARGS_STR "${RS_ARGS_STR} ${RS_ARG_REL}")
 
 if (NOT EXISTS "${RUST_DIR}/Cargo.toml")
     message(FATAL_ERROR "SEDSPRINTF_RS_DIR='${RUST_DIR}' does not contain Cargo.toml. "
             "Pass -DSEDSPRINTF_RS_DIR=/abs/path/to/sedsprintf_rs")
 endif ()
-if (NOT EXISTS "${RS_INCLUDE}")
-    message(FATAL_ERROR "Expected headers at '${RS_INCLUDE}'. "
-            "Does your crate expose C headers in C-Headers/?")
-endif ()
 
-# --- Track inputs ---
+# Ensure the include directory exists (header may be generated later)
+file(MAKE_DIRECTORY "${RS_INCLUDE}")
+
+# If the header is missing at configure time, try building once to generate it.
+if (NOT EXISTS "${RS_HEADER}")
+    message(STATUS "sedsprintf_rs: header not found (${RS_HEADER}); attempting to build once to generate it…")
+    execute_process(
+        COMMAND bash -lc "./build.sh ${RS_ARGS_STR}"
+        WORKING_DIRECTORY "${RUST_DIR}"
+        RESULT_VARIABLE _hdr_build_res
+    )
+    if (NOT _hdr_build_res EQUAL 0)
+        message(WARNING "Initial build to generate header failed (exit ${_hdr_build_res}); will rely on custom build step.")
+    endif()
+endif()
+
+# Track inputs
 file(GLOB_RECURSE RS_SRC CONFIGURE_DEPENDS
-        "${RUST_DIR}/src/*.rs"
-        "${RUST_DIR}/build.rs"
-        "${RUST_DIR}/Cargo.toml"
-        "${RUST_DIR}/Cargo.lock"
-        "${RUST_DIR}/C-Headers/*.h"
+    "${RUST_DIR}/src/*.rs"
+    "${RUST_DIR}/build.rs"
+    "${RUST_DIR}/Cargo.toml"
+    "${RUST_DIR}/Cargo.lock"
+    "${RUST_DIR}/C-Headers/*.h"
 )
 
-# --- Build rule: make the real artifacts be the OUTPUTs
+# Build rule: produce libs AND the header (so missing header triggers build)
 add_custom_command(
-        OUTPUT
-        "${RS_LIB_DBG}" "${RS_LIB_REL}"
-        COMMAND ${CMAKE_COMMAND} -E chdir "${RUST_DIR}" bash -lc "./build.sh ${RS_ARGS_STR}"
-        # Optional: ensure the directories exist (helps with first build on some shells)
-        DEPENDS ${RS_SRC}
-        COMMENT "Building sedsprintf_rs (${RUST_PROFILE}) for ${RUST_TRIPLE}"
-        USES_TERMINAL
-        VERBATIM
+    OUTPUT
+        "${RS_LIB_DBG}" "${RS_LIB_REL}" "${RS_HEADER}"   # <— include header as an output
+    COMMAND ${CMAKE_COMMAND} -E chdir "${RUST_DIR}" bash -lc "./build.sh ${RS_ARGS_STR}"
+    DEPENDS ${RS_SRC}
+    COMMENT "Building sedsprintf_rs (${RUST_PROFILE}) for ${RUST_TRIPLE}"
+    USES_TERMINAL
+    VERBATIM
 )
 
-# A target that depends on all produced files; any missing file will trigger rebuild
 add_custom_target(sedsprintf_rs_build
-        DEPENDS
-        "${RS_LIB_DBG}" "${RS_LIB_REL}"
+    DEPENDS
+        "${RS_LIB_DBG}" "${RS_LIB_REL}" "${RS_HEADER}"
 )
 
-# --- Imported lib the C/C++ links against
+# Imported library the C/C++ links against
 add_library(sedsprintf_rs STATIC IMPORTED GLOBAL)
-
 set_target_properties(sedsprintf_rs PROPERTIES
-        IMPORTED_LOCATION_DEBUG "${RS_LIB_DBG}"
-        IMPORTED_LOCATION_RELEASE "${RS_LIB_REL}"
-        INTERFACE_INCLUDE_DIRECTORIES "${RS_INCLUDE}"
+    IMPORTED_LOCATION_DEBUG   "${RS_LIB_DBG}"
+    IMPORTED_LOCATION_RELEASE "${RS_LIB_REL}"
+    INTERFACE_INCLUDE_DIRECTORIES "${RS_INCLUDE}"
 )
 add_dependencies(sedsprintf_rs sedsprintf_rs_build)
-# --- Ensure final ELF has non-exec stack even if some objs miss .note.GNU-stack
 
-# Prevent assembler from marking stack executable; force linker header to noexecstack
 include(CheckLinkerFlag)
 include(CheckCCompilerFlag)
-
 check_linker_flag(C "-Wl,-z,noexecstack" HAVE_LD_NOEXECSTACK)
 check_c_compiler_flag("-Wa,--noexecstack" HAVE_AS_NOEXECSTACK)
 
-# --- Make final ELF have non-exec stack where supported (Linux/*BSD)
 if (SEDSPRINTF_STM_BUILD)
-    # These flags are understood by GCC/Clang toolchains on ELF
     target_compile_options(sedsprintf_rs INTERFACE -Wa,--noexecstack)
     target_link_options(sedsprintf_rs INTERFACE -Wl,-z,noexecstack)
 endif ()
@@ -100,9 +101,8 @@ endif ()
 add_compile_options(-ffunction-sections -fdata-sections -Os)
 add_link_options(-Wl,--gc-sections -Wl,--icf=all)
 
-# Optional niceties
 add_library(sedsprintf_rs::sedsprintf_rs ALIAS sedsprintf_rs)
-set(SEDSPRINTF_RS_LIB_DEBUG "${RS_LIB_DBG}" PARENT_SCOPE)
+set(SEDSPRINTF_RS_LIB_DEBUG   "${RS_LIB_DBG}" PARENT_SCOPE)
 set(SEDSPRINTF_RS_LIB_RELEASE "${RS_LIB_REL}" PARENT_SCOPE)
 set(SEDSPRINTF_RS_INCLUDE_DIR "${RS_INCLUDE}" PARENT_SCOPE)
 

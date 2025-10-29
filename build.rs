@@ -281,7 +281,7 @@ fn render_python_intenum(
     members: &[(String, String)],
 ) -> String {
     // Build a quick lookup for per-member comment text
-    let mut per_member_doc = std::collections::HashMap::<&str, &str>::new();
+    let per_member_doc = std::collections::HashMap::<&str, &str>::new();
 
     let mut lines = Vec::new();
     lines.push(format!("class {name}(IntEnum):"));
