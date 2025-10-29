@@ -6,7 +6,7 @@ pub use crate::config::{
     get_data_type, get_info_type, message_meta, DataEndpoint, DataType,
     DEVICE_IDENTIFIER, MAX_PRECISION_IN_STRINGS,
 };
-use crate::{MessageDataType, MessageType, NumKind, TelemetryError, TelemetryResult};
+use crate::{MessageDataType, MessageType, TelemetryError, TelemetryResult};
 use alloc::{string::String, string::ToString, sync::Arc, vec::Vec};
 use core::{fmt::Write};
 use crate::router::LeBytes;
