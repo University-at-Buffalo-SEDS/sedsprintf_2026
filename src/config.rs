@@ -7,6 +7,8 @@ pub const DEVICE_IDENTIFIER: &str = "TEST_PLATFORM";
 pub const MAX_STRING_LENGTH: usize = 1024;
 pub const MAX_HEX_LENGTH: usize = 1024;
 
+pub const MAX_PRECISION_IN_STRINGS: usize = 8; // 12 is expensive; tune as needed
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 #[repr(u32)]
 pub enum DataEndpoint {

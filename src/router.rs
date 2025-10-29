@@ -63,21 +63,24 @@ impl BoardConfig {
 
 // -------------------- generic little-endian serialization --------------------
 
-pub trait LeBytes: Copy {
+pub trait LeBytes: Copy + Sized {
     const WIDTH: usize;
     fn write_le(self, out: &mut [u8]);
+    fn from_le_slice(bytes: &[u8]) -> Self;
 }
 
-impl_letype_num!(u8, 1, to_le_bytes);
-impl_letype_num!(u16, 2, to_le_bytes);
-impl_letype_num!(u32, 4, to_le_bytes);
-impl_letype_num!(u64, 8, to_le_bytes);
-impl_letype_num!(i8, 1, to_le_bytes);
-impl_letype_num!(i16, 2, to_le_bytes);
-impl_letype_num!(i32, 4, to_le_bytes);
-impl_letype_num!(i64, 8, to_le_bytes);
-impl_letype_num!(f32, 4, to_le_bytes);
-impl_letype_num!(f64, 8, to_le_bytes);
+impl_letype_num!(u8, 1);
+impl_letype_num!(u16, 2);
+impl_letype_num!(u32, 4);
+impl_letype_num!(u64, 8);
+impl_letype_num!(u128, 16);
+impl_letype_num!(i8, 1);
+impl_letype_num!(i16, 2);
+impl_letype_num!(i32, 4);
+impl_letype_num!(i64, 8);
+impl_letype_num!(i128, 16);
+impl_letype_num!(f32, 4);
+impl_letype_num!(f64, 8);
 
 pub(crate) fn encode_slice_le<T: LeBytes>(data: &[T]) -> Arc<[u8]> {
     let total = data.len() * T::WIDTH;

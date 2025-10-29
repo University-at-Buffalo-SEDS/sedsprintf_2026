@@ -64,8 +64,7 @@ mod embedded_alloc {
     #[panic_handler]
     fn panic(_info: &PanicInfo) -> ! {
         // Halt forever after that
-        loop {
-        }
+        loop {}
     }
 
     // ensure cortex-m only compiles on embedded
@@ -82,6 +81,16 @@ mod macros;
 mod router;
 mod serialize;
 mod telemetry_packet;
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub enum NumKind {
+    Unsigned,
+    Signed,
+    Float,
+    Bool,
+    String,
+    Hex,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 #[allow(dead_code)]
@@ -106,19 +115,61 @@ pub const fn data_type_size(dt: MessageDataType) -> usize {
     match dt {
         MessageDataType::Float64 => size_of::<f64>(),
         MessageDataType::Float32 => size_of::<f32>(),
-        MessageDataType::UInt8   => size_of::<u8>(),
-        MessageDataType::UInt16  => size_of::<u16>(),
-        MessageDataType::UInt32  => size_of::<u32>(),
-        MessageDataType::UInt64  => size_of::<u64>(),
+        MessageDataType::UInt8 => size_of::<u8>(),
+        MessageDataType::UInt16 => size_of::<u16>(),
+        MessageDataType::UInt32 => size_of::<u32>(),
+        MessageDataType::UInt64 => size_of::<u64>(),
         MessageDataType::UInt128 => size_of::<u128>(),
-        MessageDataType::Int8    => size_of::<i8>(),
-        MessageDataType::Int16   => size_of::<i16>(),
-        MessageDataType::Int32   => size_of::<i32>(),
-        MessageDataType::Int64   => size_of::<i64>(),
+        MessageDataType::Int8 => size_of::<i8>(),
+        MessageDataType::Int16 => size_of::<i16>(),
+        MessageDataType::Int32 => size_of::<i32>(),
+        MessageDataType::Int64 => size_of::<i64>(),
         MessageDataType::Int128 => size_of::<i128>(),
-        MessageDataType::Bool    => size_of::<bool>(),
-        MessageDataType::String  => MAX_STRING_LENGTH,
-        MessageDataType::Hex     => MAX_HEX_LENGTH,
+        MessageDataType::Bool => size_of::<bool>(),
+        MessageDataType::String => MAX_STRING_LENGTH,
+        MessageDataType::Hex => MAX_HEX_LENGTH,
+    }
+}
+
+impl MessageDataType {
+    #[inline]
+    pub const fn width(self) -> usize {
+        match self {
+            MessageDataType::Float64
+            | MessageDataType::UInt64
+            | MessageDataType::Int64
+            | MessageDataType::Float32
+            | MessageDataType::UInt32
+            | MessageDataType::Int32
+            | MessageDataType::UInt16
+            | MessageDataType::Int16
+            | MessageDataType::UInt128
+            | MessageDataType::Int128
+            | MessageDataType::UInt8
+            | MessageDataType::Int8 => data_type_size(self),
+
+            MessageDataType::Bool | MessageDataType::String | MessageDataType::Hex => 1,
+        }
+    }
+
+    #[inline]
+    pub const fn kind(self) -> NumKind {
+        match self {
+            MessageDataType::Float32 | MessageDataType::Float64 => NumKind::Float,
+            MessageDataType::UInt8
+            | MessageDataType::UInt16
+            | MessageDataType::UInt32
+            | MessageDataType::UInt64
+            | MessageDataType::UInt128 => NumKind::Unsigned,
+            MessageDataType::Int8
+            | MessageDataType::Int16
+            | MessageDataType::Int32
+            | MessageDataType::Int64
+            | MessageDataType::Int128 => NumKind::Signed,
+            MessageDataType::Bool => NumKind::Bool,
+            MessageDataType::String => NumKind::String,
+            MessageDataType::Hex => NumKind::Hex,
+        }
     }
 }
 

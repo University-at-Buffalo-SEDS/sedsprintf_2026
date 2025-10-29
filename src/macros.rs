@@ -37,12 +37,21 @@ macro_rules! impl_repr_i32_enum {
 
 #[macro_export]
 macro_rules! impl_letype_num {
-    ($t:ty, $w:expr, $to_le_bytes:ident) => {
+    ($t:ty, $w:expr) => {
         impl LeBytes for $t {
             const WIDTH: usize = $w;
+
             #[inline]
             fn write_le(self, out: &mut [u8]) {
-                out.copy_from_slice(&self.$to_le_bytes());
+                assert_eq!(out.len(), Self::WIDTH, "write_le: wrong out slice len");
+                out.copy_from_slice(&self.to_le_bytes());
+            }
+
+            #[inline]
+            fn from_le_slice(bytes: &[u8]) -> Self {
+                assert_eq!(bytes.len(), Self::WIDTH, "from_le_slice: wrong slice len");
+                let arr: [u8; $w] = bytes.try_into().expect("slice length mismatch");
+                <$t>::from_le_bytes(arr)
             }
         }
     };
