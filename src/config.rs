@@ -1,6 +1,7 @@
 // src/config.rs
 use crate::{data_type_size, MessageDataType, MessageType};
 
+
 //----------------------User Editable----------------------
 pub const DEVICE_IDENTIFIER: &str = "TEST_PLATFORM";
 pub const MAX_STATIC_STRING_LENGTH: usize = 1024;
@@ -134,8 +135,8 @@ impl DataType {
 pub enum MessageSizeType {
     Static(usize),
     Dynamic,
-
 }
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct MessageMeta {
     pub data_size: MessageSizeType,

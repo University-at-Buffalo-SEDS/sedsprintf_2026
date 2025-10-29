@@ -1,16 +1,12 @@
 // src/py_api.rs
 use crate::config::MessageSizeType;
+use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList, PyModule, PyTuple};
 
-use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
-
 use crate::{
-    config::{
-        message_meta, DataEndpoint, MAX_VALUE_DATA_ENDPOINT,
-        MAX_VALUE_DATA_TYPE,
-    }, router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, LeBytes, Router},
+    config::{message_meta, DataEndpoint, MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE}, router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, LeBytes, Router},
     serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet},
     telemetry_packet::{DataType, TelemetryPacket},
     try_enum_from_u32,
@@ -606,27 +602,6 @@ pub fn sedsprintf_rs(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             }
             Ok(())
         };
-
-        set_doc("TELEMETRY_ERROR", "Human-readable error message payload.")?;
-        set_doc("GPS_DATA", "GPS triple (lat, lon, alt) in f32.")?;
-        set_doc("IMU_DATA", "IMU 6-axis (accel xyz, gyro xyz) in f32.")?;
-        set_doc(
-            "BATTERY_STATUS",
-            "Battery metrics (voltage, current, etc.) in f32.",
-        )?;
-        set_doc(
-            "SYSTEM_STATUS",
-            "System health/counters (CPU load, memory usage).",
-        )?;
-        set_doc(
-            "BAROMETER_DATA",
-            "Barometer triple (pressure, temperature, altitude).",
-        )?;
-        set_doc(
-            "MESSAGE_DATA",
-            "Fixed-size UTF-8 message string (padded/truncated).",
-        )?;
-
         // Add to module
         m.add("DataType", dt_enum)?;
     }
@@ -651,9 +626,6 @@ pub fn sedsprintf_rs(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             }
             Ok(())
         };
-
-        set_doc("SD_CARD", "Persist telemetry to local SD card.")?;
-        set_doc("RADIO", "Transmit telemetry over radio link.")?;
 
         // Add to module
         m.add("DataEndpoint", ep_enum)?;
