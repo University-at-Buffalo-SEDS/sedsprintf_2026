@@ -253,7 +253,7 @@ impl TelemetryPacket {
         self.data_as_utf8_ref().map(|s| s.to_string())
     }
 
-
+    #[inline]
     fn data_to_string<T>(&self, s: &mut String)
         where
             T: LeBytes + core::fmt::Display,
@@ -270,12 +270,6 @@ impl TelemetryPacket {
             let v = T::from_le_slice(chunk);
             let _ = write!(s, "{v}");
         }
-
-        debug_assert!(
-            it.remainder().is_empty(),
-            "payload length not a multiple of element size ({})",
-            T::WIDTH
-        );
     }
     /// Full pretty string including decoded data portion.
     pub fn to_string(&self) -> String {

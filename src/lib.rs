@@ -82,16 +82,6 @@ mod router;
 mod serialize;
 mod telemetry_packet;
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
-pub enum NumKind {
-    Unsigned,
-    Signed,
-    Float,
-    Bool,
-    String,
-    Hex,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 #[allow(dead_code)]
 pub enum MessageDataType {
