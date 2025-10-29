@@ -28,7 +28,7 @@ set(RUST_PROFILE "$<IF:$<CONFIG:Debug>,debug,release>")
 set(RS_LIB_DBG "${RUST_DIR}/target/${RUST_TRIPLE}debug/libsedsprintf_rs.a")
 set(RS_LIB_REL "${RUST_DIR}/target/${RUST_TRIPLE}release/libsedsprintf_rs.a")
 set(RS_INCLUDE   "${RUST_DIR}/C-Headers")
-set(RS_HEADER    "${RS_INCLUDE}/sedsprintf.h")   # <— header we expect
+set(RS_HEADER    "${RS_INCLUDE}/sedsprintf.h")
 
 set(RS_ARG_REL " $<$<CONFIG:Release>:release>")
 set(RS_ARGS_STR "${RS_ARGS_STR} ${RS_ARG_REL}")
@@ -60,7 +60,6 @@ file(GLOB_RECURSE RS_SRC CONFIGURE_DEPENDS
     "${RUST_DIR}/build.rs"
     "${RUST_DIR}/Cargo.toml"
     "${RUST_DIR}/Cargo.lock"
-    "${RUST_DIR}/C-Headers/*.h"
 )
 
 # Build rule: produce libs AND the header (so missing header triggers build)
