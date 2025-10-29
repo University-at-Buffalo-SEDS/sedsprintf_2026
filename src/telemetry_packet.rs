@@ -1,16 +1,13 @@
 #![allow(dead_code)]
 
 
-pub use crate::config::{
-    get_info_type, message_meta, DataEndpoint, DataType, MessageDataType, MessageType,
-    DEVICE_IDENTIFIER,
-};
 // ---- core/alloc imports usable in both std and no_std ----
-use crate::{TelemetryError, TelemetryResult};
+use crate::config::get_data_type;
+pub use crate::config::{get_info_type, message_meta, DataEndpoint, DataType, DEVICE_IDENTIFIER};
+use crate::{MessageDataType, MessageType, TelemetryError, TelemetryResult};
 use alloc::{string::String, string::ToString, sync::Arc, vec::Vec};
 use core::{convert::TryInto, fmt::Write};
 use time::OffsetDateTime;
-use crate::config::get_data_type;
 
 
 const EPOCH_MS_THRESHOLD: u64 = 1_000_000_000_000; // clearly not an uptime counter

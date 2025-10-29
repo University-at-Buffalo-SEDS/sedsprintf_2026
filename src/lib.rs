@@ -85,6 +85,23 @@ mod router;
 mod serialize;
 mod telemetry_packet;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[allow(dead_code)]
+pub enum MessageDataType {
+    Float32,
+    UInt8,
+    UInt32,
+    String,
+    Hex,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[allow(dead_code)]
+pub enum MessageType {
+    Info,
+    Error,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TelemetryError {
     InvalidType,
