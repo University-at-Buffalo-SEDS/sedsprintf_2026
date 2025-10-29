@@ -3,13 +3,14 @@
 
 pub use crate::config::{
     get_info_type, message_meta, DataEndpoint, DataType, MessageDataType, MessageType,
-    DEVICE_IDENTIFIER, MESSAGE_DATA_TYPES,
+    DEVICE_IDENTIFIER,
 };
 // ---- core/alloc imports usable in both std and no_std ----
 use crate::{TelemetryError, TelemetryResult};
 use alloc::{string::String, string::ToString, sync::Arc, vec::Vec};
 use core::{convert::TryInto, fmt::Write};
 use time::OffsetDateTime;
+use crate::config::get_data_type;
 
 
 const EPOCH_MS_THRESHOLD: u64 = 1_000_000_000_000; // clearly not an uptime counter
@@ -209,7 +210,7 @@ impl TelemetryPacket {
 
     /// Borrow the payload as UTF-8 without trailing NULs (no allocation).
     pub fn data_as_utf8_ref(&self) -> Option<&str> {
-        if MESSAGE_DATA_TYPES[self.ty as usize] != MessageDataType::String {
+        if get_data_type(self.ty) != MessageDataType::String {
             return None;
         }
         let bytes = &self.payload;
@@ -220,11 +221,6 @@ impl TelemetryPacket {
     /// Back-compat helper if you truly need an owned String.
     pub fn data_as_utf8(&self) -> Option<String> {
         self.data_as_utf8_ref().map(|s| s.to_string())
-    }
-
-    #[inline]
-    fn msg_ty(&self) -> MessageDataType {
-        MESSAGE_DATA_TYPES[self.ty as usize]
     }
 
     /// Full pretty string including decoded data portion.
@@ -252,7 +248,7 @@ impl TelemetryPacket {
             return s;
         }
 
-        match self.msg_ty() {
+        match get_data_type(self.ty) {
             MessageDataType::Float32 => {
                 let mut it = self.payload.chunks_exact(4).peekable();
                 while let Some(chunk) = it.next() {
