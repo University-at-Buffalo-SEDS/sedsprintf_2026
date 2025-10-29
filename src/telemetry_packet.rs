@@ -338,7 +338,6 @@ fn div_mod_u64(n: u64, d: u64) -> (u64, u64) {
 }
 
 // Howard Hinnant–style civil-from-days (proleptic Gregorian)
-#[inline]
 fn civil_from_days(mut z: i64) -> (i32, u32, u32) {
     // epoch (1970-01-01) has days=0
     z += 719468; // shift to civil base

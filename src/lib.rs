@@ -102,7 +102,6 @@ pub enum MessageDataType {
     String,
     Hex,
 }
-#[inline(always)]
 pub const fn data_type_size(dt: MessageDataType) -> usize {
     match dt {
         MessageDataType::Float64 => size_of::<f64>(),
@@ -145,7 +144,6 @@ pub enum TelemetryError {
 }
 
 impl TelemetryError {
-    #[inline(always)]
     pub const fn to_error_code(&self) -> TelemetryErrorCode {
         match self {
             TelemetryError::InvalidType => TelemetryErrorCode::InvalidType,

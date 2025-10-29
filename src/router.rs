@@ -79,7 +79,6 @@ impl_letype_num!(i64, 8, to_le_bytes);
 impl_letype_num!(f32, 4, to_le_bytes);
 impl_letype_num!(f64, 8, to_le_bytes);
 
-#[inline]
 pub(crate) fn encode_slice_le<T: LeBytes>(data: &[T]) -> Arc<[u8]> {
     let total = data.len() * T::WIDTH;
     let mut buf = Vec::with_capacity(total);
@@ -122,7 +121,6 @@ where
     tx_function(pkt)
 }
 
-#[inline]
 fn fallback_stdout(msg: &str) {
     #[cfg(feature = "std")]
     {
