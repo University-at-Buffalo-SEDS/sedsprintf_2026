@@ -1,6 +1,5 @@
 // src/config.rs
-use crate::{MessageDataType, MessageType};
-use core::mem::size_of;
+use crate::{data_type_size, MessageDataType, MessageType};
 
 
 //----------------------User Editable----------------------
@@ -80,16 +79,6 @@ pub const MESSAGE_INFO_TYPES: [MessageType; DataType::COUNT] = [
     MessageType::Info,
     MessageType::Info,
 ];
-
-pub const fn data_type_size(dt: MessageDataType) -> usize {
-    match dt {
-        MessageDataType::Float32 => size_of::<f32>(),
-        MessageDataType::UInt8 => size_of::<u8>(),
-        MessageDataType::UInt32 => size_of::<u32>(),
-        MessageDataType::String => MAX_STRING_LENGTH,
-        MessageDataType::Hex => MAX_HEX_LENGTH,
-    }
-}
 
 /// how many elements each message carries
 pub const MESSAGE_ELEMENTS: [usize; DataType::COUNT] = [
