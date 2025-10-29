@@ -4,17 +4,17 @@
 
 use crate::router::{Clock, LeBytes};
 use crate::{
-    config::DataEndpoint, do_vec_log_typed, router,
-    router::{BoardConfig, EndpointHandler, Router},
-    serialize::deserialize_packet, serialize::packet_wire_size,
-    serialize::serialize_packet,
+    config::DataEndpoint, do_vec_log_typed, router, router::{BoardConfig, EndpointHandler, Router},
+    serialize::deserialize_packet,
+    serialize::packet_wire_size, serialize::serialize_packet,
     telemetry_packet::{DataType, TelemetryPacket},
+    MessageDataType,
     TelemetryError,
     TelemetryErrorCode,
     TelemetryResult,
 };
 
-use crate::config::{get_data_type, MessageDataType, MAX_STRING_LENGTH};
+use crate::config::{get_data_type, MAX_STRING_LENGTH};
 use crate::serialize::peek_envelope;
 use alloc::{boxed::Box, string::String, sync::Arc, vec, vec::Vec};
 use core::{ffi::c_char, ffi::c_void, mem::size_of, ptr, slice, str::from_utf8};
