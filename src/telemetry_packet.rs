@@ -2,15 +2,17 @@
 
 
 // ---- core/alloc imports usable in both std and no_std ----
-use crate::config::get_data_type;
-pub use crate::config::{get_info_type, message_meta, DataEndpoint, DataType, DEVICE_IDENTIFIER};
-use crate::{MessageDataType, MessageType, TelemetryError, TelemetryResult};
+pub use crate::config::{
+    get_data_type, get_info_type, message_meta, DataEndpoint, DataType,
+    DEVICE_IDENTIFIER, MAX_PRECISION_IN_STRINGS,
+};
+use crate::{MessageDataType, MessageType, NumKind, TelemetryError, TelemetryResult};
 use alloc::{string::String, string::ToString, sync::Arc, vec::Vec};
 use core::{convert::TryInto, fmt::Write};
 
 
 const EPOCH_MS_THRESHOLD: u64 = 1_000_000_000_000; // clearly not an uptime counter
-
+const DEFAULT_STRING_CAPACITY: usize = 96;
 /// Payload-bearing packet (safe, heap-backed, shareable).
 #[derive(Clone, Debug)]
 pub struct TelemetryPacket {
@@ -22,6 +24,76 @@ pub struct TelemetryPacket {
     pub payload: Arc<[u8]>,
 }
 
+// ---------------------Helpers for to_string()---------------------
+#[inline]
+fn print_sep(s: &mut String, i: usize) {
+    if i > 0 {
+        s.push_str(", ");
+    }
+}
+
+fn print_unsigned_chunks(bytes: &[u8], w: usize, s: &mut String) {
+    let mut it = bytes.chunks_exact(w);
+    for (i, chunk) in it.by_ref().enumerate() {
+        print_sep(s, i);
+        // LE accumulate into u128
+        let mut v: u128 = 0;
+        for (k, b) in chunk.iter().enumerate() {
+            v |= (*b as u128) << (8 * k);
+        }
+        let _ = write!(s, "{v}");
+    }
+    debug_assert!(it.remainder().is_empty());
+}
+
+fn print_signed_chunks(bytes: &[u8], w: usize, s: &mut String) {
+    let mut it = bytes.chunks_exact(w);
+    for (i, chunk) in it.by_ref().enumerate() {
+        print_sep(s, i);
+        let mut u: u128 = 0;
+        for (k, b) in chunk.iter().enumerate() {
+            u |= (*b as u128) << (8 * k);
+        }
+        let bits = (w * 8) as u32;
+        let shift = 128 - bits;
+        let v = ((u as i128) << shift) >> shift; // sign-extend
+        let _ = write!(s, "{v}");
+    }
+    debug_assert!(it.remainder().is_empty());
+}
+
+fn print_float_chunks(bytes: &[u8], w: usize, s: &mut String) {
+    match w {
+        4 => {
+            let mut it = bytes.chunks_exact(4);
+            for (i, chunk) in it.by_ref().enumerate() {
+                print_sep(s, i);
+                let arr: [u8; 4] = chunk.try_into().unwrap();
+                let v = f32::from_le_bytes(arr);
+                let _ = write!(s, "{v:.prec$}", prec = MAX_PRECISION_IN_STRINGS);
+            }
+            debug_assert!(it.remainder().is_empty());
+        }
+        8 => {
+            let mut it = bytes.chunks_exact(8);
+            for (i, chunk) in it.by_ref().enumerate() {
+                print_sep(s, i);
+                let arr: [u8; 8] = chunk.try_into().unwrap();
+                let v = f64::from_le_bytes(arr);
+                let _ = write!(s, "{v:.prec$}", prec = MAX_PRECISION_IN_STRINGS);
+            }
+            debug_assert!(it.remainder().is_empty());
+        }
+        _ => unreachable!("unsupported float width {w}"),
+    }
+}
+
+fn print_bools(bytes: &[u8], s: &mut String) {
+    for (i, b) in bytes.iter().enumerate() {
+        print_sep(s, i);
+        let _ = write!(s, "{}", *b != 0);
+    }
+}
 // -------------------- TelemetryPacket impl --------------------
 impl TelemetryPacket {
     /// Create a packet from a raw payload (validated against `message_meta(ty)`).
@@ -141,7 +213,7 @@ impl TelemetryPacket {
 
     /// Header line without data payload.
     pub fn header_string(&self) -> String {
-        let mut out = String::with_capacity(96);
+        let mut out = String::with_capacity(DEFAULT_STRING_CAPACITY);
 
         let _ = write!(
             &mut out,
@@ -151,7 +223,9 @@ impl TelemetryPacket {
             self.sender.as_ref(),
         );
         for (i, ep) in self.endpoints.iter().enumerate() {
-            if i != 0 { out.push_str(", "); }
+            if i != 0 {
+                out.push_str(", ");
+            }
             out.push_str(ep.as_str());
         }
         out.push_str("], Timestamp: ");
@@ -180,8 +254,6 @@ impl TelemetryPacket {
 
     /// Full pretty string including decoded data portion.
     pub fn to_string(&self) -> String {
-        const MAX_PRECISION: usize = 8; // 12 is expensive; tune as needed
-
         let mut s = String::from("{");
         s.push_str(&self.header_string());
 
@@ -196,6 +268,7 @@ impl TelemetryPacket {
             s.push_str(", Data: (");
         }
 
+        // Try UTF-8 string first (keeps your previous behavior)
         if let Some(msg) = self.data_as_utf8_ref() {
             s.push('"');
             s.push_str(msg);
@@ -203,113 +276,35 @@ impl TelemetryPacket {
             return s;
         }
 
-        match get_data_type(self.ty) {
-            MessageDataType::Float64 => {
-                let mut it = self.payload.chunks_exact(8).peekable();
-                while let Some(chunk) = it.next() {
-                    let v = f64::from_le_bytes(chunk.try_into().unwrap());
-                    let _ = write!(s, "{v:.prec$}", prec = MAX_PRECISION);
-                    if it.peek().is_some() { s.push_str(", "); }
-                }
+        // Type-directed, width-driven dispatch:
+        match get_data_type(self.ty).kind() {
+            NumKind::Unsigned => {
+                let w = get_data_type(self.ty).width();
+                print_unsigned_chunks(&self.payload, w, &mut s);
             }
-            MessageDataType::Float32 => {
-                let mut it = self.payload.chunks_exact(4).peekable();
-                while let Some(chunk) = it.next() {
-                    let v = f32::from_le_bytes(chunk.try_into().unwrap());
-                    let _ = write!(s, "{v:.prec$}", prec = MAX_PRECISION);
-                    if it.peek().is_some() { s.push_str(", "); }
-                }
+            NumKind::Signed => {
+                let w = get_data_type(self.ty).width();
+                print_signed_chunks(&self.payload, w, &mut s);
             }
-            MessageDataType::UInt128 => {
-                let mut it = self.payload.chunks_exact(16).peekable();
-                while let Some(chunk) = it.next() {
-                    let v = u128::from_le_bytes(chunk.try_into().unwrap());
-                    let _ = write!(s, "{v}");
-                    if it.peek().is_some() { s.push_str(", "); }
-                }
+            NumKind::Float => {
+                let w = get_data_type(self.ty).width();
+                print_float_chunks(&self.payload, w, &mut s);
             }
-            MessageDataType::UInt64 => {
-                let mut it = self.payload.chunks_exact(8).peekable();
-                while let Some(chunk) = it.next() {
-                    let v = u64::from_le_bytes(chunk.try_into().unwrap());
-                    let _ = write!(s, "{v}");
-                    if it.peek().is_some() { s.push_str(", "); }
-                }
+            NumKind::Bool => {
+                print_bools(&self.payload, &mut s);
             }
-            MessageDataType::UInt32 => {
-                let mut it = self.payload.chunks_exact(4).peekable();
-                while let Some(chunk) = it.next() {
-                    let v = u32::from_le_bytes(chunk.try_into().unwrap());
-                    let _ = write!(s, "{v}");
-                    if it.peek().is_some() { s.push_str(", "); }
-                }
+            NumKind::String => {
+                // already attempted via data_as_utf8_ref(); fall back to hex or raw?
+                // If you want to treat non-UTF8 strings as hex, you can:
+                // drop through to Hex behavior, or just show bytes.
+                // Here we’ll just show bytes as hex:
+                return self.to_hex_string();
             }
-            MessageDataType::UInt16 => {
-                let mut it = self.payload.chunks_exact(2).peekable();
-                while let Some(chunk) = it.next() {
-                    let v = u16::from_le_bytes(chunk.try_into().unwrap());
-                    let _ = write!(s, "{v}");
-                    if it.peek().is_some() { s.push_str(", "); }
-                }
+            NumKind::Hex => {
+                return self.to_hex_string();
             }
-            MessageDataType::UInt8 => {
-                let mut it = self.payload.iter().peekable();
-                while let Some(b) = it.next() {
-                    let _ = write!(s, "{}", *b);
-                    if it.peek().is_some() { s.push_str(", "); }
-                }
-            }
-            MessageDataType::Int128 => {
-                let mut it = self.payload.chunks_exact(16).peekable();
-                while let Some(chunk) = it.next() {
-                    let v = i128::from_le_bytes(chunk.try_into().unwrap());
-                    let _ = write!(s, "{v}");
-                    if it.peek().is_some() { s.push_str(", "); }
-                }
-            }
-            MessageDataType::Int64 => {
-                let mut it = self.payload.chunks_exact(8).peekable();
-                while let Some(chunk) = it.next() {
-                    let v = i64::from_le_bytes(chunk.try_into().unwrap());
-                    let _ = write!(s, "{v}");
-                    if it.peek().is_some() { s.push_str(", "); }
-                }
-            }
-            MessageDataType::Int32 => {
-                let mut it = self.payload.chunks_exact(4).peekable();
-                while let Some(chunk) = it.next() {
-                    let v = i32::from_le_bytes(chunk.try_into().unwrap());
-                    let _ = write!(s, "{v}");
-                    if it.peek().is_some() { s.push_str(", "); }
-                }
-            }
-            MessageDataType::Int16 => {
-                let mut it = self.payload.chunks_exact(2).peekable();
-                while let Some(chunk) = it.next() {
-                    let v = i16::from_le_bytes(chunk.try_into().unwrap());
-                    let _ = write!(s, "{v}");
-                    if it.peek().is_some() { s.push_str(", "); }
-                }
-            }
-            MessageDataType::Int8 => {
-                let mut it = self.payload.iter().copied().peekable();
-                while let Some(b) = it.next() {
-                    let v = b as i8;
-                    let _ = write!(s, "{v}");
-                    if it.peek().is_some() { s.push_str(", "); }
-                }
-            }
-            MessageDataType::Bool => {
-                // Interpret any nonzero as true
-                let mut it = self.payload.iter().peekable();
-                while let Some(b) = it.next() {
-                    let _ = write!(s, "{}", (*b != 0));
-                    if it.peek().is_some() { s.push_str(", "); }
-                }
-            }
-            MessageDataType::String => { /* handled above */ }
-            MessageDataType::Hex => return self.to_hex_string(),
         }
+
         s.push_str(")}");
         s
     }
@@ -342,14 +337,14 @@ fn civil_from_days(mut z: i64) -> (i32, u32, u32) {
     // epoch (1970-01-01) has days=0
     z += 719468; // shift to civil base
     let era = (if z >= 0 { z } else { z - 146096 }) / 146097;
-    let doe = z - era * 146097;                        // [0, 146096]
-    let yoe = (doe - doe/1460 + doe/36524 - doe/146096) / 365; // [0, 399]
+    let doe = z - era * 146097; // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365; // [0, 399]
     let y = (yoe as i32) + era as i32 * 400;
-    let doy = (doe - (365*yoe + yoe/4 - yoe/100)) as i32;      // [0, 365]
-    let mp = (5*doy + 2) / 153;                         // [0, 11]
-    let d = doy - (153*mp + 2)/5 + 1;                   // [1, 31]
-    let m = mp + if mp < 10 { 3 } else { -9 };          // [1, 12]
-    let y = y + (m <= 2) as i32;                        // year
+    let doy = (doe - (365 * yoe + yoe / 4 - yoe / 100)) as i32; // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11]
+    let d = doy - (153 * mp + 2) / 5 + 1; // [1, 31]
+    let m = mp + if mp < 10 { 3 } else { -9 }; // [1, 12]
+    let y = y + (m <= 2) as i32; // year
     (y, m as u32, d as u32)
 }
 
@@ -360,15 +355,17 @@ fn append_human_time(out: &mut String, total_ms: u64) {
         // Unix epoch path
         let (secs, sub_ms) = div_mod_u64(total_ms, 1_000);
         let days = (secs / 86_400) as i64;
-        let sod  = (secs % 86_400) as u32; // seconds of day
+        let sod = (secs % 86_400) as u32; // seconds of day
         let (year, month, day) = civil_from_days(days);
-        let hour =  sod / 3600;
-        let min  = (sod % 3600) / 60;
-        let sec  =  sod % 60;
+        let hour = sod / 3600;
+        let min = (sod % 3600) / 60;
+        let sec = sod % 60;
         let _ = Write::write_fmt(
             out,
-            format_args!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03}Z",
-                         year, month, day, hour, min, sec, sub_ms as u32)
+            format_args!(
+                "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03}Z",
+                year, month, day, hour, min, sec, sub_ms as u32
+            ),
         );
     } else {
         // Uptime path (your original pretty format)
@@ -378,16 +375,16 @@ fn append_human_time(out: &mut String, total_ms: u64) {
         let milliseconds = total_ms % 1_000;
         if hours > 0 {
             let _ = Write::write_fmt(
-                out, format_args!("{hours}h {minutes:02}m {seconds:02}s {milliseconds:03}ms")
+                out,
+                format_args!("{hours}h {minutes:02}m {seconds:02}s {milliseconds:03}ms"),
             );
         } else if minutes > 0 {
             let _ = Write::write_fmt(
-                out, format_args!("{minutes}m {seconds:02}s {milliseconds:03}ms")
+                out,
+                format_args!("{minutes}m {seconds:02}s {milliseconds:03}ms"),
             );
         } else {
-            let _ = Write::write_fmt(
-                out, format_args!("{seconds}s {milliseconds:03}ms")
-            );
+            let _ = Write::write_fmt(out, format_args!("{seconds}s {milliseconds:03}ms"));
         }
     }
 }
