@@ -8,7 +8,8 @@ pub use crate::config::{
 };
 use crate::{MessageDataType, MessageType, NumKind, TelemetryError, TelemetryResult};
 use alloc::{string::String, string::ToString, sync::Arc, vec::Vec};
-use core::{convert::TryInto, fmt::Write};
+use core::{fmt::Write};
+use crate::router::LeBytes;
 
 
 const EPOCH_MS_THRESHOLD: u64 = 1_000_000_000_000; // clearly not an uptime counter
@@ -252,6 +253,30 @@ impl TelemetryPacket {
         self.data_as_utf8_ref().map(|s| s.to_string())
     }
 
+
+    fn data_to_string<T>(&self, s: &mut String)
+        where
+            T: LeBytes + core::fmt::Display,
+    {
+        let mut it = self.payload.chunks_exact(T::WIDTH);
+        let mut first = true;
+
+        while let Some(chunk) = it.next() {
+            if !first {
+                s.push_str(", ");
+            }
+            first = false;
+
+            let v = T::from_le_slice(chunk);
+            let _ = write!(s, "{v}");
+        }
+
+        debug_assert!(
+            it.remainder().is_empty(),
+            "payload length not a multiple of element size ({})",
+            T::WIDTH
+        );
+    }
     /// Full pretty string including decoded data portion.
     pub fn to_string(&self) -> String {
         let mut s = String::from("{");
@@ -276,33 +301,64 @@ impl TelemetryPacket {
             return s;
         }
 
-        // Type-directed, width-driven dispatch:
-        match get_data_type(self.ty).kind() {
-            NumKind::Unsigned => {
-                let w = get_data_type(self.ty).width();
-                print_unsigned_chunks(&self.payload, w, &mut s);
+        match get_data_type(self.ty) {
+            MessageDataType::Float64 => {
+                self.data_to_string::<f64>(&mut s);
             }
-            NumKind::Signed => {
-                let w = get_data_type(self.ty).width();
-                print_signed_chunks(&self.payload, w, &mut s);
+            MessageDataType::Float32 => {
+                self.data_to_string::<f32>(&mut s);
+
             }
-            NumKind::Float => {
-                let w = get_data_type(self.ty).width();
-                print_float_chunks(&self.payload, w, &mut s);
+            MessageDataType::UInt128 => {
+                self.data_to_string::<u128>(&mut s);
+
             }
-            NumKind::Bool => {
-                print_bools(&self.payload, &mut s);
+            MessageDataType::UInt64 => {
+                self.data_to_string::<u64>(&mut s);
+
             }
-            NumKind::String => {
-                // already attempted via data_as_utf8_ref(); fall back to hex or raw?
-                // If you want to treat non-UTF8 strings as hex, you can:
-                // drop through to Hex behavior, or just show bytes.
-                // Here we’ll just show bytes as hex:
-                return self.to_hex_string();
+            MessageDataType::UInt32 => {
+                self.data_to_string::<u32>(&mut s);
+
             }
-            NumKind::Hex => {
-                return self.to_hex_string();
+            MessageDataType::UInt16 => {
+                self.data_to_string::<u16>(&mut s);
+
             }
+            MessageDataType::UInt8 => {
+                self.data_to_string::<i8>(&mut s);
+
+            }
+            MessageDataType::Int128 => {
+                self.data_to_string::<i128>(&mut s);
+
+            }
+            MessageDataType::Int64 => {
+                self.data_to_string::<i64>(&mut s);
+
+            }
+            MessageDataType::Int32 => {
+                self.data_to_string::<i32>(&mut s);
+
+            }
+            MessageDataType::Int16 => {
+                self.data_to_string::<i16>(&mut s);
+
+            }
+            MessageDataType::Int8 => {
+                self.data_to_string::<i8>(&mut s);
+
+            }
+            MessageDataType::Bool => {
+                // Interpret any nonzero as true
+                let mut it = self.payload.iter().peekable();
+                while let Some(b) = it.next() {
+                    let _ = write!(s, "{}", *b != 0);
+                    if it.peek().is_some() { s.push_str(", "); }
+                }
+            }
+            MessageDataType::String => { /* handled above */ }
+            MessageDataType::Hex => return self.to_hex_string(),
         }
 
         s.push_str(")}");
