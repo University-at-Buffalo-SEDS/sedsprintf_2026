@@ -6,13 +6,13 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList, PyModule, PyTuple};
 
 use crate::{
-    config::{DataEndpoint, MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE}, message_meta,
-    router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, LeBytes, Router},
-    serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet},
+    config::DataEndpoint, message_meta, router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, LeBytes, Router}, serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet},
     telemetry_packet::{DataType, TelemetryPacket},
     try_enum_from_u32,
     TelemetryError,
     TelemetryResult,
+    MAX_VALUE_DATA_ENDPOINT,
+    MAX_VALUE_DATA_TYPE,
 };
 
 

@@ -412,11 +412,11 @@ fn helpers_copy_telemetry_packet() {
 #[cfg(test)]
 mod handler_failure_tests {
     use super::*;
-    use crate::config::{DEVICE_IDENTIFIER, MAX_VALUE_DATA_TYPE};
+    use crate::config::DEVICE_IDENTIFIER;
     use crate::router::EndpointHandler;
     use crate::router::{BoardConfig, Router};
     use crate::telemetry_packet::DataType;
-    use crate::TelemetryError;
+    use crate::{TelemetryError, MAX_VALUE_DATA_TYPE};
     use alloc::{sync::Arc, vec, vec::Vec};
     use core::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
@@ -1187,11 +1187,12 @@ mod tests_more {
 
     use crate::{
         config::{DataEndpoint, DataType, MessageSizeType, MESSAGE_ELEMENTS}, get_data_type, message_meta, router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, Router},
-        serialize,
-        telemetry_packet::TelemetryPacket, MessageDataType,
-        TelemetryError,
-        TelemetryErrorCode,
+        serialize, telemetry_packet::TelemetryPacket,
+        MessageDataType,
+        TelemetryError, TelemetryErrorCode,
         TelemetryResult,
+        MAX_VALUE_DATA_ENDPOINT,
+        MAX_VALUE_DATA_TYPE,
     };
     use alloc::{sync::Arc, vec::Vec};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1258,11 +1259,11 @@ mod tests_more {
 
     #[test]
     fn enum_conversion_bounds_and_rejections() {
-        let max_ty = crate::config::MAX_VALUE_DATA_TYPE;
+        let max_ty = MAX_VALUE_DATA_TYPE;
         assert!(DataType::try_from_u32(max_ty).is_some());
         assert!(DataType::try_from_u32(max_ty + 1).is_none());
 
-        let max_ep = crate::config::MAX_VALUE_DATA_ENDPOINT;
+        let max_ep = MAX_VALUE_DATA_ENDPOINT;
         assert!(DataEndpoint::try_from_u32(max_ep).is_some());
         assert!(DataEndpoint::try_from_u32(max_ep + 1).is_none());
 
