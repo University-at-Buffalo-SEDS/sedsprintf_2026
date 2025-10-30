@@ -14,7 +14,7 @@ pub const MAX_STATIC_HEX_LENGTH: usize = 1024;
 pub const MAX_PRECISION_IN_STRINGS: usize = 8; // 12 is expensive; tune as needed
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, VariantArray)]
-#[repr(C)]
+#[repr(u32)]
 pub enum DataEndpoint {
     SdCard,
     Radio,
@@ -35,7 +35,7 @@ impl DataEndpoint {
 /// MESSAGE_INFO_TYPES, MESSAGE_ELEMENTS, and MESSAGE_TYPES accordingly.
 /// These must increase sequentially from 0 without gaps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, VariantArray)]
-#[repr(C)]
+#[repr(u32)]
 pub enum DataType {
     TelemetryError,
     GpsData,
