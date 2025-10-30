@@ -21,7 +21,7 @@ use crate::config::{
     MESSAGE_ELEMENTS, MESSAGE_INFO_TYPES, MESSAGE_TYPES,
 };
 use crate::macros::{ReprI32Enum, ReprU32Enum};
-use strum::VariantArray;
+use strum::EnumCount;
 
 
 #[cfg(feature = "std")]
@@ -89,12 +89,8 @@ mod telemetry_packet;
 #[allow(dead_code)]
 pub const STRING_VALUE_ELEMENTS: usize = 1;
 pub const DYNAMIC_ELEMENT: usize = 0;
-pub const MAX_VALUE_DATA_ENDPOINT: u32 = (DataEndpoint::VARIANTS.len() - 1) as u32;
-pub const MAX_VALUE_DATA_TYPE: u32 = (DataType::VARIANTS.len() - 1) as u32;
-
-impl DataType {
-    pub const COUNT: usize = (MAX_VALUE_DATA_TYPE + 1) as usize;
-}
+pub const MAX_VALUE_DATA_ENDPOINT: u32 = (DataEndpoint::COUNT - 1) as u32;
+pub const MAX_VALUE_DATA_TYPE: u32 = (DataType::COUNT - 1) as u32;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]

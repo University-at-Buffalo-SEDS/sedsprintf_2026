@@ -1,10 +1,11 @@
+use strum::EnumCount;
 // src/config.rs
 #[allow(unused_imports)]
 pub(crate) use crate::{
     get_needed_message_size, MessageDataType, MessageMeta, MessageSizeType, MessageType,
     DYNAMIC_ELEMENT, STRING_VALUE_ELEMENTS,
 };
-use strum_macros::VariantArray;
+use strum_macros::EnumCount;
 
 
 //----------------------User Editable----------------------
@@ -13,7 +14,7 @@ pub const MAX_STATIC_STRING_LENGTH: usize = 1024;
 pub const MAX_STATIC_HEX_LENGTH: usize = 1024;
 pub const MAX_PRECISION_IN_STRINGS: usize = 8; // 12 is expensive; tune as needed
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, VariantArray)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, EnumCount)]
 #[repr(u32)]
 pub enum DataEndpoint {
     SdCard,
@@ -34,7 +35,7 @@ impl DataEndpoint {
 /// /// When adding new data types, ensure to update MESSAGE_DATA_TYPES,
 /// MESSAGE_INFO_TYPES, MESSAGE_ELEMENTS, and MESSAGE_TYPES accordingly.
 /// These must increase sequentially from 0 without gaps.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, VariantArray)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, EnumCount)]
 #[repr(u32)]
 pub enum DataType {
     TelemetryError,

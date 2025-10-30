@@ -95,6 +95,7 @@ mod tests {
     };
     use std::sync::{Arc, Mutex};
     use std::vec::Vec;
+    use strum::EnumCount;
 
 
     #[test]
