@@ -17,6 +17,8 @@ python = ["std", "pyo3/extension-module"]  # turn on PyO3 for Python builds
 bindings = "pyo3"                  # force maturin to pick PyO3, not CFFI
 
 [dependencies]
+strum_macros = { version="0.27.2", default-features = false }
+strum = { version="0.27.2", default-features = false }
 # PyO3 is optional and only enabled by the `python` feature
 pyo3 = { version = "0.27.1", optional = true, features = ["auto-initialize"] }
 

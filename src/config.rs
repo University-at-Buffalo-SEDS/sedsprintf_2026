@@ -4,6 +4,7 @@ pub(crate) use crate::{
     get_needed_message_size, MessageDataType, MessageMeta, MessageSizeType, MessageType,
     DYNAMIC_ELEMENT, STRING_VALUE_ELEMENTS,
 };
+use strum_macros::VariantArray;
 
 
 //----------------------User Editable----------------------
@@ -12,14 +13,12 @@ pub const MAX_STATIC_STRING_LENGTH: usize = 1024;
 pub const MAX_STATIC_HEX_LENGTH: usize = 1024;
 pub const MAX_PRECISION_IN_STRINGS: usize = 8; // 12 is expensive; tune as needed
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
-#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, VariantArray)]
+#[repr(C)]
 pub enum DataEndpoint {
-    SdCard = 0,
-    Radio = 1,
+    SdCard,
+    Radio,
 }
-
-pub const MAX_VALUE_DATA_ENDPOINT: u32 = DataEndpoint::Radio as u32;
 
 impl DataEndpoint {
     pub fn as_str(self) -> &'static str {
@@ -35,19 +34,17 @@ impl DataEndpoint {
 /// /// When adding new data types, ensure to update MESSAGE_DATA_TYPES,
 /// MESSAGE_INFO_TYPES, MESSAGE_ELEMENTS, and MESSAGE_TYPES accordingly.
 /// These must increase sequentially from 0 without gaps.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
-#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, VariantArray)]
+#[repr(C)]
 pub enum DataType {
-    TelemetryError = 0,
-    GpsData = 1,
-    ImuData = 2,
-    BatteryStatus = 3,
-    SystemStatus = 4,
-    BarometerData = 5,
-    MessageData = 6,
+    TelemetryError,
+    GpsData,
+    ImuData,
+    BatteryStatus,
+    SystemStatus,
+    BarometerData,
+    MessageData,
 }
-
-pub const MAX_VALUE_DATA_TYPE: u32 = DataType::MessageData as u32;
 
 impl DataType {
     pub fn as_str(&self) -> &'static str {

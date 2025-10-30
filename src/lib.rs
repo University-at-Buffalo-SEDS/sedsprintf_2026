@@ -17,10 +17,11 @@ extern crate std;
 
 
 use crate::config::{
-    DataEndpoint, DataType, MAX_STATIC_HEX_LENGTH, MAX_STATIC_STRING_LENGTH, MAX_VALUE_DATA_TYPE,
-    MESSAGE_DATA_TYPES, MESSAGE_ELEMENTS, MESSAGE_INFO_TYPES, MESSAGE_TYPES,
+    DataEndpoint, DataType, MAX_STATIC_HEX_LENGTH, MAX_STATIC_STRING_LENGTH, MESSAGE_DATA_TYPES,
+    MESSAGE_ELEMENTS, MESSAGE_INFO_TYPES, MESSAGE_TYPES,
 };
 use crate::macros::{ReprI32Enum, ReprU32Enum};
+use strum::VariantArray;
 
 
 #[cfg(feature = "std")]
@@ -88,6 +89,9 @@ mod telemetry_packet;
 #[allow(dead_code)]
 pub const STRING_VALUE_ELEMENTS: usize = 1;
 pub const DYNAMIC_ELEMENT: usize = 0;
+pub const MAX_VALUE_DATA_ENDPOINT: u32 = (DataEndpoint::VARIANTS.len() - 1) as u32;
+pub const MAX_VALUE_DATA_TYPE: u32 = (DataType::VARIANTS.len() - 1) as u32;
+
 impl DataType {
     pub const COUNT: usize = (MAX_VALUE_DATA_TYPE + 1) as usize;
 }

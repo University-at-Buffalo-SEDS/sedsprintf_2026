@@ -1,9 +1,8 @@
 // src/serialize.rs
 
-use crate::config::{MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE};
 use crate::macros::ReprU32Enum;
 use crate::telemetry_packet::{DataEndpoint, TelemetryPacket};
-use crate::{config::DataType, impl_repr_u32_enum};
+use crate::{config::DataType, impl_repr_u32_enum, MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE};
 use crate::{try_enum_from_u32, TelemetryError, TelemetryResult};
 use alloc::{sync::Arc, vec::Vec};
 use core::convert::TryInto;
