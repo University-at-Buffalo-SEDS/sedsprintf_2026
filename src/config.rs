@@ -18,14 +18,14 @@ pub const MAX_PRECISION_IN_STRINGS: usize = 8; // 12 is expensive; tune as neede
 #[repr(u32)]
 pub enum DataEndpoint {
     SdCard,
-    Radio,
+    GroundStation,
 }
 
 impl DataEndpoint {
     pub fn as_str(self) -> &'static str {
         match self {
             DataEndpoint::SdCard => "SD_CARD",
-            DataEndpoint::Radio => "RADIO",
+            DataEndpoint::GroundStation => "GROUND_STATION",
         }
     }
 }
@@ -41,8 +41,9 @@ pub enum DataType {
     TelemetryError,
     GpsData,
     ImuData,
+    GyroData,
+    AccelData,
     BatteryStatus,
-    SystemStatus,
     BarometerData,
     MessageData,
 }
@@ -53,8 +54,9 @@ impl DataType {
             DataType::TelemetryError => "TELEMETRY_ERROR",
             DataType::GpsData => "GPS_DATA",
             DataType::ImuData => "IMU_DATA",
+            DataType::GyroData => "GYRO_DATA",
+            DataType::AccelData => "ACCEL_DATA",
             DataType::BatteryStatus => "BATTERY_STATUS",
-            DataType::SystemStatus => "SYSTEM_STATUS",
             DataType::BarometerData => "BAROMETER_DATA",
             DataType::MessageData => "MESSAGE_DATA",
         }
@@ -66,7 +68,8 @@ pub const MESSAGE_DATA_TYPES: [MessageDataType; DataType::COUNT] = [
     MessageDataType::Float32,
     MessageDataType::Float32,
     MessageDataType::Float32,
-    MessageDataType::UInt8,
+    MessageDataType::Float32,
+    MessageDataType::Float32,
     MessageDataType::Float32,
     MessageDataType::String,
 ];
@@ -79,15 +82,17 @@ pub const MESSAGE_INFO_TYPES: [MessageType; DataType::COUNT] = [
     MessageType::Info,
     MessageType::Info,
     MessageType::Info,
+    MessageType::Info,
 ];
 
 /// how many elements each message carries
 pub const MESSAGE_ELEMENTS: [usize; DataType::COUNT] = [
     DYNAMIC_ELEMENT, // elements in the Telemetry Error data
     3,               // elements in the GPS data (lat, lon, alt)
-    6,               // elements in the IMU data (accel x,y,z; gyro x,y,z; mag x,y,z)
-    4,               // elements in the Battery Status data
-    2,               // elements in the System Status data (cpu load, memory usage)
+    6,               // elements in the IMU data (accel x,y,z; gyro x,y,z)
+    3,               // elements in the Gyro data (x,y,z)
+    3,               // elements in the Accel data (x,y,z)
+    3,               // elements in the Battery Status data (voltage, current, temperature)
     3,               // elements in the Barometer data (pressure, temperature, altitude)
     DYNAMIC_ELEMENT, // elements in the Message Data
 ];
@@ -95,31 +100,35 @@ pub const MESSAGE_ELEMENTS: [usize; DataType::COUNT] = [
 pub const MESSAGE_TYPES: [MessageMeta; DataType::COUNT] = [
     MessageMeta {
         data_size: MessageSizeType::Dynamic,
-        endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
+        endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
     },
     MessageMeta {
         data_size: MessageSizeType::Static(get_needed_message_size(DataType::GpsData)),
-        endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
+        endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
     },
     MessageMeta {
         data_size: MessageSizeType::Static(get_needed_message_size(DataType::ImuData)),
-        endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
+        endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
+    },
+    MessageMeta {
+        data_size: MessageSizeType::Static(get_needed_message_size(DataType::GyroData)),
+        endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
+    },
+    MessageMeta {
+        data_size: MessageSizeType::Static(get_needed_message_size(DataType::AccelData)),
+        endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
     },
     MessageMeta {
         data_size: MessageSizeType::Static(get_needed_message_size(DataType::BatteryStatus)),
-        endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
-    },
-    MessageMeta {
-        data_size: MessageSizeType::Static(get_needed_message_size(DataType::SystemStatus)),
-        endpoints: &[DataEndpoint::SdCard],
+        endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
     },
     MessageMeta {
         data_size: MessageSizeType::Static(get_needed_message_size(DataType::BarometerData)),
-        endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
+        endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
     },
     MessageMeta {
         data_size: MessageSizeType::Dynamic,
-        endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
+        endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
     },
 ];
 // -------------------------------------------------------------
