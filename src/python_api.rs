@@ -6,7 +6,8 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList, PyModule, PyTuple};
 
 use crate::{
-    config::{message_meta, DataEndpoint, MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE}, router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, LeBytes, Router},
+    config::{DataEndpoint, MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE}, message_meta,
+    router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, LeBytes, Router},
     serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet},
     telemetry_packet::{DataType, TelemetryPacket},
     try_enum_from_u32,
@@ -595,13 +596,6 @@ pub fn sedsprintf_rs(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
 
         let dt_enum = int_enum.call1(("DataType", dt_dict))?;
 
-        // Per-member docstrings
-        let set_doc = |name: &str, doc: &str| -> PyResult<()> {
-            if let Ok(member) = dt_enum.getattr(name) {
-                member.setattr("__doc__", doc)?;
-            }
-            Ok(())
-        };
         // Add to module
         m.add("DataType", dt_enum)?;
     }
@@ -618,14 +612,6 @@ pub fn sedsprintf_rs(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         }
 
         let ep_enum = int_enum.call1(("DataEndpoint", ep_dict))?;
-
-        // Per-member docstrings
-        let set_doc = |name: &str, doc: &str| -> PyResult<()> {
-            if let Ok(member) = ep_enum.getattr(name) {
-                member.setattr("__doc__", doc)?;
-            }
-            Ok(())
-        };
 
         // Add to module
         m.add("DataEndpoint", ep_enum)?;

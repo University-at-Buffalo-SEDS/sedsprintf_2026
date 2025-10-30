@@ -16,7 +16,10 @@ extern crate core;
 extern crate std;
 
 
-use crate::config::{MAX_STATIC_HEX_LENGTH, MAX_STATIC_STRING_LENGTH};
+use crate::config::{
+    DataEndpoint, DataType, MAX_STATIC_HEX_LENGTH, MAX_STATIC_STRING_LENGTH, MAX_VALUE_DATA_TYPE,
+    MESSAGE_DATA_TYPES, MESSAGE_ELEMENTS, MESSAGE_INFO_TYPES, MESSAGE_TYPES,
+};
 use crate::macros::{ReprI32Enum, ReprU32Enum};
 
 
@@ -81,6 +84,46 @@ mod macros;
 mod router;
 mod serialize;
 mod telemetry_packet;
+// ----------------------Not User Editable----------------------
+#[allow(dead_code)]
+pub const STRING_VALUE_ELEMENTS: usize = 1;
+pub const DYNAMIC_ELEMENT: usize = 0;
+impl DataType {
+    pub const COUNT: usize = (MAX_VALUE_DATA_TYPE + 1) as usize;
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub enum MessageSizeType {
+    Static(usize),
+    Dynamic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub struct MessageMeta {
+    pub data_size: MessageSizeType,
+    pub endpoints: &'static [DataEndpoint],
+}
+
+#[inline(always)]
+pub fn message_meta(ty: DataType) -> &'static MessageMeta {
+    &MESSAGE_TYPES[ty as usize]
+}
+
+#[inline(always)]
+pub const fn get_needed_message_size(ty: DataType) -> usize {
+    data_type_size(get_data_type(ty)) * MESSAGE_ELEMENTS[ty as usize]
+}
+
+#[inline(always)]
+pub const fn get_info_type(ty: DataType) -> MessageType {
+    MESSAGE_INFO_TYPES[ty as usize]
+}
+
+#[inline(always)]
+pub const fn get_data_type(ty: DataType) -> MessageDataType {
+    MESSAGE_DATA_TYPES[ty as usize]
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 #[allow(dead_code)]

@@ -1,10 +1,9 @@
 use crate::config::{
-    get_data_type, get_needed_message_size, message_meta, MAX_STATIC_HEX_LENGTH,
-    MAX_STATIC_STRING_LENGTH, MESSAGE_ELEMENTS,
+    get_needed_message_size, MAX_STATIC_HEX_LENGTH, MAX_STATIC_STRING_LENGTH, MESSAGE_ELEMENTS,
 };
 use crate::router::EndpointHandler;
 use crate::telemetry_packet::{DataEndpoint, DataType, TelemetryPacket};
-use crate::{router, MessageDataType, TelemetryError};
+use crate::{get_data_type, message_meta, router, MessageDataType, TelemetryError};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -1187,10 +1186,9 @@ mod tests_more {
 
 
     use crate::{
-        config::{
-            get_data_type, message_meta, DataEndpoint, DataType, MessageSizeType, MESSAGE_ELEMENTS,
-        }, router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, Router}, serialize, telemetry_packet::TelemetryPacket,
-        MessageDataType,
+        config::{DataEndpoint, DataType, MessageSizeType, MESSAGE_ELEMENTS}, get_data_type, message_meta, router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, Router},
+        serialize,
+        telemetry_packet::TelemetryPacket, MessageDataType,
         TelemetryError,
         TelemetryErrorCode,
         TelemetryResult,

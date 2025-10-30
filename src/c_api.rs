@@ -4,18 +4,18 @@
 
 use crate::router::{Clock, LeBytes};
 use crate::{
-    config::DataEndpoint, do_vec_log_typed, router, router::{BoardConfig, EndpointHandler, Router},
-    serialize::deserialize_packet,
-    serialize::packet_wire_size, serialize::serialize_packet,
+    config::DataEndpoint, config::MessageSizeType, config::MAX_STATIC_STRING_LENGTH, do_vec_log_typed,
+    get_data_type,
+    message_meta,
+    router,
+    router::{BoardConfig, EndpointHandler, Router}, serialize::deserialize_packet, serialize::packet_wire_size, serialize::peek_envelope,
+    serialize::serialize_packet,
     telemetry_packet::{DataType, TelemetryPacket},
     MessageDataType,
     TelemetryError,
     TelemetryErrorCode,
     TelemetryResult,
 };
-
-use crate::config::{get_data_type, MAX_STATIC_STRING_LENGTH};
-use crate::serialize::peek_envelope;
 use alloc::{boxed::Box, string::String, sync::Arc, vec, vec::Vec};
 use core::{ffi::c_char, ffi::c_void, mem::size_of, ptr, slice, str::from_utf8};
 // ============================ status / error helpers ============================
@@ -78,10 +78,6 @@ fn expected_payload_size_for(ty: DataType) -> Option<usize> {
         _ => None,
     }
 }
-
-
-use crate::config::{message_meta, MessageSizeType};
-// add this if not already imported
 
 #[inline]
 fn fixed_payload_size_if_static(ty: DataType) -> Option<usize> {

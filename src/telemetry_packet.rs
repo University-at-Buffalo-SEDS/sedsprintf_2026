@@ -2,13 +2,13 @@
 
 
 // ---- core/alloc imports usable in both std and no_std ----
-pub use crate::config::{
-    get_data_type, get_info_type, message_meta, DataEndpoint, DataType,
-    DEVICE_IDENTIFIER, MAX_PRECISION_IN_STRINGS,
-};
+pub use crate::config::{DataEndpoint, DataType, DEVICE_IDENTIFIER, MAX_PRECISION_IN_STRINGS};
 use crate::config::{MessageSizeType, MAX_STATIC_HEX_LENGTH, MAX_STATIC_STRING_LENGTH};
 use crate::router::LeBytes;
-use crate::{MessageDataType, MessageType, TelemetryError, TelemetryResult};
+use crate::{
+    get_data_type, get_info_type, message_meta, MessageDataType, MessageType, TelemetryError,
+    TelemetryResult,
+};
 use alloc::{string::String, string::ToString, sync::Arc, vec::Vec};
 use core::fmt::Write;
 
