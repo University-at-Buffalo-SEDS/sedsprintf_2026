@@ -3,9 +3,9 @@
 
 use crate::config::{MessageSizeType, DEVICE_IDENTIFIER};
 use crate::{
-    config::{message_meta, DataEndpoint, DataType}, impl_letype_num,
-    serialize,
-    telemetry_packet::TelemetryPacket, TelemetryError,
+    config::{DataEndpoint, DataType}, impl_letype_num,
+    message_meta,
+    serialize, telemetry_packet::TelemetryPacket, TelemetryError,
     TelemetryResult,
 };
 use alloc::{boxed::Box, collections::VecDeque, sync::Arc, vec::Vec};

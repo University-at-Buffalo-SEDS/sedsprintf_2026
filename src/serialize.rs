@@ -180,7 +180,7 @@ pub fn deserialize_packet(buf: &[u8]) -> Result<TelemetryPacket, TelemetryError>
         ty,
         data_size: dsz,
         sender: sender_arc,
-        endpoints: Arc::<[_]>::from(eps),
+        endpoints: Arc::from(eps),
         timestamp: ts,
         payload: payload_arc,
     })

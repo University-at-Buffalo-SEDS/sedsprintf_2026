@@ -4,18 +4,18 @@
 
 use crate::router::{Clock, LeBytes};
 use crate::{
-    config::DataEndpoint, do_vec_log_typed, router, router::{BoardConfig, EndpointHandler, Router},
-    serialize::deserialize_packet,
-    serialize::packet_wire_size, serialize::serialize_packet,
+    config::DataEndpoint, config::MessageSizeType, config::MAX_STATIC_STRING_LENGTH, do_vec_log_typed,
+    get_data_type,
+    message_meta,
+    router,
+    router::{BoardConfig, EndpointHandler, Router}, serialize::deserialize_packet, serialize::packet_wire_size, serialize::peek_envelope,
+    serialize::serialize_packet,
     telemetry_packet::{DataType, TelemetryPacket},
     MessageDataType,
     TelemetryError,
     TelemetryErrorCode,
     TelemetryResult,
 };
-
-use crate::config::{get_data_type, MAX_STATIC_STRING_LENGTH};
-use crate::serialize::peek_envelope;
 use alloc::{boxed::Box, string::String, sync::Arc, vec, vec::Vec};
 use core::{ffi::c_char, ffi::c_void, mem::size_of, ptr, slice, str::from_utf8};
 // ============================ status / error helpers ============================
@@ -78,7 +78,6 @@ fn expected_payload_size_for(ty: DataType) -> Option<usize> {
         _ => None,
     }
 }
-use crate::config::{message_meta, MessageSizeType}; // add this if not already imported
 
 #[inline]
 fn fixed_payload_size_if_static(ty: DataType) -> Option<usize> {
@@ -645,10 +644,18 @@ pub extern "C" fn seds_router_log_typed_ex(
         let required_elems = required_bytes / elem_size;
 
         return match (elem_kind, elem_size) {
-            (SEDS_EK_UNSIGNED, 1) => finish_with::<u8>(r, ty, ts, queue, &padded, required_elems, 1),
-            (SEDS_EK_UNSIGNED, 2) => finish_with::<u16>(r, ty, ts, queue, &padded, required_elems, 2),
-            (SEDS_EK_UNSIGNED, 4) => finish_with::<u32>(r, ty, ts, queue, &padded, required_elems, 4),
-            (SEDS_EK_UNSIGNED, 8) => finish_with::<u64>(r, ty, ts, queue, &padded, required_elems, 8),
+            (SEDS_EK_UNSIGNED, 1) => {
+                finish_with::<u8>(r, ty, ts, queue, &padded, required_elems, 1)
+            }
+            (SEDS_EK_UNSIGNED, 2) => {
+                finish_with::<u16>(r, ty, ts, queue, &padded, required_elems, 2)
+            }
+            (SEDS_EK_UNSIGNED, 4) => {
+                finish_with::<u32>(r, ty, ts, queue, &padded, required_elems, 4)
+            }
+            (SEDS_EK_UNSIGNED, 8) => {
+                finish_with::<u64>(r, ty, ts, queue, &padded, required_elems, 8)
+            }
 
             (SEDS_EK_SIGNED, 1) => finish_with::<i8>(r, ty, ts, queue, &padded, required_elems, 1),
             (SEDS_EK_SIGNED, 2) => finish_with::<i16>(r, ty, ts, queue, &padded, required_elems, 2),

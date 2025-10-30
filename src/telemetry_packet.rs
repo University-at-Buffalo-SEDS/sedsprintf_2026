@@ -2,15 +2,15 @@
 
 
 // ---- core/alloc imports usable in both std and no_std ----
-pub use crate::config::{
-    get_data_type, get_info_type, message_meta, DataEndpoint, DataType,
-    DEVICE_IDENTIFIER, MAX_PRECISION_IN_STRINGS,
-};
-use crate::{MessageDataType, MessageType, TelemetryError, TelemetryResult};
-use alloc::{string::String, string::ToString, sync::Arc, vec::Vec};
-use core::{fmt::Write};
+pub use crate::config::{DataEndpoint, DataType, DEVICE_IDENTIFIER, MAX_PRECISION_IN_STRINGS};
 use crate::config::{MessageSizeType, MAX_STATIC_HEX_LENGTH, MAX_STATIC_STRING_LENGTH};
 use crate::router::LeBytes;
+use crate::{
+    get_data_type, get_info_type, message_meta, MessageDataType, MessageType, TelemetryError,
+    TelemetryResult,
+};
+use alloc::{string::String, string::ToString, sync::Arc, vec::Vec};
+use core::fmt::Write;
 
 
 const EPOCH_MS_THRESHOLD: u64 = 1_000_000_000_000; // clearly not an uptime counter
@@ -116,7 +116,11 @@ fn validate_dynamic_len_and_content(ty: DataType, bytes: &[u8]) -> TelemetryResu
     match dt {
         MessageDataType::String => {
             // Trim trailing NULs for validation, but do not copy.
-            let end = bytes.iter().rposition(|&b| b != 0).map(|i| i + 1).unwrap_or(0);
+            let end = bytes
+                .iter()
+                .rposition(|&b| b != 0)
+                .map(|i| i + 1)
+                .unwrap_or(0);
             if end > MAX_STATIC_STRING_LENGTH {
                 return Err(TelemetryError::SizeMismatch {
                     expected: MAX_STATIC_STRING_LENGTH,
@@ -171,7 +175,10 @@ impl TelemetryPacket {
         match meta.data_size {
             MessageSizeType::Static(need) => {
                 if payload.len() != need {
-                    return Err(TelemetryError::SizeMismatch { expected: need, got: payload.len() });
+                    return Err(TelemetryError::SizeMismatch {
+                        expected: need,
+                        got: payload.len(),
+                    });
                 }
             }
             MessageSizeType::Dynamic => {
@@ -219,13 +226,19 @@ impl TelemetryPacket {
             // Static: exact byte count must match
             MessageSizeType::Static(exact) => {
                 if need != exact {
-                    return Err(TelemetryError::SizeMismatch { expected: exact, got: need });
+                    return Err(TelemetryError::SizeMismatch {
+                        expected: exact,
+                        got: need,
+                    });
                 }
             }
             // Dynamic: just ensure it's a multiple of element width (4 for f32)
             MessageSizeType::Dynamic => {
                 if need % 4 != 0 {
-                    return Err(TelemetryError::SizeMismatch { expected: 4, got: need });
+                    return Err(TelemetryError::SizeMismatch {
+                        expected: 4,
+                        got: need,
+                    });
                 }
             }
         }
@@ -249,7 +262,6 @@ impl TelemetryPacket {
         )
     }
 
-
     /// Validate internal invariants (size, endpoints, etc.).
     pub fn validate(&self) -> TelemetryResult<()> {
         if self.endpoints.is_empty() {
@@ -266,7 +278,10 @@ impl TelemetryPacket {
         match meta.data_size {
             MessageSizeType::Static(need) => {
                 if self.data_size != need {
-                    return Err(TelemetryError::SizeMismatch { expected: need, got: self.data_size });
+                    return Err(TelemetryError::SizeMismatch {
+                        expected: need,
+                        got: self.data_size,
+                    });
                 }
             }
             MessageSizeType::Dynamic => {
@@ -275,7 +290,6 @@ impl TelemetryPacket {
         }
         Ok(())
     }
-
 
     fn build_endpoint_string(&self, endpoints: &mut String) {
         for (i, ep) in self.endpoints.iter().enumerate() {
@@ -329,8 +343,8 @@ impl TelemetryPacket {
 
     #[inline]
     fn data_to_string<T>(&self, s: &mut String)
-        where
-            T: LeBytes + core::fmt::Display,
+    where
+        T: LeBytes + core::fmt::Display,
     {
         let mut it = self.payload.chunks_exact(T::WIDTH);
         let mut first = true;
@@ -375,54 +389,45 @@ impl TelemetryPacket {
             }
             MessageDataType::Float32 => {
                 self.data_to_string::<f32>(&mut s);
-
             }
             MessageDataType::UInt128 => {
                 self.data_to_string::<u128>(&mut s);
-
             }
             MessageDataType::UInt64 => {
                 self.data_to_string::<u64>(&mut s);
-
             }
             MessageDataType::UInt32 => {
                 self.data_to_string::<u32>(&mut s);
-
             }
             MessageDataType::UInt16 => {
                 self.data_to_string::<u16>(&mut s);
-
             }
             MessageDataType::UInt8 => {
                 self.data_to_string::<i8>(&mut s);
-
             }
             MessageDataType::Int128 => {
                 self.data_to_string::<i128>(&mut s);
-
             }
             MessageDataType::Int64 => {
                 self.data_to_string::<i64>(&mut s);
-
             }
             MessageDataType::Int32 => {
                 self.data_to_string::<i32>(&mut s);
-
             }
             MessageDataType::Int16 => {
                 self.data_to_string::<i16>(&mut s);
-
             }
             MessageDataType::Int8 => {
                 self.data_to_string::<i8>(&mut s);
-
             }
             MessageDataType::Bool => {
                 // Interpret any nonzero as true
                 let mut it = self.payload.iter().peekable();
                 while let Some(b) = it.next() {
                     let _ = write!(s, "{}", *b != 0);
-                    if it.peek().is_some() { s.push_str(", "); }
+                    if it.peek().is_some() {
+                        s.push_str(", ");
+                    }
                 }
             }
             MessageDataType::String => { /* handled above */ }

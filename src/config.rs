@@ -1,11 +1,15 @@
 // src/config.rs
-use crate::{data_type_size, MessageDataType, MessageType};
+#[allow(unused_imports)]
+pub(crate) use crate::{
+    get_needed_message_size, MessageDataType, MessageMeta, MessageSizeType, MessageType,
+    DYNAMIC_ELEMENT, STRING_VALUE_ELEMENTS,
+};
+
 
 //----------------------User Editable----------------------
 pub const DEVICE_IDENTIFIER: &str = "TEST_PLATFORM";
 pub const MAX_STATIC_STRING_LENGTH: usize = 1024;
 pub const MAX_STATIC_HEX_LENGTH: usize = 1024;
-
 pub const MAX_PRECISION_IN_STRINGS: usize = 8; // 12 is expensive; tune as needed
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
@@ -81,13 +85,13 @@ pub const MESSAGE_INFO_TYPES: [MessageType; DataType::COUNT] = [
 
 /// how many elements each message carries
 pub const MESSAGE_ELEMENTS: [usize; DataType::COUNT] = [
-    1,                     // elements int he Telemetry Error data
-    3,                     // elements in the GPS data (lat, lon, alt)
-    6,                     // elements in the IMU data (accel x,y,z; gyro x,y,z; mag x,y,z)
-    4,                     // elements in the Battery Status data
-    2,                     // elements in the System Status data (cpu load, memory usage)
-    3,                     // elements in the Barometer data (pressure, temperature, altitude)
-    STRING_VALUE_ELEMENTS, // elements in the Message Data
+    DYNAMIC_ELEMENT, // elements in the Telemetry Error data
+    3,               // elements in the GPS data (lat, lon, alt)
+    6,               // elements in the IMU data (accel x,y,z; gyro x,y,z; mag x,y,z)
+    4,               // elements in the Battery Status data
+    2,               // elements in the System Status data (cpu load, memory usage)
+    3,               // elements in the Barometer data (pressure, temperature, altitude)
+    DYNAMIC_ELEMENT, // elements in the Message Data
 ];
 /// All message types with their metadata.
 pub const MESSAGE_TYPES: [MessageMeta; DataType::COUNT] = [
@@ -121,43 +125,3 @@ pub const MESSAGE_TYPES: [MessageMeta; DataType::COUNT] = [
     },
 ];
 // -------------------------------------------------------------
-
-// ----------------------Not User Editable----------------------
-#[allow(dead_code)]
-pub const STRING_VALUE_ELEMENTS: usize = 1;
-impl DataType {
-    pub const COUNT: usize = (MAX_VALUE_DATA_TYPE + 1) as usize;
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
-pub enum MessageSizeType {
-    Static(usize),
-    Dynamic,
-
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
-pub struct MessageMeta {
-    pub data_size: MessageSizeType,
-    pub endpoints: &'static [DataEndpoint],
-}
-
-#[inline(always)]
-pub fn message_meta(ty: DataType) -> &'static MessageMeta {
-    &MESSAGE_TYPES[ty as usize]
-}
-
-#[inline(always)]
-pub const fn get_needed_message_size(ty: DataType) -> usize {
-    data_type_size(get_data_type(ty)) * MESSAGE_ELEMENTS[ty as usize]
-}
-
-#[inline(always)]
-pub const fn get_info_type(ty: DataType) -> MessageType {
-    MESSAGE_INFO_TYPES[ty as usize]
-}
-
-#[inline(always)]
-pub const fn get_data_type(ty: DataType) -> MessageDataType {
-    MESSAGE_DATA_TYPES[ty as usize]
-}
