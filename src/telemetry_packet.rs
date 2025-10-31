@@ -375,7 +375,6 @@ impl TelemetryPacket {
             s.push_str(", Data: (");
         }
 
-        // Try UTF-8 string first (keeps your previous behavior)
         if let Some(msg) = self.data_as_utf8_ref() {
             s.push('"');
             s.push_str(msg);
@@ -497,7 +496,6 @@ fn append_human_time(out: &mut String, total_ms: u64) {
             ),
         );
     } else {
-        // Uptime path (your original pretty format)
         let hours = total_ms / 3_600_000;
         let minutes = (total_ms % 3_600_000) / 60_000;
         let seconds = (total_ms % 60_000) / 1_000;
