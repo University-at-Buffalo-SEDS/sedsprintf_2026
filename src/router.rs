@@ -261,7 +261,7 @@ impl Router {
         loop {
             let pkt_opt = {
                 // Pop exactly one under the lock, then release it.
-                let mut st = self.state.lock().unwrap();
+                let mut st = self.state.lock();
                 st.transmit_queue.pop_front()
             };
             let Some(pkt) = pkt_opt else { break };
@@ -277,18 +277,18 @@ impl Router {
     }
 
     pub fn clear_queues(&self) {
-        let mut st = self.state.lock().unwrap();
+        let mut st = self.state.lock();
         st.transmit_queue.clear();
         st.received_queue.clear();
     }
 
     pub fn clear_rx_queue(&self) {
-        let mut st = self.state.lock().unwrap();
+        let mut st = self.state.lock();
         st.received_queue.clear();
     }
 
     pub fn clear_tx_queue(&self) {
-        let mut st = self.state.lock().unwrap();
+        let mut st = self.state.lock();
         st.transmit_queue.clear();
     }
 
@@ -296,7 +296,7 @@ impl Router {
         let start = self.clock.now_ms();
         loop {
             let pkt_opt = {
-                let mut st = self.state.lock().unwrap();
+                let mut st = self.state.lock();
                 st.transmit_queue.pop_front()
             };
             let Some(pkt) = pkt_opt else { break };
@@ -316,7 +316,7 @@ impl Router {
         let start = self.clock.now_ms();
         loop {
             let item_opt = {
-                let mut st = self.state.lock().unwrap();
+                let mut st = self.state.lock();
                 st.received_queue.pop_front()
             };
             let Some(item) = item_opt else { break };
@@ -336,7 +336,7 @@ impl Router {
             let mut did_any = false;
 
             if let Some(pkt) = {
-                let mut st = self.state.lock().unwrap();
+                let mut st = self.state.lock();
                 st.transmit_queue.pop_front()
             } {
                 self.send(&pkt)?;
@@ -347,7 +347,7 @@ impl Router {
             }
 
             if let Some(item) = {
-                let mut st = self.state.lock().unwrap();
+                let mut st = self.state.lock();
                 st.received_queue.pop_front()
             } {
                 self.handle_rx_queue_item(item)?;
@@ -367,7 +367,7 @@ impl Router {
 
     pub fn queue_tx_message(&self, pkt: TelemetryPacket) -> TelemetryResult<()> {
         pkt.validate()?;
-        let mut st = self.state.lock().unwrap();
+        let mut st = self.state.lock();
         st.transmit_queue.push_back(pkt);
         Ok(())
     }
@@ -375,7 +375,7 @@ impl Router {
     pub fn process_received_queue(&self) -> TelemetryResult<()> {
         loop {
             let item_opt = {
-                let mut st = self.state.lock().unwrap();
+                let mut st = self.state.lock();
                 st.received_queue.pop_front()
             };
             let Some(item) = item_opt else { break };
@@ -386,14 +386,14 @@ impl Router {
 
     pub fn rx_serialized_packet_to_queue(&self, bytes: &[u8]) -> TelemetryResult<()> {
         let arc = Arc::<[u8]>::from(bytes);
-        let mut st = self.state.lock().unwrap();
+        let mut st = self.state.lock();
         st.received_queue.push_back(RxItem::Serialized(arc));
         Ok(())
     }
 
     pub fn rx_packet_to_queue(&self, pkt: TelemetryPacket) -> TelemetryResult<()> {
         pkt.validate()?;
-        let mut st = self.state.lock().unwrap();
+        let mut st = self.state.lock();
         st.received_queue.push_back(RxItem::Packet(pkt));
         Ok(())
     }
