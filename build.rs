@@ -99,7 +99,6 @@ fn generate_pyi_stub() {
     let dt_members = parse_enum_members(&dt_block); // Vec<(NAME, VALUE_TEXT)>
     let ep_members = parse_enum_members(&ep_block);
 
-    // Render the two IntEnum classes (no SedsResult in the .pyi per your template)
     let dt_enum_text = render_python_intenum(
         "DataType",
         r#"Wire-level type tags (generated to match Rust/config.rs)."#,
