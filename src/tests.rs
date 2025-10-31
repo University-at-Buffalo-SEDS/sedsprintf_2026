@@ -241,7 +241,7 @@ mod tests {
         let box_clock_tx = StepClock::new_default_box();
         let box_clock_rx = StepClock::new_default_box();
 
-        let mut tx_router = Router::new(Some(tx_fn), Default::default(), box_clock_tx);
+        let tx_router = Router::new(Some(tx_fn), Default::default(), box_clock_tx);
 
         // --- Set up an RX router with a local SD handler that decodes f32 payloads ---
         let seen: Arc<Mutex<Option<(DataType, Vec<f32>)>>> = Arc::new(Mutex::new(None));
@@ -252,7 +252,7 @@ mod tests {
             Ok(())
         }
 
-        let mut rx_router = Router::new(
+        let rx_router = Router::new(
             Some(tx_handler),
             crate::router::BoardConfig::new(vec![sd_handler]),
             box_clock_rx,
@@ -288,7 +288,7 @@ mod tests {
         let (bus, tx_fn) = TestBus::new();
         let box_clock = StepClock::new_default_box();
 
-        let mut router = Router::new(Some(tx_fn), Default::default(), box_clock);
+        let router = Router::new(Some(tx_fn), Default::default(), box_clock);
 
         // Enqueue for transmit
         let data = [10.0_f32, 10.25, 10.5];
@@ -701,7 +701,7 @@ mod timeout_tests {
 
         let box_clock = StepClock::new_default_box();
 
-        let mut r = Router::new(Some(tx), BoardConfig::new(vec![handler]), box_clock);
+        let r = Router::new(Some(tx), BoardConfig::new(vec![handler]), box_clock);
 
         // Enqueue TX (3)
         for _ in 0..3 {
@@ -743,7 +743,7 @@ mod timeout_tests {
         let handler = get_handler(rx_count_c);
         let clock = StepClock::new_box(0, 10);
 
-        let mut r = Router::new(Some(tx), BoardConfig::new(vec![handler]), clock);
+        let r = Router::new(Some(tx), BoardConfig::new(vec![handler]), clock);
 
         // Seed work in both queues
         for _ in 0..5 {
@@ -795,7 +795,7 @@ mod timeout_tests {
         let handler = get_handler(rx_count_c);
         let clock = StepClock::new_box(0, 5);
 
-        let mut r = Router::new(Some(tx), BoardConfig::new(vec![handler]), clock);
+        let r = Router::new(Some(tx), BoardConfig::new(vec![handler]), clock);
 
         // Seed work in both queues
         for _ in 0..5 {
@@ -847,7 +847,7 @@ mod timeout_tests {
         let handler = get_handler(rx_count_c);
         let start = u64::MAX - 1;
         let clock = StepClock::new_box(start, 2);
-        let mut r = Router::new(Some(tx), BoardConfig::new(vec![handler]), clock);
+        let r = Router::new(Some(tx), BoardConfig::new(vec![handler]), clock);
 
         // One TX and one RX (RX is only-local to avoid creating extra TX on receive)
         r.log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0])
@@ -988,7 +988,7 @@ mod tests_extra {
             })),
         };
 
-        let mut r = Router::new(Some(tx), BoardConfig::new(vec![handler]), zero_clock());
+        let r = Router::new(Some(tx), BoardConfig::new(vec![handler]), zero_clock());
 
         // Enqueue one TX and one RX
         let pkt_tx = TelemetryPacket::from_f32_slice(
