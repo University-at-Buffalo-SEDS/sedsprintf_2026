@@ -60,26 +60,44 @@ SedsResult bus_send(SimBus * bus, const SimNode * from, const uint8_t * bytes, s
 // IMPORTANT: Only the *originator* of a packet is allowed to TX.
 // Receivers never re-TX the same packet, preventing duplicates while
 // preserving router local delivery order.
-static SedsResult node_tx_send(const uint8_t * bytes, size_t len, void * user)
+static SedsResult node_tx_send(const uint8_t * bytes, const size_t len, void * user)
 {
-    SimNode * self = (SimNode *) user;
+    SimNode * self = user;
     if (!self || !self->bus) return SEDS_ERR;
 
     return bus_send(self->bus, self, bytes, len);
 }
 
-SedsResult radio_handler(const SedsPacketView * pkt, void * user)
+SedsResult radio_handler_serial(const uint8_t *bytes, const size_t len, void *user)
 {
     SimNode * self = user;
-    char buf[seds_pkt_to_string_len(pkt)];
-    const SedsResult s = seds_pkt_to_string(pkt, buf, sizeof(buf));
-    if (s != SEDS_OK)
-    {
+
+    // 1) Deserialize to an owned packet (owns sender/endpoints/payload)
+    SedsOwnedPacket *owned = seds_pkt_deserialize_owned(bytes, len);
+    if (!owned) {
+        fprintf(stderr, "[RADIO] deserialize failed\n");
+        return SEDS_ERR;
+    }
+
+    SedsPacketView view;
+    if (seds_owned_pkt_view(owned, &view) != SEDS_OK) {
+        fprintf(stderr, "[RADIO] owned_pkt_view failed\n");
+        seds_owned_pkt_free(owned);
+        return SEDS_ERR;
+    }
+
+    char buf[seds_pkt_to_string_len(&view)];
+    SedsResult s = seds_pkt_to_string(&view, buf, sizeof(buf));
+    if (s != SEDS_OK) {
         fprintf(stderr, "[RADIO] to_string failed: %d\n", s);
+        seds_owned_pkt_free(owned);
         return s;
     }
     if (self) self->radio_hits++;
     printf("[RADIO] %s\n", buf);
+
+    // 4) Clean up
+    seds_owned_pkt_free(owned);
     return SEDS_OK;
 }
 
@@ -119,7 +137,7 @@ SedsResult node_init(SimNode * n, SimBus * bus, const char * name, int radio, in
     {
         locals[num++] = (SedsLocalEndpointDesc){
             .endpoint = SEDS_EP_RADIO,
-            .packet_handler = radio_handler,
+            .serialized_handler = radio_handler_serial,
             .user = (void *) n
         };
     }
@@ -162,7 +180,7 @@ void node_free(SimNode * n)
     n->bus = NULL;
 }
 
-void node_rx(SimNode * n, const uint8_t * bytes, size_t len)
+void node_rx(SimNode * n, const uint8_t * bytes, const size_t len)
 {
     if (!n || !n->r || !bytes || !len) return;
     // Mark ingress only for debugging (not used by TX gate anymore)
@@ -193,7 +211,7 @@ uint64_t node_now_since_bus_ms(void *user)
 }
 
 // --- Monotonic milliseconds provider for the FFI timeout calls ---
-uint64_t host_now_ms(void * user)
+uint64_t host_now_ms(const void * user)
 {
     (void) user;
 

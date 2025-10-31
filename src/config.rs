@@ -1,10 +1,10 @@
-use strum::EnumCount;
 // src/config.rs
 #[allow(unused_imports)]
 pub(crate) use crate::{
     get_needed_message_size, MessageDataType, MessageMeta, MessageSizeType, MessageType,
     DYNAMIC_ELEMENT, STRING_VALUE_ELEMENTS,
 };
+use strum::EnumCount;
 use strum_macros::EnumCount;
 
 

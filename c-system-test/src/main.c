@@ -19,7 +19,7 @@ static uint64_t gen_random_num_ms()
     const uint16_t max = 1000;
     uint16_t value;
 
-    int fd = open("/dev/urandom", O_RDONLY);
+    const int fd = open("/dev/urandom", O_RDONLY);
     if (fd < 0) return min; // fallback
     if (read(fd, &value, sizeof(value)) != sizeof(value))
     {

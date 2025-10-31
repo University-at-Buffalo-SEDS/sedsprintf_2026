@@ -1,4 +1,6 @@
 // src/py_api.rs
+#![allow(dead_code)]
+
 use crate::config::MessageSizeType;
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
@@ -6,7 +8,12 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList, PyModule, PyTuple};
 
 use crate::{
-    config::DataEndpoint, message_meta, router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, LeBytes, Router}, serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet},
+    config::DataEndpoint,
+    message_meta,
+    router::{
+        BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, LeBytes, Router,
+    },
+    serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet},
     telemetry_packet::{DataType, TelemetryPacket},
     try_enum_from_u32,
     TelemetryError,
@@ -15,11 +22,11 @@ use crate::{
     MAX_VALUE_DATA_TYPE,
 };
 
-
 // ------------------ helpers ------------------
 const EK_UNSIGNED: u32 = 0;
 const EK_SIGNED: u32 = 1;
 const EK_FLOAT: u32 = 2;
+
 fn py_err_from(e: TelemetryError) -> PyErr {
     PyRuntimeError::new_err(format!("Telemetry error: {e:?}"))
 }
@@ -39,6 +46,8 @@ fn required_payload_size_for(ty: DataType) -> Option<usize> {
     }
 }
 
+/// Reinterpret a byte buffer as a Vec<T> using unaligned little-endian reads,
+/// writing into `out` without realloc churn. Panic-safe w.r.t. set_len.
 fn vectorize_data<T: LeBytes + Copy>(
     base: *const u8,
     count: usize,
@@ -51,17 +60,17 @@ fn vectorize_data<T: LeBytes + Copy>(
     }
     out.reserve_exact(count);
     unsafe {
-        let mut p = base;
-        let dst = out.as_mut_ptr().add(out.len());
+        let start_len = out.len();
+        let dst = out.as_mut_ptr().add(start_len);
         for i in 0..count {
-            let v = ptr::read_unaligned(p as *const T);
+            let v = ptr::read_unaligned(base.add(i * elem_size) as *const T);
             dst.add(i).write(v);
-            p = p.add(elem_size);
         }
-        out.set_len(out.len() + count);
+        out.set_len(start_len + count);
     }
     Ok(())
 }
+
 // ------------------ Packet ------------------
 
 #[pyclass(name = "Packet")]
@@ -117,12 +126,13 @@ impl PyPacket {
 struct PyClock {
     cb: Option<Py<PyAny>>,
 }
+
 impl Clock for PyClock {
     fn now_ms(&self) -> u64 {
         if let Some(ref cb) = self.cb {
             Python::attach(|py| match cb.call0(py) {
                 Ok(v) => v.extract::<u64>(py).unwrap_or(0),
-                Err(_) => 0,
+                Err(_e) => 0,
             })
         } else {
             0
@@ -132,7 +142,7 @@ impl Clock for PyClock {
 
 // ------------------ Router ------------------
 
-#[pyclass(name = "Router", unsendable)]
+#[pyclass(name = "Router")]
 pub struct PyRouter {
     inner: Router,
     _tx_cb: Option<Py<PyAny>>,
@@ -158,8 +168,7 @@ impl PyRouter {
             Some(move |bytes: &[u8]| -> TelemetryResult<()> {
                 Python::attach(|py| {
                     let arg = PyBytes::new(py, bytes);
-                    let res = cb.call1(py, (&arg,)); // wrap in tuple directly
-                    match res {
+                    match cb.call1(py, (&arg,)) {
                         Ok(_) => Ok(()),
                         Err(err) => {
                             err.restore(py);
@@ -254,7 +263,8 @@ impl PyRouter {
 
     /// Log raw bytes for a given DataType.
     ///
-    /// If the type expects a fixed payload (e.g., MessageData), it is zero-padded to MAX_STRING_LENGTH.
+    /// Static-sized payloads are padded/truncated to the exact required length.
+    /// Dynamic payloads are passed through verbatim.
     #[pyo3(signature = (ty, data, timestamp_ms=None, queue=false))]
     fn log_bytes(
         &mut self,
@@ -303,7 +313,7 @@ impl PyRouter {
         let ty = dtype_from_u32(ty).map_err(py_err_from)?;
         let mut vals: Vec<f32> = values.extract()?;
 
-        // Static: enforce exact byte count via element count. Dynamic: do nothing.
+        // Static: enforce exact element count from required bytes; Dynamic: pass-through.
         if let Some(required_bytes) = required_payload_size_for(ty) {
             if required_bytes % 4 != 0 {
                 return Err(py_err_from(TelemetryError::BadArg));
@@ -332,7 +342,7 @@ impl PyRouter {
 
     /// Generic typed logger (C-parity).
     ///
-    /// - `data` can be any Python object exposing the buffer protocol (bytes/bytearray/memoryview/NumPy).
+    /// - `data` can be any Python object exposing the buffer protocol (bytes/bytearray/memoryview/NumPy) or a str.
     /// - `elem_size` must be 1, 2, 4, or 8.
     /// - `elem_kind`: 0=unsigned, 1=signed, 2=float (parity with C).
     #[pyo3(signature = (ty, data, elem_size, elem_kind, timestamp_ms=None, queue=false))]
@@ -351,7 +361,7 @@ impl PyRouter {
         }
         let ty = dtype_from_u32(ty).map_err(py_err_from)?;
 
-        // ---- Robust buffer intake: bytes/bytearray/memoryview/NumPy/str ----
+        // Robust buffer intake: bytes/bytearray/memoryview/NumPy/str
         let mut bytes: Vec<u8> = if let Ok(b) = data.extract::<&[u8]>() {
             b.to_vec()
         } else if let Ok(py_str) = data.cast::<pyo3::types::PyString>() {
@@ -374,8 +384,7 @@ impl PyRouter {
             }
         };
 
-        // ---- Schema length enforcement ----
-        // Static: enforce exact size; Dynamic: do nothing here.
+        // Schema length enforcement for static-sized payloads only.
         if let Some(required) = required_payload_size_for(ty) {
             if bytes.len() < required {
                 bytes.resize(required, 0);
@@ -386,7 +395,7 @@ impl PyRouter {
 
         let ts = timestamp_ms;
 
-        // Fast path for 1-byte unsigned: no reinterpretation needed
+        // Fast path for 1-byte unsigned.
         if elem_size == 1 && elem_kind == EK_UNSIGNED {
             let r = if queue {
                 match ts {
@@ -402,7 +411,7 @@ impl PyRouter {
             return r.map_err(py_err_from);
         }
 
-        // Wider elements: reinterpret bytes -> Vec<T> using unaligned LE reads
+        // Wider elements: reinterpret bytes -> Vec<T> with unaligned LE reads.
         macro_rules! finish_with {
             ($T:ty) => {{
                 let cnt = bytes.len() / elem_size;
@@ -518,9 +527,9 @@ pub fn peek_header_py(py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResult<Py<Py
     out.set_item(
         "endpoints",
         env.endpoints
-            .iter()
-            .map(|e| *e as u32)
-            .collect::<Vec<u32>>(),
+           .iter()
+           .map(|e| *e as u32)
+           .collect::<Vec<u32>>(),
     )?;
     out.set_item("timestamp_ms", env.timestamp_ms)?;
     Ok(out.unbind().into_any())
@@ -547,7 +556,7 @@ pub fn make_packet(
     // Extract payload
     let mut buf: Vec<u8> = payload.extract()?;
 
-    // Static: enforce exact; Dynamic: untouched (no cap/pad/truncate)
+    // Static-sized: enforce exact length; Dynamic: pass-through
     if let Some(required) = required_payload_size_for(ty) {
         if buf.len() < required {
             buf.resize(required, 0u8);
@@ -593,10 +602,7 @@ pub fn sedsprintf_rs(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
                 m.add(name, v)?;
             }
         }
-
         let dt_enum = int_enum.call1(("DataType", dt_dict))?;
-
-        // Add to module
         m.add("DataType", dt_enum)?;
     }
 
@@ -605,24 +611,21 @@ pub fn sedsprintf_rs(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         let ep_dict = PyDict::new(py);
         for v in 0..=MAX_VALUE_DATA_ENDPOINT {
             if let Some(e) = try_enum_from_u32::<DataEndpoint>(v) {
-                let name = e.as_str(); // "SD_CARD", "RADIO"
+                let name = e.as_str(); // "SD_CARD", "RADIO", ...
                 ep_dict.set_item(name, v)?;
                 m.add(name, v)?;
             }
         }
-
         let ep_enum = int_enum.call1(("DataEndpoint", ep_dict))?;
-
-        // Add to module
         m.add("DataEndpoint", ep_enum)?;
     }
 
     // ------------------ ElemKind ------------------
     {
         let ek_dict = PyDict::new(py);
-        ek_dict.set_item("UNSIGNED", 0)?;
-        ek_dict.set_item("SIGNED", 1)?;
-        ek_dict.set_item("FLOAT", 2)?;
+        ek_dict.set_item("UNSIGNED", EK_UNSIGNED)?;
+        ek_dict.set_item("SIGNED", EK_SIGNED)?;
+        ek_dict.set_item("FLOAT", EK_FLOAT)?;
 
         let ek_enum = int_enum.call1(("ElemKind", ek_dict))?;
 

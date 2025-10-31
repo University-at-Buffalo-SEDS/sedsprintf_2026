@@ -1,15 +1,17 @@
 #![allow(dead_code)]
 
-
 use crate::config::{MessageSizeType, DEVICE_IDENTIFIER};
 use crate::{
-    config::{DataEndpoint, DataType}, impl_letype_num,
+    config::{DataEndpoint, DataType},
+    impl_letype_num,
+    lock::RouterMutex,
     message_meta,
-    serialize, telemetry_packet::TelemetryPacket, TelemetryError,
+    serialize,
+    telemetry_packet::TelemetryPacket,
+    TelemetryError,
     TelemetryResult,
 };
-use alloc::{boxed::Box, collections::VecDeque, sync::Arc, vec::Vec};
-
+use alloc::{boxed::Box, collections::VecDeque, format, sync::Arc, vec::Vec};
 
 pub enum RxItem {
     Packet(TelemetryPacket),
@@ -19,9 +21,10 @@ pub enum RxItem {
 // -------------------- endpoint + board config --------------------
 const MAX_NUMBER_OF_RETRIES: usize = 3;
 
+// Make handlers usable across tasks
 pub(crate) enum EndpointHandlerFn {
-    Packet(Box<dyn Fn(&TelemetryPacket) -> TelemetryResult<()>>),
-    Serialized(Box<dyn Fn(&[u8]) -> TelemetryResult<()>>),
+    Packet(Box<dyn Fn(&TelemetryPacket) -> TelemetryResult<()> + Send + Sync>),
+    Serialized(Box<dyn Fn(&[u8]) -> TelemetryResult<()> + Send + Sync>),
 }
 
 pub struct EndpointHandler {
@@ -47,8 +50,8 @@ pub struct BoardConfig {
 
 impl BoardConfig {
     pub fn new<H>(handlers: H) -> Self
-    where
-        H: Into<Arc<[EndpointHandler]>>,
+        where
+            H: Into<Arc<[EndpointHandler]>>,
     {
         Self {
             handlers: handlers.into(),
@@ -112,9 +115,9 @@ fn log_raw<T, F>(
     timestamp: u64,
     mut tx_function: F,
 ) -> TelemetryResult<()>
-where
-    T: LeBytes,
-    F: FnMut(TelemetryPacket) -> TelemetryResult<()>,
+    where
+        T: LeBytes,
+        F: FnMut(TelemetryPacket) -> TelemetryResult<()>,
 {
     let meta = message_meta(ty);
     let got = data.len() * T::WIDTH;
@@ -122,10 +125,7 @@ where
     match meta.data_size {
         MessageSizeType::Static(need) => {
             if got != need {
-                return Err(TelemetryError::SizeMismatch {
-                    expected: need,
-                    got,
-                });
+                return Err(TelemetryError::SizeMismatch { expected: need, got });
             }
         }
         MessageSizeType::Dynamic => {
@@ -163,13 +163,19 @@ fn fallback_stdout(msg: &str) {
 
 // -------------------- Router --------------------
 
-pub struct Router {
-    sender: Arc<str>,
-    transmit: Option<Box<dyn Fn(&[u8]) -> TelemetryResult<()>>>,
-    cfg: BoardConfig,
+// Only the queues are mutable; put them behind a mutex.
+struct RouterInner {
     received_queue: VecDeque<RxItem>,
     transmit_queue: VecDeque<TelemetryPacket>,
-    clock: Box<dyn Clock>,
+}
+
+pub struct Router {
+    sender: Arc<str>,
+    // make TX usable across tasks
+    transmit: Option<Box<dyn Fn(&[u8]) -> TelemetryResult<()> + Send + Sync>>,
+    cfg: BoardConfig,
+    state: RouterMutex<RouterInner>,
+    clock: Box<dyn Clock + Send + Sync>,
 }
 
 impl Router {
@@ -178,15 +184,17 @@ impl Router {
         cfg: BoardConfig,
         clock: Box<dyn Clock + Send + Sync>,
     ) -> Self
-    where
-        Tx: Fn(&[u8]) -> TelemetryResult<()> + Send + Sync + 'static,
+        where
+            Tx: Fn(&[u8]) -> TelemetryResult<()> + Send + Sync + 'static,
     {
         Self {
             sender: DEVICE_IDENTIFIER.into(),
             transmit: transmit.map(|t| Box::new(t) as _),
             cfg,
-            received_queue: VecDeque::new(),
-            transmit_queue: VecDeque::new(),
+            state: RouterMutex::new(RouterInner {
+                received_queue: VecDeque::new(),
+                transmit_queue: VecDeque::new(),
+            }),
             clock,
         }
     }
@@ -198,16 +206,13 @@ impl Router {
         e: TelemetryError,
     ) -> TelemetryResult<()> {
         let error_msg = match dest {
-            Some(failed_local) => alloc::format!(
+            Some(failed_local) => format!(
                 "Handler for endpoint {:?} failed on device {:?}: {:?}",
-                failed_local,
-                DEVICE_IDENTIFIER,
-                e
+                failed_local, DEVICE_IDENTIFIER, e
             ),
-            None => alloc::format!(
+            None => format!(
                 "TX Handler failed on device {:?}: {:?}",
-                DEVICE_IDENTIFIER,
-                e
+                DEVICE_IDENTIFIER, e
             ),
         };
 
@@ -224,12 +229,10 @@ impl Router {
             locals.retain(|&ep| ep != failed_local);
         }
 
-        if dest.is_none() {
-            if locals.is_empty() {
-                fallback_stdout(&error_msg);
-                return Ok(());
-            }
-        } else if locals.is_empty() {
+        if dest.is_none() && locals.is_empty() {
+            fallback_stdout(&error_msg);
+            return Ok(());
+        } else if dest.is_some() && locals.is_empty() {
             return Ok(());
         }
 
@@ -252,34 +255,51 @@ impl Router {
         self.send(&error_pkt)
     }
 
-    pub fn process_send_queue(&mut self) -> TelemetryResult<()> {
-        while let Some(pkt) = self.transmit_queue.pop_front() {
-            self.send(&pkt)?;
+    // ---------- PUBLIC API: now all &self (thread-safe via internal locking) ----------
+
+    pub fn process_send_queue(&self) -> TelemetryResult<()> {
+        loop {
+            let pkt_opt = {
+                // Pop exactly one under the lock, then release it.
+                let mut st = self.state.lock().unwrap();
+                st.transmit_queue.pop_front()
+            };
+            let Some(pkt) = pkt_opt else { break };
+            self.send(&pkt)?; // No lock held while calling user code
         }
         Ok(())
     }
 
-    pub fn process_all_queues(&mut self) -> TelemetryResult<()> {
+    pub fn process_all_queues(&self) -> TelemetryResult<()> {
         self.process_send_queue()?;
         self.process_received_queue()?;
         Ok(())
     }
 
-    pub fn clear_queues(&mut self) {
-        self.transmit_queue.clear();
-        self.received_queue.clear();
+    pub fn clear_queues(&self) {
+        let mut st = self.state.lock().unwrap();
+        st.transmit_queue.clear();
+        st.received_queue.clear();
     }
 
-    pub fn clear_rx_queue(&mut self) {
-        self.received_queue.clear();
-    }
-    pub fn clear_tx_queue(&mut self) {
-        self.transmit_queue.clear();
+    pub fn clear_rx_queue(&self) {
+        let mut st = self.state.lock().unwrap();
+        st.received_queue.clear();
     }
 
-    pub fn process_tx_queue_with_timeout(&mut self, timeout_ms: u32) -> TelemetryResult<()> {
+    pub fn clear_tx_queue(&self) {
+        let mut st = self.state.lock().unwrap();
+        st.transmit_queue.clear();
+    }
+
+    pub fn process_tx_queue_with_timeout(&self, timeout_ms: u32) -> TelemetryResult<()> {
         let start = self.clock.now_ms();
-        while let Some(pkt) = self.transmit_queue.pop_front() {
+        loop {
+            let pkt_opt = {
+                let mut st = self.state.lock().unwrap();
+                st.transmit_queue.pop_front()
+            };
+            let Some(pkt) = pkt_opt else { break };
             self.send(&pkt)?;
             if self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
                 break;
@@ -288,14 +308,19 @@ impl Router {
         Ok(())
     }
 
-    fn handle_rx_queue_item(&mut self, item: RxItem) -> TelemetryResult<()> {
+    fn handle_rx_queue_item(&self, item: RxItem) -> TelemetryResult<()> {
         self.receive_item(&item)
     }
 
-    pub fn process_rx_queue_with_timeout(&mut self, timeout_ms: u32) -> TelemetryResult<()> {
+    pub fn process_rx_queue_with_timeout(&self, timeout_ms: u32) -> TelemetryResult<()> {
         let start = self.clock.now_ms();
-        while let Some(pkt) = self.received_queue.pop_front() {
-            self.handle_rx_queue_item(pkt)?;
+        loop {
+            let item_opt = {
+                let mut st = self.state.lock().unwrap();
+                st.received_queue.pop_front()
+            };
+            let Some(item) = item_opt else { break };
+            self.handle_rx_queue_item(item)?;
             if self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
                 break;
             }
@@ -303,14 +328,17 @@ impl Router {
         Ok(())
     }
 
-    pub fn process_all_queues_with_timeout(&mut self, timeout_ms: u32) -> TelemetryResult<()> {
+    pub fn process_all_queues_with_timeout(&self, timeout_ms: u32) -> TelemetryResult<()> {
         let drain_fully = timeout_ms == 0;
         let start = if drain_fully { 0 } else { self.clock.now_ms() };
 
         loop {
             let mut did_any = false;
 
-            if let Some(pkt) = self.transmit_queue.pop_front() {
+            if let Some(pkt) = {
+                let mut st = self.state.lock().unwrap();
+                st.transmit_queue.pop_front()
+            } {
                 self.send(&pkt)?;
                 did_any = true;
             }
@@ -318,8 +346,11 @@ impl Router {
                 break;
             }
 
-            if let Some(pkt) = self.received_queue.pop_front() {
-                self.handle_rx_queue_item(pkt)?;
+            if let Some(item) = {
+                let mut st = self.state.lock().unwrap();
+                st.received_queue.pop_front()
+            } {
+                self.handle_rx_queue_item(item)?;
                 did_any = true;
             }
 
@@ -334,34 +365,42 @@ impl Router {
         Ok(())
     }
 
-    pub fn queue_tx_message(&mut self, pkt: TelemetryPacket) -> TelemetryResult<()> {
+    pub fn queue_tx_message(&self, pkt: TelemetryPacket) -> TelemetryResult<()> {
         pkt.validate()?;
-        self.transmit_queue.push_back(pkt);
+        let mut st = self.state.lock().unwrap();
+        st.transmit_queue.push_back(pkt);
         Ok(())
     }
 
-    pub fn process_received_queue(&mut self) -> TelemetryResult<()> {
-        while let Some(pkt) = self.received_queue.pop_front() {
-            self.handle_rx_queue_item(pkt)?;
+    pub fn process_received_queue(&self) -> TelemetryResult<()> {
+        loop {
+            let item_opt = {
+                let mut st = self.state.lock().unwrap();
+                st.received_queue.pop_front()
+            };
+            let Some(item) = item_opt else { break };
+            self.handle_rx_queue_item(item)?;
         }
         Ok(())
     }
 
-    pub fn rx_serialized_packet_to_queue(&mut self, bytes: &[u8]) -> TelemetryResult<()> {
-        self.received_queue
-            .push_back(RxItem::Serialized(Arc::<[u8]>::from(bytes)));
+    pub fn rx_serialized_packet_to_queue(&self, bytes: &[u8]) -> TelemetryResult<()> {
+        let arc = Arc::<[u8]>::from(bytes);
+        let mut st = self.state.lock().unwrap();
+        st.received_queue.push_back(RxItem::Serialized(arc));
         Ok(())
     }
 
-    pub fn rx_packet_to_queue(&mut self, pkt: TelemetryPacket) -> TelemetryResult<()> {
+    pub fn rx_packet_to_queue(&self, pkt: TelemetryPacket) -> TelemetryResult<()> {
         pkt.validate()?;
-        self.received_queue.push_back(RxItem::Packet(pkt));
+        let mut st = self.state.lock().unwrap();
+        st.received_queue.push_back(RxItem::Packet(pkt));
         Ok(())
     }
 
     fn retry<F, T, E>(&self, times: usize, mut f: F) -> Result<T, E>
-    where
-        F: FnMut() -> Result<T, E>,
+        where
+            F: FnMut() -> Result<T, E>,
     {
         let mut last_err = None;
         for _ in 0..times {
@@ -403,8 +442,8 @@ impl Router {
             env_for_ctx: Option<&serialize::TelemetryEnvelope>,
             mut run: F,
         ) -> TelemetryResult<()>
-        where
-            F: FnMut() -> TelemetryResult<()>,
+            where
+                F: FnMut() -> TelemetryResult<()>,
         {
             this.retry(MAX_NUMBER_OF_RETRIES, || run()).map_err(|e| {
                 if let Some(pkt) = pkt_for_ctx {
@@ -435,6 +474,7 @@ impl Router {
             }
         }
     }
+
     /// Error helper when we only have an envelope (no full packet).
     fn handle_callback_error_from_env(
         &self,
@@ -456,11 +496,9 @@ impl Router {
             locals.retain(|&ep| ep != failed);
         }
 
-        let error_msg = alloc::format!(
+        let error_msg = format!(
             "Handler for endpoint {:?} failed on device {:?}: {:?}",
-            dest,
-            DEVICE_IDENTIFIER,
-            e
+            dest, DEVICE_IDENTIFIER, e
         );
         if locals.is_empty() {
             fallback_stdout(&error_msg);
@@ -629,39 +667,22 @@ impl Router {
         self.receive_item(&item)
     }
 
-    /// Build a packet then send.
+    /// Build a packet then send immediately.
     pub fn log<T: LeBytes>(&self, ty: DataType, data: &[T]) -> TelemetryResult<()> {
-        log_raw(self.sender.clone(), ty, data, self.clock.now_ms(), |pkt| {
-            self.send(&pkt)
-        })
+        log_raw(self.sender.clone(), ty, data, self.clock.now_ms(), |pkt| self.send(&pkt))
     }
 
-    pub fn log_queue<T: LeBytes>(&mut self, ty: DataType, data: &[T]) -> TelemetryResult<()> {
-        log_raw(self.sender.clone(), ty, data, self.clock.now_ms(), |pkt| {
-            self.queue_tx_message(pkt)
-        })
+    /// Build a packet and queue it for later TX.
+    pub fn log_queue<T: LeBytes>(&self, ty: DataType, data: &[T]) -> TelemetryResult<()> {
+        log_raw(self.sender.clone(), ty, data, self.clock.now_ms(), |pkt| self.queue_tx_message(pkt))
     }
 
-    pub fn log_ts<T: LeBytes>(
-        &self,
-        ty: DataType,
-        timestamp: u64,
-        data: &[T],
-    ) -> TelemetryResult<()> {
-        log_raw(self.sender.clone(), ty, data, timestamp, |pkt| {
-            self.send(&pkt)
-        })
+    pub fn log_ts<T: LeBytes>(&self, ty: DataType, timestamp: u64, data: &[T]) -> TelemetryResult<()> {
+        log_raw(self.sender.clone(), ty, data, timestamp, |pkt| self.send(&pkt))
     }
 
-    pub fn log_queue_ts<T: LeBytes>(
-        &mut self,
-        ty: DataType,
-        timestamp: u64,
-        data: &[T],
-    ) -> TelemetryResult<()> {
-        log_raw(self.sender.clone(), ty, data, timestamp, |pkt| {
-            self.queue_tx_message(pkt)
-        })
+    pub fn log_queue_ts<T: LeBytes>(&self, ty: DataType, timestamp: u64, data: &[T]) -> TelemetryResult<()> {
+        log_raw(self.sender.clone(), ty, data, timestamp, |pkt| self.queue_tx_message(pkt))
     }
 
     #[inline]

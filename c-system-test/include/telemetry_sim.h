@@ -5,6 +5,7 @@
 
 #ifdef __cplusplus
 extern "C" {
+
 #endif
 
 // Forward declare via typedef, then define the named struct.
@@ -55,11 +56,11 @@ SedsResult node_log(
     size_t element_size);
 
 // Handlers
-SedsResult radio_handler(const SedsPacketView * pkt, void * user);
+SedsResult radio_handler_serial(const uint8_t * bytes, size_t len, void * user);
 
 SedsResult sdcard_handler(const SedsPacketView * pkt, void * user);
 
-uint64_t host_now_ms(void * user);
+uint64_t host_now_ms(const void * user);
 
 uint64_t node_now_since_bus_ms(void * user);
 #ifdef __cplusplus
