@@ -106,7 +106,7 @@ mod tests {
     #[test]
     fn serialize_roundtrip_gps() {
         // GPS: 3 * f32
-        let endpoints = &[DataEndpoint::SdCard, DataEndpoint::Radio];
+        let endpoints = &[DataEndpoint::SdCard, DataEndpoint::GroundStation];
         let pkt = TelemetryPacket::from_f32_slice(
             DataType::GpsData,
             &[5.2141414, 3.1342144, 1.1231232],
@@ -130,27 +130,27 @@ mod tests {
 
     #[test]
     fn header_string_matches_expectation() {
-        let endpoints = &[DataEndpoint::SdCard, DataEndpoint::Radio];
+        let endpoints = &[DataEndpoint::SdCard, DataEndpoint::GroundStation];
         let pkt =
             TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], endpoints, 0)
                 .unwrap();
         let s = pkt.header_string();
         assert_eq!(
             s,
-            "Type: GPS_DATA, Data Size: 12, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, RADIO], Timestamp: 0 (0s 000ms)"
+            "Type: GPS_DATA, Data Size: 12, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, GROUND_STATION], Timestamp: 0 (0s 000ms)"
         );
     }
 
     #[test]
     fn packet_to_string_formats_floats() {
-        let endpoints = &[DataEndpoint::SdCard, DataEndpoint::Radio];
+        let endpoints = &[DataEndpoint::SdCard, DataEndpoint::GroundStation];
         let pkt =
             TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.5, 3.25], endpoints, 0)
                 .unwrap();
 
         let text = pkt.to_string();
         assert!(text.starts_with(
-            "{Type: GPS_DATA, Data Size: 12, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, RADIO], Timestamp: 0 (0s 000ms), Data: "
+            "{Type: GPS_DATA, Data Size: 12, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, GROUND_STATION], Timestamp: 0 (0s 000ms), Data: "
         ));
         assert!(text.contains("1"));
         assert!(text.contains("2.5"));
@@ -294,7 +294,7 @@ mod tests {
         let data = [10.0_f32, 10.25, 10.5];
         router.log_queue(DataType::GpsData, &data).unwrap();
 
-        let data = [10.0_f32, 10.25, 10.5, 12.3];
+        let data = [10.0_f32, 10.25, 10.5];
         router.log_queue(DataType::BatteryStatus, &data).unwrap();
 
         let data = [10.0_f32, 10.25, 10.5];
@@ -316,20 +316,20 @@ mod tests {
 // ---- Helpers (test-local) ----
 
 /// Build a deterministic packet with a raw 3-byte payload [0x13, 0x21, 0x34],
-/// endpoints [SD_CARD, RADIO], and timestamp 1123581321.
+/// endpoints [SD_CARD, GROUND_STATION], and timestamp 1123581321.
 /// Note: we intentionally do not call `validate()` because GPS_DATA usually
 /// expects f32s (size 12). We only exercise formatting/copying.
 fn fake_telemetry_packet_bytes() -> TelemetryPacket {
     use crate::config::{DataEndpoint, DataType};
 
     let payload = [0x13 as f32, 0x21 as f32, 0x34 as f32]; // f32 values
-    let endpoints = [DataEndpoint::SdCard, DataEndpoint::Radio];
+    let endpoints = [DataEndpoint::SdCard, DataEndpoint::GroundStation];
 
     TelemetryPacket::from_f32_slice(DataType::GpsData, &payload, &endpoints, 1123581321).unwrap()
 }
 
 /// Produce the exact string the C++ test checks:
-/// "Type: GPS_DATA, Size: 3, Endpoints: [SD_CARD, RADIO], Timestamp: 1123581321, Payload (hex): 0x13 0x21 0x34"
+/// "Type: GPS_DATA, Size: 3, Endpoints: [SD_CARD, GROUND_STATION], Timestamp: 1123581321, Payload (hex): 0x13 0x21 0x34"
 ///
 /// We keep this as a test-local helper (no crate changes).
 
@@ -369,7 +369,7 @@ unsafe fn copy_telemetry_packet_raw(
 fn helpers_packet_hex_to_string() {
     let pkt = fake_telemetry_packet_bytes();
     let got = pkt.to_hex_string();
-    let expect = "Type: GPS_DATA, Data Size: 12, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, RADIO], Timestamp: 1123581321 (312h 06m 21s 321ms), Data (hex): 0x00 0x00 0x98 0x41 0x00 0x00 0x04 0x42 0x00 0x00 0x50 0x42";
+    let expect = "Type: GPS_DATA, Data Size: 12, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, GROUND_STATION], Timestamp: 1123581321 (312h 06m 21s 321ms), Data (hex): 0x00 0x00 0x98 0x41 0x00 0x00 0x04 0x42 0x00 0x00 0x50 0x42";
     assert_eq!(got, expect);
 }
 
@@ -499,7 +499,7 @@ mod handler_failure_tests {
 
         // Verify exact payload text produced by handle_callback_error(Some(dest), e)
         let expected = format!(
-            "{{Type: TELEMETRY_ERROR, Data Size: {:?}, Sender: TEST_PLATFORM, Endpoints: [RADIO], Timestamp: 0 (0s 000ms), Error: (\"Handler for endpoint {:?} failed on device {:?}: {:?}\")}}",
+            "{{Type: TELEMETRY_ERROR, Data Size: {:?}, Sender: TEST_PLATFORM, Endpoints: [GROUND_STATION], Timestamp: 0 (0s 000ms), Error: (\"Handler for endpoint {:?} failed on device {:?}: {:?}\")}}",
             68,
             failing_ep,
             DEVICE_IDENTIFIER,
@@ -994,7 +994,7 @@ mod tests_extra {
         let pkt_tx = TelemetryPacket::from_f32_slice(
             DataType::GpsData,
             &[1.0_f32, 2.0, 3.0],
-            &[DataEndpoint::SdCard, DataEndpoint::Radio],
+            &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
             0,
         )
         .unwrap();
@@ -1101,7 +1101,7 @@ mod tests_extra {
     #[test]
     fn deserialize_header_only_then_full_parse_matches() {
         // Build a normal packet then compare header-only vs full.
-        let endpoints = &[DataEndpoint::SdCard, DataEndpoint::Radio];
+        let endpoints = &[DataEndpoint::SdCard, DataEndpoint::GroundStation];
         let pkt = TelemetryPacket::from_f32_slice(
             DataType::GpsData,
             &[5.25_f32, 3.5, 1.0],
@@ -1157,7 +1157,7 @@ mod tests_extra {
         let pkt = TelemetryPacket::from_f32_slice(
             DataType::GpsData,
             &[1.0_f32, 2.0, 3.0],
-            &[DataEndpoint::SdCard, DataEndpoint::Radio],
+            &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
             7,
         )
         .unwrap();
@@ -1282,7 +1282,7 @@ mod tests_more {
 
     #[test]
     fn packet_wire_size_matches_serialized_len() {
-        let endpoints = &[DataEndpoint::SdCard, DataEndpoint::Radio];
+        let endpoints = &[DataEndpoint::SdCard, DataEndpoint::GroundStation];
         let pkt =
             TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], endpoints, 9)
                 .unwrap();
@@ -1349,7 +1349,7 @@ mod tests_more {
 
     #[test]
     fn packet_handlers_trigger_single_deserialize_and_fan_out() {
-        let endpoints = &[DataEndpoint::SdCard, DataEndpoint::Radio];
+        let endpoints = &[DataEndpoint::SdCard, DataEndpoint::GroundStation];
         let pkt =
             TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], endpoints, 5)
                 .unwrap();
@@ -1369,7 +1369,7 @@ mod tests_more {
             })),
         };
         let serialized_h = EndpointHandler {
-            endpoint: DataEndpoint::Radio,
+            endpoint: DataEndpoint::GroundStation,
             handler: EndpointHandlerFn::Serialized(Box::new(move |_b| {
                 sh.fetch_add(1, Ordering::SeqCst);
                 Ok(())
@@ -1477,7 +1477,7 @@ mod tests_more {
         let pkt = TelemetryPacket::from_f32_slice(
             DataType::GpsData,
             &[1.0, 2.0, 3.0],
-            &[DataEndpoint::SdCard, DataEndpoint::Radio],
+            &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
             1,
         )
         .unwrap();
