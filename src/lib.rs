@@ -81,10 +81,12 @@ mod embedded_alloc {
 // ---------- Portable core logic ----------
 mod c_api;
 mod config;
+mod lock;
 mod macros;
 mod router;
 mod serialize;
 mod telemetry_packet;
+
 // ----------------------Not User Editable----------------------
 #[allow(dead_code)]
 pub const STRING_VALUE_ELEMENTS: usize = 1;
