@@ -1,97 +1,201 @@
 #!/usr/bin/env python3
+import os
 import time
-import array
+import random
 import numpy as np
+import multiprocessing as mp
+from queue import Empty
+
 import sedsprintf_rs as seds
 
-# Shorthand aliases (optional, just makes calls shorter)
 DT = seds.DataType
 EP = seds.DataEndpoint
 EK = seds.ElemKind
 
-# ---------- Example Callbacks ----------
+# ---------------- Enum helpers ----------------
+def enum_to_int(obj):
+    try:
+        return int(obj)
+    except Exception:
+        return obj
 
-def now_ms() -> int:
+def deep_coerce_enums(x):
+    if isinstance(x, dict):
+        return {deep_coerce_enums(k): deep_coerce_enums(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        t = type(x)
+        return t(deep_coerce_enums(v) for v in x)
+    return enum_to_int(x)
+
+# ---------------- Router callbacks ----------------
+def _now_ms() -> int:
     return int(time.time() * 1000)
 
-def tx(bytes_buf: bytes):
-    print(f"[TX] Sent {len(bytes_buf)} bytes: {bytes_buf.hex()}")
+def _tx(_bytes_buf: bytes):
+    # Transmission stub (no-op)
+    pass
 
-def on_packet(packet: seds.Packet):
+def _on_packet(pkt: seds.Packet):
     print("[RX Packet]")
-    # __str__ is implemented on Packet, so this prints a nice header+summary
-    print(f"\n{packet}\n")
+    print(pkt)  # pretty header + summary
 
-def on_serialized(data: bytes):
+def _on_serialized(data: bytes):
     print(f"[RX Serialized] {len(data)} bytes: {data.hex()}")
 
-# ---------- Build Router ----------
+# ---------------- Server (single-threaded) ----------------
+def router_server(cmd_q: mp.Queue, _done_evt_unused: mp.Event,
+                  pump_period_ms: int = 2,
+                  drain_grace_seconds: float = 3.0,
+                  max_total_seconds: float = 60.0):
+    """
+    Single-threaded server:
+      - Polls cmd_q for work
+      - Calls router.log* directly
+      - Pumps router periodically
+      - On 'shutdown', drains briefly and exits
+    This avoids thread pools / extra threads entirely → deterministic teardown.
+    """
+    handlers = [
+        (int(EP.SD_CARD), _on_packet, None),
+        (int(EP.RADIO),   None,       _on_serialized),
+    ]
+    router = seds.Router(tx=_tx, now_ms=_now_ms, handlers=handlers)
+    print(f"[SERVER] Router up. PID={os.getpid()}")
 
-handlers = [
-    (EP.SD_CARD, on_packet, None),      # parsed packets from SD card
-    (EP.RADIO,   None,      on_serialized),  # raw bytes from radio
-]
-router = seds.Router(tx=tx, now_ms=now_ms, handlers=handlers)
-print("[INFO] Router initialized.")
+    shutting_down = False
+    drain_deadline = None
+    last_pump = 0.0
+    start_time = time.time()
 
-# ---------- Log and Process Example ----------
+    def pump_now():
+        nonlocal last_pump
+        try:
+            router.process_all_queues()
+        finally:
+            last_pump = time.time()
 
-# 1) Bytes: fixed-size type will be padded to schema size by the Rust layer
-router.log_bytes(ty=DT.MESSAGE_DATA, data=b"Hello, Telemetry!")
+    # Main loop
+    while True:
+        now = time.time()
 
-# 2) Floats (barometer triple)
-router.log_f32(ty=DT.BAROMETER_DATA, values=[101325.0, 22.5, -0.1])
+        # Safety cap so we don't run forever if something external misbehaves
+        if now - start_time > max_total_seconds:
+            print("[SERVER] Max runtime reached; forcing shutdown.")
+            break
 
-# 3) Process queues (triggers tx())
-router.process_all_queues()
-print("[INFO] Queues processed.")
+        # Periodic pump
+        if (now - last_pump) * 1000.0 >= pump_period_ms:
+            pump_now()
 
-# ---------- Serialize / Deserialize Example ----------
+        # Drain a bit of work from the command queue
+        try:
+            op, payload = cmd_q.get(timeout=0.05)
+        except Empty:
+            op, payload = None, None
 
-pkt = seds.make_packet(
-    ty=DT.BAROMETER_DATA,
-    sender="CrashNBurn",
-    endpoints=[EP.SD_CARD, EP.RADIO],
-    timestamp_ms=now_ms(),
-    payload=b"100000000000",  # demo payload; real payload should match schema
-)
+        if op == "shutdown":
+            # Start drain window
+            shutting_down = True
+            if drain_deadline is None:
+                drain_deadline = time.time() + drain_grace_seconds
+        elif op is not None:
+            # Execute immediately in this process (no threads)
+            try:
+                if op == "log":
+                    router.log(ty=payload["ty"], data=payload["data"],
+                               elem_size=payload["elem_size"], elem_kind=payload["elem_kind"])
+                elif op == "log_f32":
+                    router.log_f32(ty=payload["ty"], values=payload["values"])
+                elif op == "log_bytes":
+                    router.log_bytes(ty=payload["ty"], data=payload["data"])
+            except Exception as e:
+                print(f"[SERVER] worker op error: {e!r}")
 
-print("\n[INFO] Created Packet:")
-print("  Header:", pkt.header_string())
-print("  Wire size:", pkt.wire_size())
+        # If in shutdown, keep pumping and stop when quiet or grace expires
+        if shutting_down:
+            pump_now()
+            # Router queues are internal; we can't query length here,
+            # so just wait for the grace window to pass.
+            if time.time() >= drain_deadline:
+                break
 
-wire = pkt.serialize()
-print("[INFO] Serialized bytes:", wire.hex())
+    # Final drain
+    try:
+        pump_now()
+    except Exception as e:
+        print(f"[SERVER] final drain error: {e!r}")
+    print("[SERVER] Shutdown complete.")
 
-decoded = seds.deserialize_packet_py(wire)
-print("\n[INFO] Deserialized Packet:")
-print("  Header:", decoded.header_string())
-print("  Sender:", decoded.sender)
-print("  Type:", decoded.ty)
-print("  Endpoints:", decoded.endpoints)
+# ---------------- Producer processes ----------------
+def producer_proc(name: str, cmd_q: mp.Queue, n_iters: int, seed: int):
+    random.seed(seed + os.getpid())
+    print(f"[{name}] start PID={os.getpid()} iters={n_iters}")
+    for i in range(n_iters):
+        which = random.randint(0, 2)
+        if which == 0:
+            msg = f"{name} hello {i}".encode("utf-8")
+            cmd_q.put(deep_coerce_enums(("log_bytes", {
+                "ty": DT.MESSAGE_DATA, "data": msg
+            })))
+        elif which == 1:
+            vals = [101325.0 + random.random() * 100.0,
+                    20.0 + random.random() * 10.0,
+                    -0.5 + random.random()]
+            cmd_q.put(deep_coerce_enums(("log_f32", {
+                "ty": DT.BAROMETER_DATA, "values": vals
+            })))
+        else:
+            arr = np.array([random.randint(0, 1000) for _ in range(8)], dtype=np.uint16)
+            cmd_q.put(deep_coerce_enums(("log", {
+                "ty": DT.GPS_DATA, "data": arr,
+                "elem_size": 2, "elem_kind": EK.UNSIGNED
+            })))
+        time.sleep(random.random() * 0.002)  # 0–2ms jitter
+    print(f"[{name}] done")
 
-# Extract just the payload data as bytes
-payload_bytes = bytes(decoded.payload)
-print("  Payload (hex):", payload_bytes.hex())
+# ---------------- Main ----------------
+def main():
+    mp.set_start_method("spawn", force=True)
 
-# Optional: interpret payload as numbers, e.g., little-endian f32s
-# import struct; floats = struct.unpack("<fff", payload_bytes[:12])
+    cmd_q    = mp.Queue(maxsize=8192)
+    done_evt = mp.Event()
 
-# Peek header cheaply (no full deserialize)
-header_info = seds.peek_header_py(wire)
-print("\n[INFO] Peeked header:", header_info)
+    server = mp.Process(target=router_server, args=(cmd_q, done_evt, 2, 3.0, 120.0), daemon=False)
+    server.start()
 
-print("\n[DONE] Example complete.")
+    n_producers = 6
+    iters_per   = 500
 
-# ---------- Unified typed logger examples ----------
+    procs = []
+    for i in range(n_producers):
+        p = mp.Process(target=producer_proc, args=(f"P{i}", cmd_q, iters_per, 1337 + i), daemon=False)
+        p.start()
+        procs.append(p)
 
-# a) Strings: Python str is auto-encoded to UTF-8 in Router.log
-router.log(ty=DT.MESSAGE_DATA, data="hello", elem_size=1, elem_kind=EK.UNSIGNED)
+    # Wait for producers
+    for p in procs:
+        p.join()
 
-# b) Array of f32 (barometer triple)
-vals = array.array('f', [101325.0, 22.5, -0.1])
-router.log(ty=DT.BAROMETER_DATA, data=vals, elem_size=4, elem_kind=EK.FLOAT)
+    # Tell server to finish once queue is drained
+    cmd_q.put(("shutdown", {}))
+    cmd_q.close()
+    cmd_q.join_thread()
 
-# c) NumPy uint16 array for GPS (example)
-a = np.array([1, 2, 3, 4], dtype=np.uint16)
-router.log(ty=DT.GPS_DATA, data=a, elem_size=2, elem_kind=EK.UNSIGNED)
+    # Give it a short window to shut down gracefully; then enforce
+    server.join(timeout=10)
+    if server.is_alive():
+        print("[MAIN] Server still alive after timeout; terminating…")
+        server.terminate()
+        server.join(timeout=5)
+
+    if server.exitcode not in (0, None):
+        print(f"[MAIN] Server exit code: {server.exitcode} (non-zero)")
+        raise SystemExit(1)
+
+    print("[MAIN] All done ✔️")
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n[MAIN] Interrupted")

@@ -192,8 +192,8 @@ impl Router {
             transmit: transmit.map(|t| Box::new(t) as _),
             cfg,
             state: RouterMutex::new(RouterInner {
-                received_queue: VecDeque::new(),
-                transmit_queue: VecDeque::new(),
+                received_queue: VecDeque::with_capacity(16),
+                transmit_queue: VecDeque::with_capacity(16),
             }),
             clock,
         }
