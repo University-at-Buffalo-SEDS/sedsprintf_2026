@@ -1,19 +1,16 @@
 // src/py_api.rs
 #![allow(dead_code)]
 
+
 use crate::config::MessageSizeType;
-use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, string::String, sync::Arc as AArc, vec::Vec};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList, PyModule, PyTuple};
+use std::sync::{Arc as SArc, Mutex};
 
 use crate::{
-    config::DataEndpoint,
-    message_meta,
-    router::{
-        BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, LeBytes, Router,
-    },
-    serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet},
+    config::DataEndpoint, message_meta, router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, LeBytes, Router}, serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet},
     telemetry_packet::{DataType, TelemetryPacket},
     try_enum_from_u32,
     TelemetryError,
@@ -21,6 +18,7 @@ use crate::{
     MAX_VALUE_DATA_ENDPOINT,
     MAX_VALUE_DATA_TYPE,
 };
+
 
 // ------------------ helpers ------------------
 const EK_UNSIGNED: u32 = 0;
@@ -144,7 +142,8 @@ impl Clock for PyClock {
 
 #[pyclass(name = "Router")]
 pub struct PyRouter {
-    inner: Router,
+    // Host-side concurrency: protect the Router with a Mutex and share via Arc.
+    inner: SArc<Mutex<Router>>,
     _tx_cb: Option<Py<PyAny>>,
     _pkt_cbs: Vec<Py<PyAny>>,
     _ser_cbs: Vec<Py<PyAny>>,
@@ -254,7 +253,7 @@ impl PyRouter {
         let router = Router::new(transmit, cfg, Box::new(clock));
 
         Ok(Self {
-            inner: router,
+            inner: SArc::new(Mutex::new(router)),
             _tx_cb: tx_keep,
             _pkt_cbs: keep_pkt,
             _ser_cbs: keep_ser,
@@ -267,7 +266,7 @@ impl PyRouter {
     /// Dynamic payloads are passed through verbatim.
     #[pyo3(signature = (ty, data, timestamp_ms=None, queue=false))]
     fn log_bytes(
-        &mut self,
+        &self,
         _py: Python<'_>,
         ty: u32,
         data: &Bound<'_, PyAny>,
@@ -277,7 +276,6 @@ impl PyRouter {
         let ty = dtype_from_u32(ty).map_err(py_err_from)?;
         let mut buf: Vec<u8> = data.extract::<&[u8]>()?.to_vec();
 
-        // Static: enforce exact length (pad/truncate). Dynamic: do nothing.
         if let Some(required) = required_payload_size_for(ty) {
             if buf.len() < required {
                 buf.resize(required, 0u8);
@@ -286,15 +284,19 @@ impl PyRouter {
             }
         }
 
+        let rtr = self
+            .inner
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
         let r = if queue {
             match timestamp_ms {
-                Some(ts) => self.inner.log_queue_ts::<u8>(ty, ts, &buf),
-                None => self.inner.log_queue::<u8>(ty, &buf),
+                Some(ts) => rtr.log_queue_ts::<u8>(ty, ts, &buf),
+                None => rtr.log_queue::<u8>(ty, &buf),
             }
         } else {
             match timestamp_ms {
-                Some(ts) => self.inner.log_ts::<u8>(ty, ts, &buf),
-                None => self.inner.log::<u8>(ty, &buf),
+                Some(ts) => rtr.log_ts::<u8>(ty, ts, &buf),
+                None => rtr.log::<u8>(ty, &buf),
             }
         };
         r.map_err(py_err_from)
@@ -303,7 +305,7 @@ impl PyRouter {
     /// Log f32 array quickly.
     #[pyo3(signature = (ty, values, timestamp_ms=None, queue=false))]
     fn log_f32(
-        &mut self,
+        &self,
         _py: Python<'_>,
         ty: u32,
         values: &Bound<'_, PyAny>,
@@ -313,7 +315,6 @@ impl PyRouter {
         let ty = dtype_from_u32(ty).map_err(py_err_from)?;
         let mut vals: Vec<f32> = values.extract()?;
 
-        // Static: enforce exact element count from required bytes; Dynamic: pass-through.
         if let Some(required_bytes) = required_payload_size_for(ty) {
             if required_bytes % 4 != 0 {
                 return Err(py_err_from(TelemetryError::BadArg));
@@ -326,15 +327,19 @@ impl PyRouter {
             }
         }
 
+        let rtr = self
+            .inner
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
         let r = if queue {
             match timestamp_ms {
-                Some(ts) => self.inner.log_queue_ts::<f32>(ty, ts, &vals),
-                None => self.inner.log_queue::<f32>(ty, &vals),
+                Some(ts) => rtr.log_queue_ts::<f32>(ty, ts, &vals),
+                None => rtr.log_queue::<f32>(ty, &vals),
             }
         } else {
             match timestamp_ms {
-                Some(ts) => self.inner.log_ts::<f32>(ty, ts, &vals),
-                None => self.inner.log::<f32>(ty, &vals),
+                Some(ts) => rtr.log_ts::<f32>(ty, ts, &vals),
+                None => rtr.log::<f32>(ty, &vals),
             }
         };
         r.map_err(py_err_from)
@@ -347,7 +352,7 @@ impl PyRouter {
     /// - `elem_kind`: 0=unsigned, 1=signed, 2=float (parity with C).
     #[pyo3(signature = (ty, data, elem_size, elem_kind, timestamp_ms=None, queue=false))]
     fn log(
-        &mut self,
+        &self,
         py: Python<'_>,
         ty: u32,
         data: &Bound<'_, PyAny>,
@@ -361,7 +366,7 @@ impl PyRouter {
         }
         let ty = dtype_from_u32(ty).map_err(py_err_from)?;
 
-        // Robust buffer intake: bytes/bytearray/memoryview/NumPy/str
+        // Robust buffer intake
         let mut bytes: Vec<u8> = if let Ok(b) = data.extract::<&[u8]>() {
             b.to_vec()
         } else if let Ok(py_str) = data.cast::<pyo3::types::PyString>() {
@@ -384,7 +389,6 @@ impl PyRouter {
             }
         };
 
-        // Schema length enforcement for static-sized payloads only.
         if let Some(required) = required_payload_size_for(ty) {
             if bytes.len() < required {
                 bytes.resize(required, 0);
@@ -397,15 +401,19 @@ impl PyRouter {
 
         // Fast path for 1-byte unsigned.
         if elem_size == 1 && elem_kind == EK_UNSIGNED {
+            let rtr = self
+                .inner
+                .lock()
+                .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
             let r = if queue {
                 match ts {
-                    Some(t) => self.inner.log_queue_ts::<u8>(ty, t, &bytes),
-                    None => self.inner.log_queue::<u8>(ty, &bytes),
+                    Some(t) => rtr.log_queue_ts::<u8>(ty, t, &bytes),
+                    None => rtr.log_queue::<u8>(ty, &bytes),
                 }
             } else {
                 match ts {
-                    Some(t) => self.inner.log_ts::<u8>(ty, t, &bytes),
-                    None => self.inner.log::<u8>(ty, &bytes),
+                    Some(t) => rtr.log_ts::<u8>(ty, t, &bytes),
+                    None => rtr.log::<u8>(ty, &bytes),
                 }
             };
             return r.map_err(py_err_from);
@@ -423,15 +431,19 @@ impl PyRouter {
                 let mut v: Vec<$T> = Vec::with_capacity(cnt);
                 vectorize_data::<$T>(bytes.as_ptr(), cnt, elem_size, &mut v)
                     .map_err(|_| PyValueError::new_err("vectorize failed"))?;
+                let rtr = self
+                    .inner
+                    .lock()
+                    .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
                 let r = if queue {
                     match ts {
-                        Some(t) => self.inner.log_queue_ts::<$T>(ty, t, &v),
-                        None => self.inner.log_queue::<$T>(ty, &v),
+                        Some(t) => rtr.log_queue_ts::<$T>(ty, t, &v),
+                        None => rtr.log_queue::<$T>(ty, &v),
                     }
                 } else {
                     match ts {
-                        Some(t) => self.inner.log_ts::<$T>(ty, t, &v),
-                        None => self.inner.log::<$T>(ty, &v),
+                        Some(t) => rtr.log_ts::<$T>(ty, t, &v),
+                        None => rtr.log::<$T>(ty, &v),
                     }
                 };
                 r.map_err(py_err_from)
@@ -459,47 +471,78 @@ impl PyRouter {
 
     fn receive_serialized(&self, _py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResult<()> {
         let bytes: &[u8] = data.extract()?;
-        self.inner.receive_serialized(bytes).map_err(py_err_from)
+        let rtr = self
+            .inner
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
+        rtr.receive_serialized(bytes).map_err(py_err_from)
     }
 
-    fn process_send_queue(&mut self) -> PyResult<()> {
-        self.inner.process_send_queue().map_err(py_err_from)
+    fn process_send_queue(&self) -> PyResult<()> {
+        let rtr = self
+            .inner
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
+        rtr.process_send_queue().map_err(py_err_from)
     }
 
-    fn process_received_queue(&mut self) -> PyResult<()> {
-        self.inner.process_received_queue().map_err(py_err_from)
+    fn process_received_queue(&self) -> PyResult<()> {
+        let rtr = self
+            .inner
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
+        rtr.process_received_queue().map_err(py_err_from)
     }
 
-    fn process_all_queues(&mut self) -> PyResult<()> {
-        self.inner.process_all_queues().map_err(py_err_from)
+    fn process_all_queues(&self) -> PyResult<()> {
+        let rtr = self
+            .inner
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
+        rtr.process_all_queues().map_err(py_err_from)
     }
 
-    fn clear_rx_queue(&mut self) {
-        self.inner.clear_rx_queue();
+    fn clear_rx_queue(&self) {
+        if let Ok(r) = self.inner.lock() {
+            r.clear_rx_queue();
+        }
     }
 
-    fn clear_tx_queue(&mut self) {
-        self.inner.clear_tx_queue();
+    fn clear_tx_queue(&self) {
+        if let Ok(r) = self.inner.lock() {
+            r.clear_tx_queue();
+        }
     }
 
-    fn clear_queues(&mut self) {
-        self.inner.clear_queues();
+    fn clear_queues(&self) {
+        if let Ok(r) = self.inner.lock() {
+            r.clear_queues();
+        }
     }
 
     /// Time-budgeted variants
-    fn process_tx_queue_with_timeout(&mut self, timeout_ms: u32) -> PyResult<()> {
-        self.inner
-            .process_tx_queue_with_timeout(timeout_ms)
+    fn process_tx_queue_with_timeout(&self, timeout_ms: u32) -> PyResult<()> {
+        let rtr = self
+            .inner
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
+        rtr.process_tx_queue_with_timeout(timeout_ms)
             .map_err(py_err_from)
     }
-    fn process_rx_queue_with_timeout(&mut self, timeout_ms: u32) -> PyResult<()> {
-        self.inner
-            .process_rx_queue_with_timeout(timeout_ms)
+    fn process_rx_queue_with_timeout(&self, timeout_ms: u32) -> PyResult<()> {
+        let rtr = self
+            .inner
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
+        rtr.process_rx_queue_with_timeout(timeout_ms)
             .map_err(py_err_from)
     }
-    fn process_all_queues_with_timeout(&mut self, timeout_ms: u32) -> PyResult<()> {
-        self.inner
-            .process_all_queues_with_timeout(timeout_ms)
+    fn process_all_queues_with_timeout(&self, timeout_ms: u32) -> PyResult<()> {
+        let rtr = self
+            .inner
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
+        rtr.process_all_queues_with_timeout(timeout_ms)
             .map_err(py_err_from)
     }
 }
@@ -527,9 +570,9 @@ pub fn peek_header_py(py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResult<Py<Py
     out.set_item(
         "endpoints",
         env.endpoints
-           .iter()
-           .map(|e| *e as u32)
-           .collect::<Vec<u32>>(),
+            .iter()
+            .map(|e| *e as u32)
+            .collect::<Vec<u32>>(),
     )?;
     out.set_item("timestamp_ms", env.timestamp_ms)?;
     Ok(out.unbind().into_any())
@@ -546,7 +589,7 @@ pub fn make_packet(
     payload: &Bound<'_, PyAny>,
 ) -> PyResult<Py<PyAny>> {
     let ty = dtype_from_u32(ty).map_err(py_err_from)?;
-    let eps = Arc::<[DataEndpoint]>::from(
+    let eps = AArc::<[DataEndpoint]>::from(
         endpoints
             .into_iter()
             .map(|e| endpoint_from_u32(e).map_err(py_err_from))
@@ -568,10 +611,10 @@ pub fn make_packet(
     let pkt = TelemetryPacket {
         ty,
         data_size: buf.len(),
-        sender: Arc::<str>::from(sender),
+        sender: AArc::<str>::from(sender),
         endpoints: eps,
         timestamp: timestamp_ms,
-        payload: Arc::<[u8]>::from(buf),
+        payload: AArc::<[u8]>::from(buf),
     };
     pkt.validate().map_err(py_err_from)?;
     Ok(Py::new(py, PyPacket { inner: pkt })?.into_any())
@@ -592,14 +635,19 @@ pub fn sedsprintf_rs(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let enum_mod = PyModule::import(py, "enum")?;
     let int_enum = enum_mod.getattr("IntEnum")?;
 
+    // Get the real module name to stamp on the classes
+    let mod_name: String = m.getattr("__name__")?.extract()?;
+
     // ------------------ DataType ------------------
     {
         let dt_dict = PyDict::new(py);
+        dt_dict.set_item("__module__", &mod_name)?;
+
         for v in 0..=MAX_VALUE_DATA_TYPE {
             if let Some(e) = try_enum_from_u32::<DataType>(v) {
-                let name = e.as_str(); // e.g. "BAROMETER_DATA"
+                let name = e.as_str();
                 dt_dict.set_item(name, v)?;
-                m.add(name, v)?;
+                m.add(name, v)?; // convenience constants
             }
         }
         let dt_enum = int_enum.call1(("DataType", dt_dict))?;
@@ -609,9 +657,10 @@ pub fn sedsprintf_rs(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // ------------------ DataEndpoint ------------------
     {
         let ep_dict = PyDict::new(py);
+        ep_dict.set_item("__module__", &mod_name)?;
         for v in 0..=MAX_VALUE_DATA_ENDPOINT {
             if let Some(e) = try_enum_from_u32::<DataEndpoint>(v) {
-                let name = e.as_str(); // "SD_CARD", "RADIO", ...
+                let name = e.as_str();
                 ep_dict.set_item(name, v)?;
                 m.add(name, v)?;
             }
@@ -623,22 +672,11 @@ pub fn sedsprintf_rs(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // ------------------ ElemKind ------------------
     {
         let ek_dict = PyDict::new(py);
+        ek_dict.set_item("__module__", &mod_name)?;
         ek_dict.set_item("UNSIGNED", EK_UNSIGNED)?;
         ek_dict.set_item("SIGNED", EK_SIGNED)?;
         ek_dict.set_item("FLOAT", EK_FLOAT)?;
-
         let ek_enum = int_enum.call1(("ElemKind", ek_dict))?;
-
-        if let Ok(member) = ek_enum.getattr("UNSIGNED") {
-            member.setattr("__doc__", "Unsigned integer types (u8/u16/u32/u64).")?;
-        }
-        if let Ok(member) = ek_enum.getattr("SIGNED") {
-            member.setattr("__doc__", "Signed integer types (i8/i16/i32/i64).")?;
-        }
-        if let Ok(member) = ek_enum.getattr("FLOAT") {
-            member.setattr("__doc__", "Floating-point types (f32/f64).")?;
-        }
-
         m.add("ElemKind", ek_enum)?;
     }
 
