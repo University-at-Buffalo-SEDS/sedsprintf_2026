@@ -94,6 +94,8 @@ pub const DYNAMIC_ELEMENT: usize = 0;
 pub const MAX_VALUE_DATA_ENDPOINT: u32 = (DataEndpoint::COUNT - 1) as u32;
 pub const MAX_VALUE_DATA_TYPE: u32 = (DataType::COUNT - 1) as u32;
 
+impl_repr_u32_enum!(DataType, MAX_VALUE_DATA_TYPE);
+impl_repr_u32_enum!(DataEndpoint, MAX_VALUE_DATA_TYPE);
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub enum MessageSizeType {

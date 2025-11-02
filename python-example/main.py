@@ -133,7 +133,7 @@ def producer_proc(name: str, cmd_q: mp.Queue, n_iters: int, seed: int):
     for i in range(n_iters):
         which = random.randint(0, 2)
         if which == 0:
-            msg = f"{name} hello {i}".encode("utf-8")
+            msg = f"{name} hello there {i}".encode("utf-8")
             cmd_q.put(deep_coerce_enums(("log_bytes", {
                 "ty": DT.MESSAGE_DATA, "data": msg
             })))
