@@ -7,7 +7,9 @@ pub struct RouterMutex<T>(std::sync::Mutex<T>);
 #[cfg(feature = "std")]
 impl<T> RouterMutex<T> {
     #[inline]
-    pub fn new(v: T) -> Self { Self(std::sync::Mutex::new(v)) }
+    pub fn new(v: T) -> Self {
+        Self(std::sync::Mutex::new(v))
+    }
 
     /// Uniform lock API: unwrap poison in std builds.
     #[inline]
@@ -22,7 +24,9 @@ pub struct RouterMutex<T>(spin::Mutex<T>);
 #[cfg(not(feature = "std"))]
 impl<T> RouterMutex<T> {
     #[inline]
-    pub fn new(v: T) -> Self { Self(spin::Mutex::new(v)) }
+    pub fn new(v: T) -> Self {
+        Self(spin::Mutex::new(v))
+    }
 
     /// Uniform lock API for no_std: spin::Mutex never poisons.
     #[inline]
