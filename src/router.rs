@@ -1,17 +1,17 @@
 #![allow(dead_code)]
 
+
 use crate::config::{MessageSizeType, DEVICE_IDENTIFIER};
 use crate::{
-    config::{DataEndpoint, DataType},
-    impl_letype_num,
+    config::{DataEndpoint, DataType}, impl_letype_num,
     lock::RouterMutex,
     message_meta,
     serialize,
-    telemetry_packet::TelemetryPacket,
-    TelemetryError,
+    telemetry_packet::TelemetryPacket, TelemetryError,
     TelemetryResult,
 };
 use alloc::{boxed::Box, collections::VecDeque, format, sync::Arc, vec::Vec};
+
 
 pub enum RxItem {
     Packet(TelemetryPacket),
@@ -50,8 +50,8 @@ pub struct BoardConfig {
 
 impl BoardConfig {
     pub fn new<H>(handlers: H) -> Self
-        where
-            H: Into<Arc<[EndpointHandler]>>,
+    where
+        H: Into<Arc<[EndpointHandler]>>,
     {
         Self {
             handlers: handlers.into(),
@@ -115,9 +115,9 @@ fn log_raw<T, F>(
     timestamp: u64,
     mut tx_function: F,
 ) -> TelemetryResult<()>
-    where
-        T: LeBytes,
-        F: FnMut(TelemetryPacket) -> TelemetryResult<()>,
+where
+    T: LeBytes,
+    F: FnMut(TelemetryPacket) -> TelemetryResult<()>,
 {
     let meta = message_meta(ty);
     let got = data.len() * T::WIDTH;
@@ -125,7 +125,10 @@ fn log_raw<T, F>(
     match meta.data_size {
         MessageSizeType::Static(need) => {
             if got != need {
-                return Err(TelemetryError::SizeMismatch { expected: need, got });
+                return Err(TelemetryError::SizeMismatch {
+                    expected: need,
+                    got,
+                });
             }
         }
         MessageSizeType::Dynamic => {
@@ -184,8 +187,8 @@ impl Router {
         cfg: BoardConfig,
         clock: Box<dyn Clock + Send + Sync>,
     ) -> Self
-        where
-            Tx: Fn(&[u8]) -> TelemetryResult<()> + Send + Sync + 'static,
+    where
+        Tx: Fn(&[u8]) -> TelemetryResult<()> + Send + Sync + 'static,
     {
         Self {
             sender: DEVICE_IDENTIFIER.into(),
@@ -399,8 +402,8 @@ impl Router {
     }
 
     fn retry<F, T, E>(&self, times: usize, mut f: F) -> Result<T, E>
-        where
-            F: FnMut() -> Result<T, E>,
+    where
+        F: FnMut() -> Result<T, E>,
     {
         let mut last_err = None;
         for _ in 0..times {
@@ -442,8 +445,8 @@ impl Router {
             env_for_ctx: Option<&serialize::TelemetryEnvelope>,
             mut run: F,
         ) -> TelemetryResult<()>
-            where
-                F: FnMut() -> TelemetryResult<()>,
+        where
+            F: FnMut() -> TelemetryResult<()>,
         {
             this.retry(MAX_NUMBER_OF_RETRIES, || run()).map_err(|e| {
                 if let Some(pkt) = pkt_for_ctx {
@@ -669,20 +672,38 @@ impl Router {
 
     /// Build a packet then send immediately.
     pub fn log<T: LeBytes>(&self, ty: DataType, data: &[T]) -> TelemetryResult<()> {
-        log_raw(self.sender.clone(), ty, data, self.clock.now_ms(), |pkt| self.send(&pkt))
+        log_raw(self.sender.clone(), ty, data, self.clock.now_ms(), |pkt| {
+            self.send(&pkt)
+        })
     }
 
     /// Build a packet and queue it for later TX.
     pub fn log_queue<T: LeBytes>(&self, ty: DataType, data: &[T]) -> TelemetryResult<()> {
-        log_raw(self.sender.clone(), ty, data, self.clock.now_ms(), |pkt| self.queue_tx_message(pkt))
+        log_raw(self.sender.clone(), ty, data, self.clock.now_ms(), |pkt| {
+            self.queue_tx_message(pkt)
+        })
     }
 
-    pub fn log_ts<T: LeBytes>(&self, ty: DataType, timestamp: u64, data: &[T]) -> TelemetryResult<()> {
-        log_raw(self.sender.clone(), ty, data, timestamp, |pkt| self.send(&pkt))
+    pub fn log_ts<T: LeBytes>(
+        &self,
+        ty: DataType,
+        timestamp: u64,
+        data: &[T],
+    ) -> TelemetryResult<()> {
+        log_raw(self.sender.clone(), ty, data, timestamp, |pkt| {
+            self.send(&pkt)
+        })
     }
 
-    pub fn log_queue_ts<T: LeBytes>(&self, ty: DataType, timestamp: u64, data: &[T]) -> TelemetryResult<()> {
-        log_raw(self.sender.clone(), ty, data, timestamp, |pkt| self.queue_tx_message(pkt))
+    pub fn log_queue_ts<T: LeBytes>(
+        &self,
+        ty: DataType,
+        timestamp: u64,
+        data: &[T],
+    ) -> TelemetryResult<()> {
+        log_raw(self.sender.clone(), ty, data, timestamp, |pkt| {
+            self.queue_tx_message(pkt)
+        })
     }
 
     #[inline]

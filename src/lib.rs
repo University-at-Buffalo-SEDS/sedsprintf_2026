@@ -185,6 +185,7 @@ pub enum TelemetryError {
     MissingPayload,
     HandlerError(&'static str),
     BadArg,
+    Serialize(&'static str),
     Deserialize(&'static str),
     Io(&'static str),
     InvalidUtf8,
@@ -201,6 +202,7 @@ impl TelemetryError {
             TelemetryError::MissingPayload => TelemetryErrorCode::MissingPayload,
             TelemetryError::HandlerError(_) => TelemetryErrorCode::HandlerError,
             TelemetryError::BadArg => TelemetryErrorCode::BadArg,
+            TelemetryError::Serialize(_) => TelemetryErrorCode::Serialize,
             TelemetryError::Deserialize(_) => TelemetryErrorCode::Deserialize,
             TelemetryError::Io(_) => TelemetryErrorCode::Io,
             TelemetryError::InvalidUtf8 => TelemetryErrorCode::InvalidUtf8,
@@ -218,9 +220,10 @@ pub enum TelemetryErrorCode {
     MissingPayload = -7,
     HandlerError = -8,
     BadArg = -9,
-    Deserialize = -10,
-    Io = -11,
-    InvalidUtf8 = -12,
+    Serialize = -10,
+    Deserialize = -11,
+    Io = -12,
+    InvalidUtf8 = -13,
 }
 
 impl_repr_i32_enum!(
@@ -241,6 +244,7 @@ impl TelemetryErrorCode {
             TelemetryErrorCode::MissingPayload => "{Missing Payload}",
             TelemetryErrorCode::HandlerError => "{Handler Error}",
             TelemetryErrorCode::BadArg => "{Bad Arg}",
+            TelemetryErrorCode::Serialize => "{Serialize Error}",
             TelemetryErrorCode::Deserialize => "{Deserialize Error}",
             TelemetryErrorCode::Io => "{IO Error}",
             TelemetryErrorCode::InvalidUtf8 => "{Invalid UTF-8}",

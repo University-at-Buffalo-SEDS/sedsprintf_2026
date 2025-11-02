@@ -4,13 +4,16 @@
 
 use crate::router::{Clock, LeBytes};
 use crate::{
-    config::DataEndpoint, config::MessageSizeType,
-    do_vec_log_typed, message_meta, router,
-    router::{BoardConfig, EndpointHandler, Router},
-    serialize::deserialize_packet, serialize::packet_wire_size, serialize::peek_envelope,
+    config::DataEndpoint, config::MessageSizeType, do_vec_log_typed,
+    message_meta,
+    router,
+    router::{BoardConfig, EndpointHandler, Router}, serialize::deserialize_packet, serialize::packet_wire_size,
+    serialize::peek_envelope,
     serialize::serialize_packet,
-    telemetry_packet::{DataType, TelemetryPacket}
-    , TelemetryError, TelemetryErrorCode, TelemetryResult,
+    telemetry_packet::{DataType, TelemetryPacket},
+    TelemetryError,
+    TelemetryErrorCode,
+    TelemetryResult,
 };
 use alloc::{boxed::Box, string::String, sync::Arc, vec, vec::Vec};
 use core::{ffi::c_char, ffi::c_void, mem::size_of, ptr, slice, str::from_utf8};
@@ -171,7 +174,7 @@ pub struct SedsPacketView {
 type CTransmit = Option<extern "C" fn(bytes: *const u8, len: usize, user: *mut c_void) -> i32>;
 type CEndpointHandler = Option<extern "C" fn(pkt: *const SedsPacketView, user: *mut c_void) -> i32>;
 type CSerializedHandler =
-Option<extern "C" fn(bytes: *const u8, len: usize, user: *mut c_void) -> i32>;
+    Option<extern "C" fn(bytes: *const u8, len: usize, user: *mut c_void) -> i32>;
 
 #[repr(C)]
 pub struct SedsHandlerDesc {
@@ -246,8 +249,10 @@ unsafe fn write_str_to_buf(s: &str, buf: *mut c_char, buf_len: usize) -> i32 {
     }
 
     let ncopy = core::cmp::min(s.len(), buf_len.saturating_sub(1));
-    unsafe{ptr::copy_nonoverlapping(s.as_ptr(), buf as *mut u8, ncopy);
-    *buf.add(ncopy) = 0};
+    unsafe {
+        ptr::copy_nonoverlapping(s.as_ptr(), buf as *mut u8, ncopy);
+        *buf.add(ncopy) = 0
+    };
 
     // If too small, return required size (not success)
     if buf_len < needed {
@@ -706,7 +711,14 @@ pub extern "C" fn seds_router_log_typed(
     elem_kind: u32,
 ) -> i32 {
     seds_router_log_typed_ex(
-        r, ty_u32, data, count, elem_size, elem_kind, ptr::null(), false,
+        r,
+        ty_u32,
+        data,
+        count,
+        elem_size,
+        elem_kind,
+        ptr::null(),
+        false,
     )
 }
 
@@ -719,7 +731,16 @@ pub extern "C" fn seds_router_log_queue_typed(
     elem_size: usize,
     elem_kind: u32,
 ) -> i32 {
-    seds_router_log_typed_ex(r, ty_u32, data, count, elem_size, elem_kind, ptr::null(), true)
+    seds_router_log_typed_ex(
+        r,
+        ty_u32,
+        data,
+        count,
+        elem_size,
+        elem_kind,
+        ptr::null(),
+        true,
+    )
 }
 
 // -------------------- Receive / queue RX --------------------
