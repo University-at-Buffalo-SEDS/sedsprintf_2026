@@ -882,6 +882,7 @@ mod tests_extra {
     #![cfg(test)]
 
 
+    use crate::config::DataEndpoint::{Radio, SdCard};
     use crate::tests::test_payload_len_for;
     use crate::{
         config::{DataEndpoint, DataType}, router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, Router}, serialize,
@@ -1069,7 +1070,8 @@ mod tests_extra {
         let wire = serialize::serialize_packet(&pkt);
         let back = serialize::deserialize_packet(&wire).unwrap();
         assert_eq!(
-            &*back.endpoints, &*pkt.endpoints,
+            &*back.endpoints,
+            [SdCard, Radio],
             "endpoints must roundtrip 1:1"
         );
         assert_eq!(back.ty, pkt.ty);
