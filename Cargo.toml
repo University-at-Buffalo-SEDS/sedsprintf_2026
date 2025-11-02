@@ -2,26 +2,32 @@
 name = "sedsprintf_rs"
 version = "0.1.0"
 edition = "2024"
+build = "build.rs"
+authors = ["Rylan Meilutis <rylan@rylanswebsite.com>"]
+description = "A memory safe, no_std-capable telemetry library in Rust with Python and c bindings for use in the UBSEDS student group."
+license = "GPL-2"
+repository = "github.com/rylanmeilutis/sedsprintf_rs"
+keywords = ["sprintf", "no_std", "embedded", "python", "pyo3"]
+categories = ["embedded", "no-std"]
+readme = "README.md"
 
 [lib]
-# Only the safe defaults here. We’ll add `cdylib` *dynamically* in build.rs when the
-# `python` feature is enabled, so embedded builds won’t see it.
 crate-type = ["rlib", "staticlib"]
 
 [features]
-default = ["std"]                  # host default; embedded can opt out
+default = ["std"]
 std = []
-embedded = ["spin"]      # for FreeRTOS-based targets
-python = ["std", "pyo3/extension-module"]  # turn on PyO3 for Python builds
+embedded = ["spin"]
+python = ["std", "pyo3/extension-module"]
 
 [package.metadata.maturin]
-bindings = "pyo3"                  # force maturin to pick PyO3, not CFFI
+bindings = "pyo3"
 
 [dependencies]
-spin = { version="0.10.0", optional = true }
-strum_macros = { version="0.27.2", default-features = false }
-strum = { version="0.27.2", default-features = false }
-# PyO3 is optional and only enabled by the `python` feature
+strum_macros = { version = "0.27.2", default-features = false }
+strum = { version = "0.27.2", default-features = false }
+# Optional dependencies
+spin = { version = "0.10.0", optional = true }
 pyo3 = { version = "0.27.1", optional = true, features = ["auto-initialize", "extension-module", "multiple-pymethods"] }
 
 [build-dependencies]

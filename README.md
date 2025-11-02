@@ -24,6 +24,26 @@ The library is platform-agnostic and can be used on any platform that supports R
 to be used in embedded systems and used by a C program, but can also be used in desktop applications and other rust
 codebases.
 
+This library also supports python bindings via pyo3. to use you need maturin installed to build the python package.
+The size of the header in a serialized packet is around 20 bytes (the size will change based on the total number of 
+endpoints in your system and the length of the sender string), so a packet containing three floats is 32 bytes total. This small size makes it ideal for 
+use in low bandwidth environments.
+
+## Building
+To build the library in a C project, just include the library as a submodule or subtree and link it in your cmakelists.txt as shown below.
+For other build systems, you can build the library as a static or dynamic library using cargo and link it to your project.
+
+Building with python bindings can be done with the build script on posix systems:
+
+```bash
+./build.sh release maturin-develop 
+```
+
+When building in an embedded environment the library will compile to a static library that can be linked to your C code.
+this library takes up about 100kb of flash and does require heap allocation to be available through either freertos, or
+by creating shims that expose pvPortMalloc and vPortFree.
+
+
 ## Dependencies
 
 - Rust
@@ -47,6 +67,11 @@ cmakelists.txt
   add_subdirectory(${CMAKE_SOURCE_DIR}/sedsprintf_rs)
   target_link_libraries(${CMAKE_PROJECT_NAME} sedsprintf_rs)
   ```
+- Setup the config.rs to match your application needs. All config options are in the config.rs file and are very self-explanatory.
+NOTE: (ON EVERY SYSTEM THIS LIBRARY IS USED, THE CONFIG ENUMS MUST BE THE SAME OR UNDEFINED BEHAVIOR MAY OCCUR). So for most
+applications I would recommend making a fork and setting the config values you need for your application minus the sender,
+and then only changing the sender string on each system, this will ensure that the enum values are the same on all systems.
+
 
 
 - To add this repo as a subtree to allow for modifications, use the following command:
