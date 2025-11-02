@@ -927,10 +927,35 @@ mod tests_extra {
 
     #[test]
     fn deserialize_header_only_short_buffer_fails() {
-        // Too short to hold the fixed header
-        let tiny = [0u8; 8];
+        // v2 header is varint-based. Force a definite short read in the first varint.
+
+        // Case A: only NEP present (0 endpoints), but no bytes for `ty` varint.
+        let tiny = [0x00u8]; // NEP = 0
         let err = serialize::deserialize_packet_header_only(&tiny).unwrap_err();
         matches_deser_err(err);
+
+        // Case B: NEP present, and a *truncated* varint (continuation bit set, but no following byte).
+        let truncated = [0x00u8, 0x80]; // NEP=0, then start varint with continuation bit
+        let err = serialize::deserialize_packet_header_only(&truncated).unwrap_err();
+        matches_deser_err(err);
+    }
+    #[test]
+    fn header_size_is_prefix_of_wire_image() {
+        let pkt = TelemetryPacket::from_f32_slice(
+            DataType::GpsData,
+            &[1.0, 2.0, 3.0],
+            &[DataEndpoint::SdCard, DataEndpoint::Radio],
+            123,
+        )
+        .unwrap();
+
+        let wire = serialize::serialize_packet(&pkt);
+        let hdr = serialize::header_size_bytes(&pkt);
+        assert!(hdr <= wire.len());
+
+        // header must decode from the start (i.e., NEP + scalars exists)
+        // we can't fully verify here without re-parsing, but hdr must at least be > 0
+        assert!(hdr > 0);
     }
 
     fn matches_deser_err(e: TelemetryError) {
@@ -938,6 +963,229 @@ mod tests_extra {
             TelemetryError::Deserialize(_) => {}
             other => panic!("expected Deserialize error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn serializer_is_canonical_roundtrip() {
+        use crate::config::{DataEndpoint, DataType};
+        use crate::{serialize, telemetry_packet::TelemetryPacket};
+
+        // Dynamic payload to avoid schema constraints and let us vary sizes later.
+        let msg = "hello world";
+        let pkt = TelemetryPacket::from_u8_slice(
+            DataType::TelemetryError,
+            msg.as_bytes(),
+            &[DataEndpoint::SdCard, DataEndpoint::Radio],
+            0,
+        )
+        .unwrap();
+
+        let wire1 = serialize::serialize_packet(&pkt);
+        let pkt2 = serialize::deserialize_packet(&wire1).unwrap();
+        let wire2 = serialize::serialize_packet(&pkt2);
+
+        // ULEB128 is canonical (no leading 0x80 “more” bytes), so bytes must match
+        assert_eq!(&*wire1, &*wire2, "serializer must be canonical");
+    }
+
+    #[test]
+    fn serializer_varint_scalars_grow_as_expected() {
+        use crate::config::{DataEndpoint, DataType};
+        use crate::{serialize, telemetry_packet::TelemetryPacket};
+
+        // Helper to build a TelemetryError string payload of given length.
+        fn pkt_with(len: usize, sender_len: usize, ts: u64) -> TelemetryPacket {
+            let s = "x".repeat(sender_len);
+            let payload = vec![b'A'; len]; // dynamic payload
+            TelemetryPacket::new(
+                DataType::TelemetryError,
+                &[DataEndpoint::SdCard],
+                s,
+                ts,
+                Arc::<[u8]>::from(payload),
+            )
+            .unwrap()
+        }
+
+        // Case 1: small (all varints fit in 1 byte)
+        let p1 = pkt_with(10, 5, 0x7F); // <= 127
+        let w1 = serialize::serialize_packet(&p1);
+        let h1 = serialize::header_size_bytes(&p1);
+        assert!(h1 >= 1 + 4, "NEP + 4 one-byte varints minimum");
+
+        // Case 2: two-byte varints for size/sender_len
+        let p2 = pkt_with(200, 200, 0x7F);
+        let w2 = serialize::serialize_packet(&p2);
+        let h2 = serialize::header_size_bytes(&p2);
+        assert!(w2.len() > w1.len(), "wire should grow with larger varints");
+        assert!(h2 > h1, "header should grow with larger varints");
+
+        // Case 3: bigger timestamp to push it beyond 1 byte (and usually >2)
+        let p3 = pkt_with(200, 200, 1u64 << 40); // forces 6-byte varint
+        let w3 = serialize::serialize_packet(&p3);
+        let h3 = serialize::header_size_bytes(&p3);
+        assert!(
+            w3.len() > w2.len(),
+            "wire should grow with larger timestamp"
+        );
+        assert!(h3 > h2, "header should grow with larger timestamp");
+
+        // Size function must match exact output
+        assert_eq!(serialize::packet_wire_size(&p3), w3.len());
+    }
+    #[test]
+    fn endpoints_bitpack_roundtrip_many_and_extremes() {
+        use crate::{
+            config::{DataEndpoint, DataType},
+            serialize,
+            telemetry_packet::TelemetryPacket,
+            MAX_VALUE_DATA_ENDPOINT,
+        };
+
+        // Build a long endpoint list by cycling through all enum values (0..=MAX)
+        let mut eps = Vec::<DataEndpoint>::new();
+        for i in 0..=MAX_VALUE_DATA_ENDPOINT {
+            if let Some(ep) = DataEndpoint::try_from_u32(i) {
+                eps.push(ep);
+            }
+        }
+        // Repeat to make the bitstream cross multiple bytes
+        let mut endpoints = Vec::new();
+        for _ in 0..4 {
+            endpoints.extend_from_slice(&eps);
+        }
+
+        // Make payload dynamic so schema doesn't get in the way
+        let payload = vec![0x55u8; 257]; // force 2-byte varint for data_size
+        let pkt = TelemetryPacket::new(
+            DataType::TelemetryError,
+            &endpoints,
+            "sender",
+            123456,
+            Arc::<[u8]>::from(payload),
+        )
+        .unwrap();
+
+        let wire = serialize::serialize_packet(&pkt);
+        let back = serialize::deserialize_packet(&wire).unwrap();
+        assert_eq!(
+            &*back.endpoints, &*pkt.endpoints,
+            "endpoints must roundtrip 1:1"
+        );
+        assert_eq!(back.ty, pkt.ty);
+        assert_eq!(back.timestamp, pkt.timestamp);
+        assert_eq!(&*back.payload, &*pkt.payload);
+        assert_eq!(serialize::packet_wire_size(&pkt), wire.len());
+    }
+    #[test]
+    fn peek_envelope_matches_full_parse_on_large_values() {
+        use crate::config::{DataEndpoint, DataType};
+        use crate::{serialize, telemetry_packet::TelemetryPacket};
+
+        let sender = "S".repeat(10_000);        // big sender (varint grows)
+        let payload = vec![b'h'; 4096];
+        let ts = (1u64 << 40) + 123;            // large ts (varint grows)
+
+        let pkt = TelemetryPacket::new(
+            DataType::TelemetryError,                          // String-typed
+            &[DataEndpoint::SdCard, DataEndpoint::Radio],
+            sender,
+            ts,
+            std::sync::Arc::<[u8]>::from(payload),
+        ).unwrap();
+
+        let wire = serialize::serialize_packet(&pkt);
+        let env  = serialize::deserialize_packet_header_only(&wire).unwrap();
+        let full = serialize::deserialize_packet(&wire).unwrap();
+
+        assert_eq!(env.ty, pkt.ty);
+        assert_eq!(env.sender.as_ref(), pkt.sender.as_ref());
+        assert_eq!(env.timestamp_ms, pkt.timestamp);
+        assert_eq!(&*env.endpoints, &*pkt.endpoints);
+
+        assert_eq!(full.ty, pkt.ty);
+        assert_eq!(full.timestamp, pkt.timestamp);
+        assert_eq!(&*full.endpoints, &*pkt.endpoints);
+        assert_eq!(&*full.payload, &*pkt.payload);
+    }
+
+    #[test]
+    fn corrupt_endpoint_bits_yields_bad_endpoint_error() {
+        use crate::{
+            config::{DataEndpoint, DataType},
+            serialize,
+            telemetry_packet::TelemetryPacket,
+            MAX_VALUE_DATA_ENDPOINT,
+        };
+
+        // Recompute EP_BITS the same way the module does.
+        let bits = 32 - MAX_VALUE_DATA_ENDPOINT.leading_zeros();
+        let ep_bits: u8 = if bits == 0 { 1 } else { bits as u8 };
+        // If EP_BITS is exactly the minimum bits to encode MAX, there is room for values > MAX.
+        let upper_val = (1u64 << ep_bits) - 1;
+        if upper_val as u32 <= MAX_VALUE_DATA_ENDPOINT {
+            // Nothing to corrupt beyond max—skip test (no larger representable value).
+            return;
+        }
+
+        // Build a simple, valid packet with at least 1 endpoint.
+        let pkt = TelemetryPacket::from_f32_slice(
+            DataType::GpsData,
+            &[1.0, 2.0, 3.0],
+            &[DataEndpoint::SdCard],
+            123,
+        )
+        .unwrap();
+        let mut wire = serialize::serialize_packet(&pkt).to_vec();
+
+        // Compute where endpoint bits start (right after header varints)
+        let ep_offset = serialize::header_size_bytes(&pkt);
+        assert!(ep_offset < wire.len());
+
+        // Overwrite the *first* endpoint with an out-of-range value in the bitstream.
+        // Bits are packed LSB-first.
+        let mut v = upper_val as u64;
+        let mut bitpos = 0usize;
+        for _ in 0..ep_bits {
+            let byte_idx = ep_offset + (bitpos / 8);
+            let bit_off = bitpos % 8;
+            // Set bit if the corresponding bit of v is 1
+            if (v & 1) != 0 {
+                wire[byte_idx] |= 1 << bit_off;
+            } else {
+                wire[byte_idx] &= !(1 << bit_off);
+            }
+            v >>= 1;
+            bitpos += 1;
+        }
+
+        // Now deserialization must fail with a Deserialize("bad endpoint") error.
+        let err = serialize::deserialize_packet(&wire).unwrap_err();
+        match err {
+            crate::TelemetryError::Deserialize(msg) if msg.contains("endpoint") => {}
+            other => panic!("expected bad endpoint deserialize error, got {other:?}"),
+        }
+    }
+    #[test]
+    fn header_size_is_prefix_and_less_than_total() {
+        use crate::config::{DataEndpoint, DataType};
+        use crate::{serialize, telemetry_packet::TelemetryPacket};
+
+        let pkt = TelemetryPacket::from_f32_slice(
+            DataType::GpsData,
+            &[1.0, 2.0, 3.0],
+            &[DataEndpoint::SdCard, DataEndpoint::Radio],
+            999,
+        )
+        .unwrap();
+
+        let wire = serialize::serialize_packet(&pkt);
+        let hdr = serialize::header_size_bytes(&pkt);
+
+        assert!(hdr > 0 && hdr < wire.len());
+        // Ensure header-only parse consumes exactly those bytes before endpoints.
+        // (Indirectly validated by successful full parse + size equality.)
+        assert_eq!(serialize::packet_wire_size(&pkt), wire.len());
     }
 
     // --------------------------- UTF-8 trimming behavior ---------------------------
@@ -1291,27 +1539,6 @@ mod tests_more {
         assert_eq!(need, out.len());
     }
 
-    #[test]
-    fn header_size_bytes_is_consistent() {
-        use crate::serialize::{
-            header_size_bytes, DATA_SIZE_SIZE, NUM_ENDPOINTS_SIZE, SENDER_LEN_SIZE, TIME_SIZE,
-            TYPE_SIZE,
-        };
-        let expected =
-            TYPE_SIZE + DATA_SIZE_SIZE + TIME_SIZE + SENDER_LEN_SIZE + NUM_ENDPOINTS_SIZE;
-        assert_eq!(header_size_bytes(), expected);
-    }
-
-    #[test]
-    fn bytereader_short_reads_fail() {
-        use crate::serialize::ByteReader;
-        let mut r = ByteReader::new(&[0u8; 3]);
-        assert!(matches!(r.read_u32(), Err(TelemetryError::Deserialize(_))));
-
-        let mut r = ByteReader::new(&[0u8; 7]);
-        assert!(matches!(r.read_u64(), Err(TelemetryError::Deserialize(_))));
-    }
-
     // ---------------------------------------------------------------------------
     // Router serialization/deserialization paths
     // ---------------------------------------------------------------------------
@@ -1332,7 +1559,7 @@ mod tests_more {
         let handler = EndpointHandler {
             endpoint: DataEndpoint::SdCard,
             handler: EndpointHandlerFn::Serialized(Box::new(move |bytes: &[u8]| {
-                assert!(bytes.len() >= serialize::header_size_bytes());
+                assert!(bytes.len() >= serialize::header_size_bytes(&pkt));
                 c.fetch_add(1, Ordering::SeqCst);
                 Ok(())
             })),

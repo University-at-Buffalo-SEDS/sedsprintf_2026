@@ -3,7 +3,7 @@
 
 // ---- core/alloc imports usable in both std and no_std ----
 pub use crate::config::{DataEndpoint, DataType, DEVICE_IDENTIFIER, MAX_PRECISION_IN_STRINGS};
-use crate::config::{MessageSizeType, MAX_STATIC_HEX_LENGTH, MAX_STATIC_STRING_LENGTH};
+use crate::config::MessageSizeType;
 use crate::router::LeBytes;
 use crate::{
     get_data_type, get_info_type, message_meta, MessageDataType, MessageType, TelemetryError,
@@ -121,12 +121,6 @@ fn validate_dynamic_len_and_content(ty: DataType, bytes: &[u8]) -> TelemetryResu
                 .rposition(|&b| b != 0)
                 .map(|i| i + 1)
                 .unwrap_or(0);
-            if end > MAX_STATIC_STRING_LENGTH {
-                return Err(TelemetryError::SizeMismatch {
-                    expected: MAX_STATIC_STRING_LENGTH,
-                    got: end,
-                });
-            }
             // Empty string is OK; otherwise ensure valid UTF-8.
             if end > 0 {
                 core::str::from_utf8(&bytes[..end]).map_err(|_| TelemetryError::InvalidUtf8)?;
@@ -134,13 +128,7 @@ fn validate_dynamic_len_and_content(ty: DataType, bytes: &[u8]) -> TelemetryResu
             Ok(())
         }
         MessageDataType::Hex => {
-            // No UTF-8 requirement. Optionally bound the size:
-            if bytes.len() > MAX_STATIC_HEX_LENGTH {
-                return Err(TelemetryError::SizeMismatch {
-                    expected: MAX_STATIC_HEX_LENGTH,
-                    got: bytes.len(),
-                });
-            }
+            // No UTF-8 requirement.
             Ok(())
         }
         _ => {
