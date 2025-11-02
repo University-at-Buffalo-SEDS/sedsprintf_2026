@@ -1,10 +1,11 @@
 // src/serialize.rs
 #![allow(dead_code)]
 
-use alloc::{sync::Arc, vec::Vec};
+
 use crate::telemetry_packet::{DataEndpoint, TelemetryPacket};
 use crate::{config::DataType, MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE};
 use crate::{try_enum_from_u32, TelemetryError, TelemetryResult};
+use alloc::{sync::Arc, vec::Vec};
 
 // =========================== Public Types ===========================
 
@@ -83,7 +84,10 @@ struct BitWriter {
 }
 impl BitWriter {
     fn new() -> Self {
-        Self { buf: Vec::new(), bit_len: 0 }
+        Self {
+            buf: Vec::new(),
+            bit_len: 0,
+        }
     }
     fn push_bits(&mut self, mut value: u64, nbits: u32) {
         assert!((1..=32).contains(&nbits));
@@ -202,7 +206,11 @@ const EP_BITS: u8 = {
 fn data_endpoint_to_bits(eps: &[DataEndpoint], bw: &mut BitWriter) {
     for &ep in eps.iter() {
         let v = ep as u32 as u64;
-        let max_val = if EP_BITS >= 32 { u32::MAX as u64 } else { (1u64 << EP_BITS) - 1 };
+        let max_val = if EP_BITS >= 32 {
+            u32::MAX as u64
+        } else {
+            (1u64 << EP_BITS) - 1
+        };
         debug_assert!(v <= max_val, "endpoint value exceeds EP_BITS");
         bw.push_bits(v, EP_BITS as u32);
     }
@@ -225,7 +233,7 @@ pub fn serialize_packet(pkt: &TelemetryPacket) -> Arc<[u8]> {
 
     // Varint scalars
     write_uleb128(pkt.ty as u32 as u64, &mut out);
-    write_uleb128(pkt.data_size as u64,    &mut out);
+    write_uleb128(pkt.data_size as u64, &mut out);
     write_uleb128(pkt.timestamp, &mut out);
     write_uleb128(pkt.sender.len() as u64, &mut out);
 
@@ -250,11 +258,11 @@ pub fn serialize_packet_into(pkt: &TelemetryPacket, out: &mut Vec<u8>) {
     out.clear();
     out.reserve_exact(16 + ep_blob.len() + pkt.sender.len() + pkt.payload.len());
 
-    out.push(pkt.endpoints.len() as u8);            // NEP
-    write_uleb128(pkt.ty as u32 as u64, out);       // ty
-    write_uleb128(pkt.data_size as u64, out);       // data_size
-    write_uleb128(pkt.timestamp, out);       // timestamp
-    write_uleb128(pkt.sender.len() as u64, out);    // sender_len
+    out.push(pkt.endpoints.len() as u8); // NEP
+    write_uleb128(pkt.ty as u32 as u64, out); // ty
+    write_uleb128(pkt.data_size as u64, out); // data_size
+    write_uleb128(pkt.timestamp, out); // timestamp
+    write_uleb128(pkt.sender.len() as u64, out); // sender_len
 
     out.extend_from_slice(&ep_blob);
     out.extend_from_slice(pkt.sender.as_bytes());
@@ -263,12 +271,16 @@ pub fn serialize_packet_into(pkt: &TelemetryPacket, out: &mut Vec<u8>) {
 
 // =========================== API: Deserialize ===========================
 
-
-fn data_endpoint_from_bits(nep: usize, br: & mut BitReader, eps:& mut Vec<DataEndpoint>) -> Result<(), TelemetryError> {
+fn data_endpoint_from_bits(
+    nep: usize,
+    br: &mut BitReader,
+    eps: &mut Vec<DataEndpoint>,
+) -> Result<(), TelemetryError> {
     for _ in 0..nep {
         let v = br.read_bits(EP_BITS as u32)? as u32;
         // SAFETY: range-checked above
-        let ep = DataEndpoint::try_from_u32(v).ok_or(TelemetryError::Deserialize("bad endpoint"))?;
+        let ep =
+            DataEndpoint::try_from_u32(v).ok_or(TelemetryError::Deserialize("bad endpoint"))?;
         eps.push(ep);
     }
     Ok(())
@@ -283,10 +295,10 @@ pub fn deserialize_packet(buf: &[u8]) -> Result<TelemetryPacket, TelemetryError>
     let nep = r.read_bytes(1)?[0] as usize;
 
     // Varint scalars
-    let ty_v  = read_uleb128(&mut r)?;
-    let dsz   = read_uleb128(&mut r)? as usize;
-    let ts_v  = read_uleb128(&mut r)?;
-    let slen  = read_uleb128(&mut r)? as usize;
+    let ty_v = read_uleb128(&mut r)?;
+    let dsz = read_uleb128(&mut r)? as usize;
+    let ts_v = read_uleb128(&mut r)?;
+    let slen = read_uleb128(&mut r)? as usize;
 
     // Endpoints bit-packed with EP_BITS
     let ep_bits_total = nep
@@ -301,7 +313,7 @@ pub fn deserialize_packet(buf: &[u8]) -> Result<TelemetryPacket, TelemetryError>
     let ep_buf = r.read_bytes(ep_bytes)?;
     let mut br = BitReader::new(ep_buf);
     let mut eps = Vec::with_capacity(nep);
-    data_endpoint_from_bits(nep, & mut br, & mut eps)?;
+    data_endpoint_from_bits(nep, &mut br, &mut eps)?;
     br.align_byte();
 
     // Sender
@@ -339,7 +351,7 @@ pub fn peek_envelope(buf: &[u8]) -> TelemetryResult<TelemetryEnvelope> {
     }
     let mut r = ByteReader::new(buf);
 
-    let nep  = r.read_bytes(1)?[0] as usize;
+    let nep = r.read_bytes(1)?[0] as usize;
     let ty_v = read_uleb128(&mut r)?;
     let _dsz = read_uleb128(&mut r)? as usize;
     let ts_v = read_uleb128(&mut r)?;
@@ -358,7 +370,7 @@ pub fn peek_envelope(buf: &[u8]) -> TelemetryResult<TelemetryEnvelope> {
     let ep_buf = r.read_bytes(ep_bytes)?;
     let mut br = BitReader::new(ep_buf);
     let mut eps = Vec::with_capacity(nep);
-    data_endpoint_from_bits(nep, & mut br, & mut eps)?;
+    data_endpoint_from_bits(nep, &mut br, &mut eps)?;
     br.align_byte();
 
     // Sender (OWNED)

@@ -1082,20 +1082,21 @@ mod tests_extra {
         use crate::config::{DataEndpoint, DataType};
         use crate::{serialize, telemetry_packet::TelemetryPacket};
 
-        let sender = "S".repeat(10_000);        // big sender (varint grows)
+        let sender = "S".repeat(10_000); // big sender (varint grows)
         let payload = vec![b'h'; 4096];
-        let ts = (1u64 << 40) + 123;            // large ts (varint grows)
+        let ts = (1u64 << 40) + 123; // large ts (varint grows)
 
         let pkt = TelemetryPacket::new(
-            DataType::TelemetryError,                          // String-typed
+            DataType::TelemetryError, // String-typed
             &[DataEndpoint::SdCard, DataEndpoint::Radio],
             sender,
             ts,
             std::sync::Arc::<[u8]>::from(payload),
-        ).unwrap();
+        )
+        .unwrap();
 
         let wire = serialize::serialize_packet(&pkt);
-        let env  = serialize::deserialize_packet_header_only(&wire).unwrap();
+        let env = serialize::deserialize_packet_header_only(&wire).unwrap();
         let full = serialize::deserialize_packet(&wire).unwrap();
 
         assert_eq!(env.ty, pkt.ty);
