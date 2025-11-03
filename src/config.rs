@@ -116,8 +116,8 @@ pub const fn get_message_elements(datatype: DataType) -> usize {
         DataType::GpsData => 3, // GPS Data messages carry 3 float32 elements (latitude, longitude, altitude)
         DataType::ImuData => 6, // IMU Data messages carry 6 float32 elements (accel x,y,z and gyro x,y,z)
         DataType::BatteryStatus => 3, // Battery Status messages carry 2 float32 elements (voltage, current)
-        DataType::GyroData => 3, // Gyro Data messages carry 3 float32 elements (gyro x,y,z)
-        DataType::AccelData => 3, // Accel Data messages carry 3 float32 elements (accel x,y,z)
+        DataType::GyroData => 3,      // Gyro Data messages carry 3 float32 elements (gyro x,y,z)
+        DataType::AccelData => 3,     // Accel Data messages carry 3 float32 elements (accel x,y,z)
         DataType::BarometerData => 3, // Barometer Data messages carry 2 float32 elements (pressure, temperature)
         DataType::MessageData => DYNAMIC_ELEMENT, // Message Data messages have dynamic length
     }
@@ -144,16 +144,14 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
         DataType::ImuData => {
             MessageMeta {
                 // IMU Data
-                data_size: MessageSizeType::Static(get_needed_message_size(DataType::ImuData)),
+                data_size: MessageSizeType::Static(get_needed_message_size(data_type)),
                 endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
             }
         }
         DataType::BatteryStatus => {
             MessageMeta {
                 // Battery Status
-                data_size: MessageSizeType::Static(get_needed_message_size(
-                    DataType::BatteryStatus,
-                )),
+                data_size: MessageSizeType::Static(get_needed_message_size(data_type)),
                 endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
             }
         }
@@ -167,18 +165,14 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
         DataType::BarometerData => {
             MessageMeta {
                 // Barometer Data
-                data_size: MessageSizeType::Static(get_needed_message_size(
-                    data_type,
-                )),
+                data_size: MessageSizeType::Static(get_needed_message_size(data_type)),
                 endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
             }
         }
         DataType::AccelData => {
             MessageMeta {
                 // Barometer Data
-                data_size: MessageSizeType::Static(get_needed_message_size(
-                    data_type,
-                )),
+                data_size: MessageSizeType::Static(get_needed_message_size(data_type)),
                 endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
             }
         }
