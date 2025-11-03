@@ -876,7 +876,7 @@ mod tests_extra {
     #![cfg(test)]
 
 
-    use crate::config::DataEndpoint::{Radio, SdCard};
+    use crate::config::DataEndpoint::{GroundStation, SdCard};
     use crate::tests::test_payload_len_for;
     use crate::{
         config::{DataEndpoint, DataType}, router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, Router}, serialize,
@@ -939,7 +939,7 @@ mod tests_extra {
         let pkt = TelemetryPacket::from_f32_slice(
             DataType::GpsData,
             &[1.0, 2.0, 3.0],
-            &[DataEndpoint::SdCard, DataEndpoint::Radio],
+            &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
             123,
         )
         .unwrap();
@@ -970,7 +970,7 @@ mod tests_extra {
         let pkt = TelemetryPacket::from_u8_slice(
             DataType::TelemetryError,
             msg.as_bytes(),
-            &[DataEndpoint::SdCard, DataEndpoint::Radio],
+            &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
             0,
         )
         .unwrap();
@@ -1065,7 +1065,7 @@ mod tests_extra {
         let back = serialize::deserialize_packet(&wire).unwrap();
         assert_eq!(
             &*back.endpoints,
-            [SdCard, Radio],
+            [SdCard, GroundStation],
             "endpoints must roundtrip 1:1"
         );
         assert_eq!(back.ty, pkt.ty);
@@ -1084,7 +1084,7 @@ mod tests_extra {
 
         let pkt = TelemetryPacket::new(
             DataType::TelemetryError, // String-typed
-            &[DataEndpoint::SdCard, DataEndpoint::Radio],
+            &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
             sender,
             ts,
             std::sync::Arc::<[u8]>::from(payload),
@@ -1171,7 +1171,7 @@ mod tests_extra {
         let pkt = TelemetryPacket::from_f32_slice(
             DataType::GpsData,
             &[1.0, 2.0, 3.0],
-            &[DataEndpoint::SdCard, DataEndpoint::Radio],
+            &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
             999,
         )
         .unwrap();

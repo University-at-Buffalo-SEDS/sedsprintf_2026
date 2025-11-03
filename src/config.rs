@@ -87,7 +87,8 @@ pub const fn get_message_data_type(data_type: DataType) -> MessageDataType {
         DataType::GpsData => MessageDataType::Float32,
         DataType::ImuData => MessageDataType::Float32,
         DataType::BatteryStatus => MessageDataType::Float32,
-        DataType::SystemStatus => MessageDataType::UInt8,
+        DataType::GyroData => MessageDataType::Float32,
+        DataType::AccelData => MessageDataType::Float32,
         DataType::BarometerData => MessageDataType::Float32,
         DataType::MessageData => MessageDataType::String,
     }
@@ -100,7 +101,8 @@ pub const fn get_message_info_types(message_type: DataType) -> MessageType {
         DataType::GpsData => MessageType::Info,
         DataType::ImuData => MessageType::Info,
         DataType::BatteryStatus => MessageType::Info,
-        DataType::SystemStatus => MessageType::Info,
+        DataType::GyroData => MessageType::Info,
+        DataType::AccelData => MessageType::Info,
         DataType::BarometerData => MessageType::Info,
         DataType::MessageData => MessageType::Info,
     }
@@ -110,11 +112,12 @@ pub const fn get_message_info_types(message_type: DataType) -> MessageType {
 /// For dynamic sized data, use DYNAMIC_ELEMENT.
 pub const fn get_message_elements(datatype: DataType) -> usize {
     match datatype {
-        DataType::TelemetryError => STRING_VALUE_ELEMENTS, // Telemetry Error messages carry 1 string element
+        DataType::TelemetryError => DYNAMIC_ELEMENT, // Telemetry Error messages carry 1 string element
         DataType::GpsData => 3, // GPS Data messages carry 3 float32 elements (latitude, longitude, altitude)
         DataType::ImuData => 6, // IMU Data messages carry 6 float32 elements (accel x,y,z and gyro x,y,z)
-        DataType::BatteryStatus => 4, // Battery Status messages carry 2 float32 elements (voltage, current)
-        DataType::SystemStatus => 2,  // System Status messages carry 1 uint8 element (status code)
+        DataType::BatteryStatus => 3, // Battery Status messages carry 2 float32 elements (voltage, current)
+        DataType::GyroData => 3, // Gyro Data messages carry 3 float32 elements (gyro x,y,z)
+        DataType::AccelData => 3, // Accel Data messages carry 3 float32 elements (accel x,y,z)
         DataType::BarometerData => 3, // Barometer Data messages carry 2 float32 elements (pressure, temperature)
         DataType::MessageData => DYNAMIC_ELEMENT, // Message Data messages have dynamic length
     }
@@ -128,21 +131,21 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
             MessageMeta {
                 // Telemetry Error
                 data_size: MessageSizeType::Dynamic,
-                endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
+                endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
             }
         }
         DataType::GpsData => {
             MessageMeta {
                 // GPS Data
-                data_size: MessageSizeType::Static(get_needed_message_size(DataType::GpsData)),
-                endpoints: &[DataEndpoint::Radio, DataEndpoint::SdCard],
+                data_size: MessageSizeType::Static(get_needed_message_size(data_type)),
+                endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
             }
         }
         DataType::ImuData => {
             MessageMeta {
                 // IMU Data
                 data_size: MessageSizeType::Static(get_needed_message_size(DataType::ImuData)),
-                endpoints: &[DataEndpoint::Radio, DataEndpoint::SdCard],
+                endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
             }
         }
         DataType::BatteryStatus => {
@@ -151,13 +154,13 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
                 data_size: MessageSizeType::Static(get_needed_message_size(
                     DataType::BatteryStatus,
                 )),
-                endpoints: &[DataEndpoint::Radio, DataEndpoint::SdCard],
+                endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
             }
         }
-        DataType::SystemStatus => {
+        DataType::GyroData => {
             MessageMeta {
                 // System Status
-                data_size: MessageSizeType::Static(get_needed_message_size(DataType::SystemStatus)),
+                data_size: MessageSizeType::Static(get_needed_message_size(data_type)),
                 endpoints: &[DataEndpoint::SdCard],
             }
         }
@@ -165,16 +168,25 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
             MessageMeta {
                 // Barometer Data
                 data_size: MessageSizeType::Static(get_needed_message_size(
-                    DataType::BarometerData,
+                    data_type,
                 )),
-                endpoints: &[DataEndpoint::Radio, DataEndpoint::SdCard],
+                endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
+            }
+        }
+        DataType::AccelData => {
+            MessageMeta {
+                // Barometer Data
+                data_size: MessageSizeType::Static(get_needed_message_size(
+                    data_type,
+                )),
+                endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
             }
         }
         DataType::MessageData => {
             MessageMeta {
                 // Message Data
                 data_size: MessageSizeType::Dynamic,
-                endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
+                endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
             }
         }
     }
