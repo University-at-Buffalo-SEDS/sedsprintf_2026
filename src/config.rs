@@ -138,21 +138,21 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
             MessageMeta {
                 // GPS Data
                 data_size: MessageSizeType::Static(get_needed_message_size(data_type)),
-                endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
+                endpoints: &[DataEndpoint::Radio, DataEndpoint::SdCard],
             }
         }
         DataType::ImuData => {
             MessageMeta {
                 // IMU Data
                 data_size: MessageSizeType::Static(get_needed_message_size(data_type)),
-                endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
+                endpoints: &[DataEndpoint::Radio, DataEndpoint::SdCard],
             }
         }
         DataType::BatteryStatus => {
             MessageMeta {
                 // Battery Status
                 data_size: MessageSizeType::Static(get_needed_message_size(data_type)),
-                endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
+                endpoints: &[DataEndpoint::Radio, DataEndpoint::SdCard],
             }
         }
         DataType::GyroData => {
@@ -166,7 +166,7 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
             MessageMeta {
                 // Barometer Data
                 data_size: MessageSizeType::Static(get_needed_message_size(data_type)),
-                endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
+                endpoints: &[DataEndpoint::Radio, DataEndpoint::SdCard],
             }
         }
         DataType::AccelData => {
