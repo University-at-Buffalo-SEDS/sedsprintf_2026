@@ -6,7 +6,7 @@
 // Therefore, if you are trying to optimize
 // this routine, and it fails (it most surely will),
 // please increase this counter as a warning for the next person:
-// total hours wasted on this project = 24
+// total hours wasted on this project = 80
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -17,8 +17,8 @@ extern crate std;
 
 
 use crate::config::{
-    DataEndpoint, DataType, MAX_STATIC_HEX_LENGTH, MAX_STATIC_STRING_LENGTH, MESSAGE_DATA_TYPES,
-    MESSAGE_ELEMENTS, MESSAGE_INFO_TYPES, MESSAGE_TYPES,
+    get_message_data_type, get_message_elements, get_message_info_types, get_message_meta, DataEndpoint,
+    DataType, MAX_STATIC_HEX_LENGTH, MAX_STATIC_STRING_LENGTH,
 };
 use crate::macros::{ReprI32Enum, ReprU32Enum};
 use strum::EnumCount;
@@ -110,23 +110,23 @@ pub struct MessageMeta {
 }
 
 #[inline(always)]
-pub fn message_meta(ty: DataType) -> &'static MessageMeta {
-    &MESSAGE_TYPES[ty as usize]
+pub fn message_meta(ty: DataType) -> MessageMeta {
+    get_message_meta(ty)
 }
 
 #[inline(always)]
 pub const fn get_needed_message_size(ty: DataType) -> usize {
-    data_type_size(get_data_type(ty)) * MESSAGE_ELEMENTS[ty as usize]
+    data_type_size(get_data_type(ty)) * get_message_elements(ty)
 }
 
 #[inline(always)]
 pub const fn get_info_type(ty: DataType) -> MessageType {
-    MESSAGE_INFO_TYPES[ty as usize]
+    get_message_info_types(ty)
 }
 
 #[inline(always)]
 pub const fn get_data_type(ty: DataType) -> MessageDataType {
-    MESSAGE_DATA_TYPES[ty as usize]
+    get_message_data_type(ty)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
