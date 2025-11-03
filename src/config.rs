@@ -138,35 +138,35 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
             MessageMeta {
                 // GPS Data
                 data_size: MessageSizeType::Static(get_needed_message_size(data_type)),
-                endpoints: &[DataEndpoint::Radio, DataEndpoint::SdCard],
+                endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
             }
         }
         DataType::ImuData => {
             MessageMeta {
                 // IMU Data
                 data_size: MessageSizeType::Static(get_needed_message_size(data_type)),
-                endpoints: &[DataEndpoint::Radio, DataEndpoint::SdCard],
+                endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
             }
         }
         DataType::BatteryStatus => {
             MessageMeta {
                 // Battery Status
                 data_size: MessageSizeType::Static(get_needed_message_size(data_type)),
-                endpoints: &[DataEndpoint::Radio, DataEndpoint::SdCard],
+                endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
             }
         }
         DataType::GyroData => {
             MessageMeta {
                 // System Status
                 data_size: MessageSizeType::Static(get_needed_message_size(data_type)),
-                endpoints: &[DataEndpoint::SdCard],
+                endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
             }
         }
         DataType::BarometerData => {
             MessageMeta {
                 // Barometer Data
                 data_size: MessageSizeType::Static(get_needed_message_size(data_type)),
-                endpoints: &[DataEndpoint::Radio, DataEndpoint::SdCard],
+                endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
             }
         }
         DataType::AccelData => {
