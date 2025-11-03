@@ -132,39 +132,35 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
         DataType::GpsData => {
             MessageMeta {
                 // GPS Data
-                data_size: MessageSizeType::Static(get_needed_message_size(DataType::GpsData)),
+                data_size: MessageSizeType::Static(get_needed_message_size(data_type)),
                 endpoints: &[DataEndpoint::Radio, DataEndpoint::SdCard],
             }
         }
         DataType::ImuData => {
             MessageMeta {
                 // IMU Data
-                data_size: MessageSizeType::Static(get_needed_message_size(DataType::ImuData)),
+                data_size: MessageSizeType::Static(get_needed_message_size(data_type)),
                 endpoints: &[DataEndpoint::Radio, DataEndpoint::SdCard],
             }
         }
         DataType::BatteryStatus => {
             MessageMeta {
                 // Battery Status
-                data_size: MessageSizeType::Static(get_needed_message_size(
-                    DataType::BatteryStatus,
-                )),
+                data_size: MessageSizeType::Static(get_needed_message_size(data_type)),
                 endpoints: &[DataEndpoint::Radio, DataEndpoint::SdCard],
             }
         }
         DataType::SystemStatus => {
             MessageMeta {
                 // System Status
-                data_size: MessageSizeType::Static(get_needed_message_size(DataType::SystemStatus)),
+                data_size: MessageSizeType::Static(get_needed_message_size(data_type)),
                 endpoints: &[DataEndpoint::SdCard],
             }
         }
         DataType::BarometerData => {
             MessageMeta {
                 // Barometer Data
-                data_size: MessageSizeType::Static(get_needed_message_size(
-                    DataType::BarometerData,
-                )),
+                data_size: MessageSizeType::Static(get_needed_message_size(data_type)),
                 endpoints: &[DataEndpoint::Radio, DataEndpoint::SdCard],
             }
         }
