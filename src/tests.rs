@@ -1,5 +1,5 @@
 use crate::config::{
-    get_needed_message_size, MAX_STATIC_HEX_LENGTH, MAX_STATIC_STRING_LENGTH, MESSAGE_ELEMENTS,
+    get_message_elements, get_needed_message_size, MAX_STATIC_HEX_LENGTH, MAX_STATIC_STRING_LENGTH,
 };
 use crate::router::EndpointHandler;
 use crate::telemetry_packet::{DataEndpoint, DataType, TelemetryPacket};
@@ -30,7 +30,7 @@ fn test_payload_len_for(ty: DataType) -> usize {
                         MessageDataType::UInt128 | MessageDataType::Int128 => 16,
                         MessageDataType::String | MessageDataType::Hex => 1,
                     };
-                    let elems = MESSAGE_ELEMENTS[ty as usize].max(1);
+                    let elems = get_message_elements(ty).max(1);
                     w * elems
                 }
             }
@@ -52,7 +52,7 @@ fn get_sd_card_handler(sd_seen_c: Arc<Mutex<Option<(DataType, Vec<f32>)>>>) -> E
         endpoint: DataEndpoint::SdCard,
         handler: router::EndpointHandlerFn::Packet(Box::new(move |pkt: &TelemetryPacket| {
             // sanity: element sizing must be 4 bytes (f32) for GPS_DATA
-            let elems = MESSAGE_ELEMENTS[pkt.ty as usize].max(1);
+            let elems = get_message_elements(pkt.ty).max(1);
             let per_elem = get_needed_message_size(pkt.ty) / elems;
             assert_eq!(pkt.ty, DataType::GpsData);
             assert_eq!(per_elem, 4, "GPS_DATA expected f32 elements");
@@ -87,7 +87,7 @@ mod tests {
     use crate::tests::get_sd_card_handler;
     use crate::tests::timeout_tests::StepClock;
     use crate::{
-        config::{DataEndpoint, DataType, MESSAGE_ELEMENTS},
+        config::{DataEndpoint, DataType},
         router::Router,
         serialize,
         telemetry_packet::TelemetryPacket,
@@ -95,13 +95,7 @@ mod tests {
     };
     use std::sync::{Arc, Mutex};
     use std::vec::Vec;
-    use strum::EnumCount;
 
-
-    #[test]
-    fn names_tables_match_enums() {
-        assert_eq!(MESSAGE_ELEMENTS.len(), DataType::COUNT);
-    }
 
     #[test]
     fn serialize_roundtrip_gps() {
@@ -1437,8 +1431,9 @@ mod tests_more {
     #![cfg(test)]
 
 
+    use crate::config::get_message_elements;
     use crate::{
-        config::{DataEndpoint, DataType, MessageSizeType, MESSAGE_ELEMENTS}, get_data_type, message_meta, router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, Router},
+        config::{DataEndpoint, DataType, MessageSizeType}, get_data_type, message_meta, router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, Router},
         serialize, telemetry_packet::TelemetryPacket,
         MessageDataType,
         TelemetryError, TelemetryErrorCode,
@@ -1478,7 +1473,7 @@ mod tests_more {
                     MessageDataType::UInt128 | MessageDataType::Int128 => 16,
                     MessageDataType::String | MessageDataType::Hex => 1,
                 };
-                let elems = MESSAGE_ELEMENTS[ty as usize].max(1);
+                let elems = get_message_elements(ty).max(1);
                 core::cmp::max(1, w * elems)
             }
         }
@@ -1735,5 +1730,45 @@ mod tests_more {
             exp.extend_from_slice(&v.to_le_bytes());
         }
         assert_eq!(&*got, &exp);
+    }
+
+    #[test]
+    fn test_payload_len_for_respects_element_width() {
+        use crate::tests::test_payload_len_for;
+
+        for i in 0..=MAX_VALUE_DATA_TYPE {
+            if let Some(ty) = DataType::try_from_u32(i) {
+                let len = test_payload_len_for(ty);
+                assert!(len > 0, "test payload length must be > 0 for {ty:?}");
+
+                match get_data_type(ty) {
+                    MessageDataType::String | MessageDataType::Hex => {
+                        // any positive length is fine for string/hex, just sanity check
+                        assert!(len >= 1, "string/hex must have at least 1 byte for {ty:?}");
+                    }
+                    kind => {
+                        let width = match kind {
+                            MessageDataType::UInt8
+                            | MessageDataType::Int8
+                            | MessageDataType::Bool => 1,
+                            MessageDataType::UInt16 | MessageDataType::Int16 => 2,
+                            MessageDataType::UInt32
+                            | MessageDataType::Int32
+                            | MessageDataType::Float32 => 4,
+                            MessageDataType::UInt64
+                            | MessageDataType::Int64
+                            | MessageDataType::Float64 => 8,
+                            MessageDataType::UInt128 | MessageDataType::Int128 => 16,
+                            MessageDataType::String | MessageDataType::Hex => 1,
+                        };
+                        assert_eq!(
+                            len % width,
+                            0,
+                            "test payload length {len} not multiple of element width {width} for {ty:?}"
+                        );
+                    }
+                }
+            }
+        }
     }
 }
