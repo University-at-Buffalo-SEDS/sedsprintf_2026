@@ -1,7 +1,8 @@
 // build.rs
-use std::{env, fs};
-use std::path::PathBuf;
 use regex::Regex;
+use std::path::PathBuf;
+use std::{env, fs};
+
 
 fn main() {
     generate_c_header();
@@ -13,7 +14,9 @@ fn main() {
 fn generate_c_header() {
     // 1) Run cbindgen to a visible temp file
     let crate_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
-    let out_dir = PathBuf::from(&crate_dir).join("target").join("cbindgen_out");
+    let out_dir = PathBuf::from(&crate_dir)
+        .join("target")
+        .join("cbindgen_out");
     fs::create_dir_all(&out_dir).expect("create cbindgen_out");
     let enums_tmp = out_dir.join("enums_raw.h");
 
@@ -62,7 +65,11 @@ fn generate_c_header() {
 
     let marker = "/* {{AUTOGEN:ENUMS}} */";
     if !tpl.contains(marker) {
-        panic!("Template {} is missing marker: {}", tpl_path.display(), marker);
+        panic!(
+            "Template {} is missing marker: {}",
+            tpl_path.display(),
+            marker
+        );
     }
 
     let final_text = tpl.replace(marker, &enums_joined);
@@ -78,7 +85,9 @@ fn generate_c_header() {
 
 fn generate_pyi_stub() {
     let crate_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
-    let out_dir = PathBuf::from(&crate_dir).join("target").join("cbindgen_out");
+    let out_dir = PathBuf::from(&crate_dir)
+        .join("target")
+        .join("cbindgen_out");
     let enums_tmp = out_dir.join("enums_raw.h");
 
     // Ensure cbindgen was already run by generate_c_header()
@@ -91,10 +100,14 @@ fn generate_pyi_stub() {
     let raw = fs::read_to_string(&enums_tmp).expect("read enums_raw.h");
 
     // Extract the two enums from raw cbindgen output (unprefixed names)
-    let dt_block = extract_enum(&raw, "DataType")
-        .unwrap_or_else(|| { dump_excerpt(&raw, "DataType"); panic!("DataType not found for .pyi"); });
-    let ep_block = extract_enum(&raw, "DataEndpoint")
-        .unwrap_or_else(|| { dump_excerpt(&raw, "DataEndpoint"); panic!("DataEndpoint not found for .pyi"); });
+    let dt_block = extract_enum(&raw, "DataType").unwrap_or_else(|| {
+        dump_excerpt(&raw, "DataType");
+        panic!("DataType not found for .pyi");
+    });
+    let ep_block = extract_enum(&raw, "DataEndpoint").unwrap_or_else(|| {
+        dump_excerpt(&raw, "DataEndpoint");
+        panic!("DataEndpoint not found for .pyi");
+    });
 
     let dt_members = parse_enum_members(&dt_block); // Vec<(NAME, VALUE_TEXT)>
     let ep_members = parse_enum_members(&ep_block);
@@ -119,17 +132,22 @@ fn generate_pyi_stub() {
         .unwrap_or_else(|e| panic!("read pyi template {}: {e}", tpl_path.display()));
     let marker = "/* {{AUTOGEN:PY_ENUMS}} */";
     if !tpl.contains(marker) {
-        panic!("pyi template {} missing marker {}", tpl_path.display(), marker);
+        panic!(
+            "pyi template {} missing marker {}",
+            tpl_path.display(),
+            marker
+        );
     }
 
     let final_text = tpl.replace(marker, &joined);
 
     // Write to an importable location inside the crate workspace
     // (adjust if you prefer a different output path)
-    let out_pyi = PathBuf::from(&crate_dir).join("python-files").join("sedsprintf_rs.pyi");
+    let out_pyi = PathBuf::from(&crate_dir)
+        .join("python-files")
+        .join("sedsprintf_rs.pyi");
     fs::create_dir_all(out_pyi.parent().unwrap()).expect("create python_bindings/");
-    fs::write(&out_pyi, final_text)
-        .unwrap_or_else(|e| panic!("write {}: {e}", out_pyi.display()));
+    fs::write(&out_pyi, final_text).unwrap_or_else(|e| panic!("write {}: {e}", out_pyi.display()));
 
     println!("[INFO] Generated .pyi → {}", out_pyi.display());
 }
@@ -158,7 +176,12 @@ fn extract_enum(input: &str, name: &str) -> Option<String> {
 }
 
 /// Generic transformer used for DataType/DataEndpoint:
-fn transform_enum_block(block: &str, old_type: &str, new_type: &str, variant_prefix: &str) -> String {
+fn transform_enum_block(
+    block: &str,
+    old_type: &str,
+    new_type: &str,
+    variant_prefix: &str,
+) -> String {
     let mut s = block.replace(&format!("}} {};", old_type), &format!("}} {};", new_type));
     if let (Some(l), Some(r)) = (s.find('{'), s.rfind('}')) {
         let body = &s[(l + 1)..r];
@@ -166,8 +189,12 @@ fn transform_enum_block(block: &str, old_type: &str, new_type: &str, variant_pre
             .lines()
             .map(|line| {
                 if let Some((lead, rest)) = split_leading_ws(line) {
-                    if let Some(id) = rest.split(|c: char| c == ' ' || c == '=' || c == ',').next() {
-                        if !id.is_empty() && id.chars().all(|c| c.is_ascii_uppercase() || c == '_') {
+                    if let Some(id) = rest
+                        .split(|c: char| c == ' ' || c == '=' || c == ',')
+                        .next()
+                    {
+                        if !id.is_empty() && id.chars().all(|c| c.is_ascii_uppercase() || c == '_')
+                        {
                             if rest.trim_start().starts_with(variant_prefix) {
                                 return line.to_string();
                             }
@@ -188,17 +215,30 @@ fn transform_enum_block(block: &str, old_type: &str, new_type: &str, variant_pre
 fn transform_errors_enum_as_seds_result(block: &str) -> String {
     let (l, r) = match (block.find('{'), block.rfind('}')) {
         (Some(l), Some(r)) => (l, r),
-        _ => return String::from("typedef enum SedsResult { SEDS_OK = 0, SEDS_ERR = -1, } SedsResult;"),
+        _ => {
+            return String::from(
+                "typedef enum SedsResult { SEDS_OK = 0, SEDS_ERR = -1, } SedsResult;",
+            );
+        }
     };
     let body = &block[(l + 1)..r];
 
     let mut lines = Vec::new();
     for line in body.lines() {
         let trimmed = line.trim();
-        if trimmed.is_empty() { continue; }
+        if trimmed.is_empty() {
+            continue;
+        }
         if let Some((lead, rest)) = split_leading_ws(line) {
-            if let Some(id) = rest.split(|c: char| c == ' ' || c == '=' || c == ',').next() {
-                if !id.is_empty() && id.chars().all(|c| c.is_ascii_uppercase() || c == '_') {
+            if let Some(id) = rest
+                .split(|c: char| c == ' ' || c == '=' || c == ',')
+                .next()
+            {
+                if !id.is_empty()
+                    && id
+                        .chars()
+                        .all(|c| c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit())
+                {
                     let prefixed = if rest.trim_start().starts_with("SEDS_") {
                         rest.to_string()
                     } else {
@@ -224,7 +264,10 @@ fn transform_errors_enum_as_seds_result(block: &str) -> String {
     }
     injected.extend(lines);
 
-    format!("typedef enum SedsResult {{\n\n{}\n\n}} SedsResult;", injected.join("\n"))
+    format!(
+        "typedef enum SedsResult {{\n\n{}\n\n}} SedsResult;",
+        injected.join("\n")
+    )
 }
 
 /// Parse enum body into (NAME, VALUE_TEXT) pairs. Keeps values verbatim (e.g., "= 5", " = -2").
@@ -238,7 +281,9 @@ fn parse_enum_members(block: &str) -> Vec<(String, String)> {
 
     for line in body.lines() {
         let t = line.trim();
-        if t.is_empty() || t.starts_with("/*") || t.starts_with("//") { continue; }
+        if t.is_empty() || t.starts_with("/*") || t.starts_with("//") {
+            continue;
+        }
 
         // Grab "IDENT [= VALUE] ," at start of line
         if let Some((_, rest)) = split_leading_ws(line) {
@@ -274,11 +319,7 @@ fn parse_enum_members(block: &str) -> Vec<(String, String)> {
     out
 }
 
-fn render_python_intenum(
-    name: &str,
-    doc: &str,
-    members: &[(String, String)],
-) -> String {
+fn render_python_intenum(name: &str, doc: &str, members: &[(String, String)]) -> String {
     // Build a quick lookup for per-member comment text
     let per_member_doc = std::collections::HashMap::<&str, &str>::new();
 
@@ -316,6 +357,9 @@ fn dump_excerpt(raw: &str, want: &str) {
         let excerpt = &raw[start..end];
         println!("cargo:warning=Excerpt around `{}`:\n{}", want, excerpt);
     } else {
-        println!("cargo:warning=`{}` not found anywhere in cbindgen output", want);
+        println!(
+            "cargo:warning=`{}` not found anywhere in cbindgen output",
+            want
+        );
     }
 }

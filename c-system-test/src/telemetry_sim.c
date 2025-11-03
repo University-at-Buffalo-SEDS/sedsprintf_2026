@@ -6,40 +6,45 @@
 #include <stdint.h>
 
 #ifdef _WIN32
-  #define WIN32_LEAN_AND_MEAN
-  #include <windows.h>
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #else
-  #include <pthread.h>
+#include <pthread.h>
 #endif
 
 /* ===================== Global recursive lock ===================== */
 
 #ifdef _WIN32
-static INIT_ONCE        g_once   = INIT_ONCE_STATIC_INIT;
+static INIT_ONCE g_once = INIT_ONCE_STATIC_INIT;
 static CRITICAL_SECTION g_cs;
 
-static BOOL CALLBACK win_init_mutex(PINIT_ONCE once, PVOID param, PVOID *ctx) {
-    (void)once; (void)param; (void)ctx;
+static BOOL CALLBACK win_init_mutex(PINIT_ONCE once, PVOID param, PVOID * ctx)
+{
+    (void) once;
+    (void) param;
+    (void) ctx;
     InitializeCriticalSection(&g_cs); // recursive by design
     return TRUE;
 }
 static inline void lock_init_once(void) { InitOnceExecuteOnce(&g_once, win_init_mutex, NULL, NULL); }
-static inline void LOCK(void)   { EnterCriticalSection(&g_cs); }
+static inline void LOCK(void) { EnterCriticalSection(&g_cs); }
 static inline void UNLOCK(void) { LeaveCriticalSection(&g_cs); }
 
 #else
 static pthread_mutex_t g_mtx;
-static pthread_once_t  g_once = PTHREAD_ONCE_INIT;
+static pthread_once_t g_once = PTHREAD_ONCE_INIT;
 
-static void posix_init_mutex(void) {
+static void posix_init_mutex(void)
+{
     pthread_mutexattr_t attr;
     pthread_mutexattr_init(&attr);
     pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
     pthread_mutex_init(&g_mtx, &attr);
     pthread_mutexattr_destroy(&attr);
 }
+
 static inline void lock_init_once(void) { pthread_once(&g_once, posix_init_mutex); }
-static inline void LOCK(void)   { pthread_mutex_lock(&g_mtx); }
+static inline void LOCK(void) { pthread_mutex_lock(&g_mtx); }
 static inline void UNLOCK(void) { pthread_mutex_unlock(&g_mtx); }
 #endif
 
@@ -54,11 +59,11 @@ uint64_t host_now_ms(const void * user)
     LARGE_INTEGER ctr;
     if (freq.QuadPart == 0) { QueryPerformanceFrequency(&freq); }
     QueryPerformanceCounter(&ctr);
-    return (uint64_t)((ctr.QuadPart * 1000ULL) / (uint64_t)freq.QuadPart);
+    return (uint64_t) ((ctr.QuadPart * 1000ULL) / (uint64_t) freq.QuadPart);
 #else
     struct timeval tv;
     gettimeofday(&tv, NULL);
-    return (uint64_t)tv.tv_sec * 1000ULL + (uint64_t)(tv.tv_usec / 1000ULL);
+    return (uint64_t) tv.tv_sec * 1000ULL + (uint64_t) (tv.tv_usec / 1000ULL);
 #endif
 }
 
@@ -69,10 +74,10 @@ void bus_init(SimBus * bus)
     if (!bus) return;
     lock_init_once();
     LOCK();
-    bus->nodes  = NULL;
-    bus->count  = 0;
-    bus->cap    = 0;
-    bus->t0_ms  = host_now_ms(NULL); // zero point
+    bus->nodes = NULL;
+    bus->count = 0;
+    bus->cap = 0;
+    bus->t0_ms = host_now_ms(NULL); // zero point
     UNLOCK();
 }
 
@@ -84,28 +89,28 @@ void bus_free(SimBus * bus)
     free(bus->nodes);
     bus->nodes = NULL;
     bus->count = 0;
-    bus->cap   = 0;
+    bus->cap = 0;
     UNLOCK();
 }
 
 size_t bus_register(SimBus * bus, SimNode * n)
 {
-    if (!bus || !n) return (size_t)-1;
+    if (!bus || !n) return (size_t) -1;
     lock_init_once();
     LOCK();
 
     if (bus->count == bus->cap)
     {
         size_t newcap = bus->cap ? bus->cap * 2 : 4;
-        SimNode ** tmp = (SimNode**)realloc(bus->nodes, newcap * sizeof(*tmp));
+        SimNode ** tmp = (SimNode **) realloc(bus->nodes, newcap * sizeof(*tmp));
         if (!tmp)
         {
             fprintf(stderr, "bus_register: OOM\n");
             UNLOCK();
-            return (size_t)-1;
+            return (size_t) -1;
         }
         bus->nodes = tmp;
-        bus->cap   = newcap;
+        bus->cap = newcap;
     }
     bus->nodes[bus->count] = n;
     size_t id = bus->count++;
@@ -137,26 +142,28 @@ SedsResult bus_send(SimBus * bus, const SimNode * from, const uint8_t * bytes, s
 // TX for a node: push raw bytes onto the bus.
 static SedsResult node_tx_send(const uint8_t * bytes, const size_t len, void * user)
 {
-    SimNode * self = (SimNode*)user;
+    SimNode * self = (SimNode *) user;
     if (!self || !self->bus) return SEDS_ERR;
     // bus_send does its own locking
     return bus_send(self->bus, self, bytes, len);
 }
 
-SedsResult radio_handler_serial(const uint8_t *bytes, const size_t len, void *user)
+SedsResult radio_handler_serial(const uint8_t * bytes, const size_t len, void * user)
 {
-    (void)len;
-    SimNode * self = (SimNode*)user;
+    (void) len;
+    SimNode * self = (SimNode *) user;
 
     // Deserialize into owned packet
-    SedsOwnedPacket *owned = seds_pkt_deserialize_owned(bytes, len);
-    if (!owned) {
+    SedsOwnedPacket * owned = seds_pkt_deserialize_owned(bytes, len);
+    if (!owned)
+    {
         fprintf(stderr, "[RADIO] deserialize failed\n");
         return SEDS_ERR;
     }
 
     SedsPacketView view;
-    if (seds_owned_pkt_view(owned, &view) != SEDS_OK) {
+    if (seds_owned_pkt_view(owned, &view) != SEDS_OK)
+    {
         fprintf(stderr, "[RADIO] owned_pkt_view failed\n");
         seds_owned_pkt_free(owned);
         return SEDS_ERR;
@@ -164,7 +171,8 @@ SedsResult radio_handler_serial(const uint8_t *bytes, const size_t len, void *us
 
     char buf[seds_pkt_to_string_len(&view)];
     SedsResult s = seds_pkt_to_string(&view, buf, sizeof(buf));
-    if (s != SEDS_OK) {
+    if (s != SEDS_OK)
+    {
         fprintf(stderr, "[RADIO] to_string failed: %d\n", s);
         seds_owned_pkt_free(owned);
         return s;
@@ -182,7 +190,7 @@ SedsResult radio_handler_serial(const uint8_t *bytes, const size_t len, void *us
 
 SedsResult sdcard_handler(const SedsPacketView * pkt, void * user)
 {
-    SimNode * self = (SimNode*)user;
+    SimNode * self = (SimNode *) user;
     char buf[seds_pkt_to_string_len(pkt)];
     const SedsResult s = seds_pkt_to_string(pkt, buf, sizeof(buf));
     if (s != SEDS_OK)
@@ -200,10 +208,10 @@ SedsResult sdcard_handler(const SedsPacketView * pkt, void * user)
     return SEDS_OK;
 }
 
-uint64_t node_now_since_bus_ms(void *user)
+uint64_t node_now_since_bus_ms(void * user)
 {
-    const SimNode *self = (const SimNode*)user;
-    const uint64_t now  = host_now_ms(NULL);
+    const SimNode * self = (const SimNode *) user;
+    const uint64_t now = host_now_ms(NULL);
     // No need to lock for read-only snapshot here; t0_ms set at init and never changes
     return (self && self->bus) ? (now - self->bus->t0_ms) : 0;
 }
@@ -215,14 +223,14 @@ SedsResult node_init(SimNode * n, SimBus * bus, const char * name, int radio, in
     lock_init_once();
     LOCK();
 
-    n->r          = NULL;
-    n->bus        = bus;
-    n->name       = name ? name : "node";
-    n->has_radio  = radio ? 1 : 0;
+    n->r = NULL;
+    n->bus = bus;
+    n->name = name ? name : "node";
+    n->has_radio = radio ? 1 : 0;
     n->has_sdcard = sdcard ? 1 : 0;
 
     n->radio_hits = 0;
-    n->sd_hits    = 0;
+    n->sd_hits = 0;
 
     SedsLocalEndpointDesc locals[2];
     uint32_t num = 0;
@@ -230,17 +238,17 @@ SedsResult node_init(SimNode * n, SimBus * bus, const char * name, int radio, in
     if (n->has_radio)
     {
         locals[num++] = (SedsLocalEndpointDesc){
-            .endpoint           = SEDS_EP_RADIO,
+            .endpoint = SEDS_EP_RADIO,
             .serialized_handler = radio_handler_serial,
-            .user               = (void*)n
+            .user = (void *) n
         };
     }
     if (n->has_sdcard)
     {
         locals[num++] = (SedsLocalEndpointDesc){
-            .endpoint       = SEDS_EP_SD_CARD, // your enum
+            .endpoint = SEDS_EP_SD_CARD, // your enum
             .packet_handler = sdcard_handler,
-            .user           = (void*)n
+            .user = (void *) n
         };
     }
 

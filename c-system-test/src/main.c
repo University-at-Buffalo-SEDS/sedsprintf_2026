@@ -14,29 +14,34 @@
 #include "sedsprintf.h"
 
 // --------- helpers ----------
-static void make_series(float *out, size_t n, float base) {
-    for (size_t i = 0; i < n; ++i) out[i] = base + (float)i * 0.25f;
+static void make_series(float * out, size_t n, float base)
+{
+    for (size_t i = 0; i < n; ++i) out[i] = base + (float) i * 0.25f;
 }
 
-static uint64_t gen_random_us(void) {
+static uint64_t gen_random_us(void)
+{
     const uint32_t min_ms = 20, max_ms = 1000;
     uint32_t v = 0;
     int fd = open("/dev/urandom", O_RDONLY);
-    if (fd >= 0) {
+    if (fd >= 0)
+    {
         if (read(fd, &v, sizeof(v)) != sizeof(v)) v = 0;
         close(fd);
     }
     uint32_t ms = (v % (max_ms - min_ms + 1)) + min_ms;
-    return (uint64_t)ms * 1000ULL;
+    return (uint64_t) ms * 1000ULL;
 }
 
 // --------- global stop flag ----------
 static volatile int g_stop = 0;
 
 // --------- processor thread (per-node) ----------
-static void *processor_thread(void *arg) {
-    SimNode *n = (SimNode *)arg;
-    while (!g_stop) {
+static void * processor_thread(void * arg)
+{
+    SimNode * n = (SimNode *) arg;
+    while (!g_stop)
+    {
         // Small timeouts so we can respond to g_stop quickly
         seds_router_process_tx_queue_with_timeout(n->r, 5);
         seds_router_process_rx_queue_with_timeout(n->r, 5);
@@ -44,7 +49,8 @@ static void *processor_thread(void *arg) {
         usleep(1000);
     }
     // Final drain to avoid stragglers
-    for (int i = 0; i < 50; ++i) {
+    for (int i = 0; i < 50; ++i)
+    {
         seds_router_process_tx_queue_with_timeout(n->r, 0);
         seds_router_process_rx_queue_with_timeout(n->r, 0);
         usleep(1000);
@@ -53,17 +59,20 @@ static void *processor_thread(void *arg) {
 }
 
 // --------- sender threads (one per node) ----------
-typedef struct {
-    SimNode *nodeA; // Radio Board (RADIO handler)
-    SimNode *nodeB; // Flight Controller (SD handler)
-    SimNode *nodeC; // Power Board (no local endpoints)
+typedef struct
+{
+    SimNode * nodeA; // Radio Board (RADIO handler)
+    SimNode * nodeB; // Flight Controller (SD handler)
+    SimNode * nodeC; // Power Board (no local endpoints)
 } Topo;
 
-static void *sender_A(void *arg) {
-    (void)arg;
-    SimNode *A = ((Topo *)arg)->nodeA;
+static void * sender_A(void * arg)
+{
+    (void) arg;
+    SimNode * A = ((Topo *) arg)->nodeA;
     float buf[8];
-    for (int i = 0; i < 5; ++i) {
+    for (int i = 0; i < 5; ++i)
+    {
         make_series(buf, 3, 10.0f);
         assert(node_log(A, SEDS_DT_GPS_DATA, buf, 3, sizeof(buf[0])) == SEDS_OK);
         usleep(gen_random_us());
@@ -71,10 +80,12 @@ static void *sender_A(void *arg) {
     return NULL;
 }
 
-static void *sender_B(void *arg) {
-    SimNode *B = ((Topo *)arg)->nodeB;
+static void * sender_B(void * arg)
+{
+    SimNode * B = ((Topo *) arg)->nodeB;
     float buf[8];
-    for (int i = 0; i < 5; ++i) {
+    for (int i = 0; i < 5; ++i)
+    {
         make_series(buf, 6, 0.5f);
         assert(node_log(B, SEDS_DT_IMU_DATA, buf, 6, sizeof(buf[0])) == SEDS_OK);
         usleep(gen_random_us());
@@ -86,30 +97,33 @@ static void *sender_B(void *arg) {
     return NULL;
 }
 
-static void *sender_C(void *arg) {
-    SimNode *C = ((Topo *)arg)->nodeC;
+static void * sender_C(void * arg)
+{
+    SimNode * C = ((Topo *) arg)->nodeC;
     float buf[8];
-    for (int i = 0; i < 5; ++i) {
+    for (int i = 0; i < 5; ++i)
+    {
         make_series(buf, 4, 3.7f);
         assert(node_log(C, SEDS_DT_BATTERY_STATUS, buf, 4, sizeof(buf[0])) == SEDS_OK);
         usleep(gen_random_us());
 
-        const char *msg = "hello world!";
+        const char * msg = "hello world!";
         assert(node_log(C, SEDS_DT_MESSAGE_DATA, msg, strlen(msg), sizeof(msg[0])) == SEDS_OK);
         usleep(gen_random_us());
     }
     return NULL;
 }
 
-int main(void) {
+int main(void)
+{
     // 1) Bus + nodes
     SimBus bus;
     bus_init(&bus);
 
     SimNode radioBoard, flightControllerBoard, powerBoard;
-    assert(node_init(&radioBoard,        &bus, "Radio Board",           1, 0) == SEDS_OK);
+    assert(node_init(&radioBoard, &bus, "Radio Board", 1, 0) == SEDS_OK);
     assert(node_init(&flightControllerBoard, &bus, "Flight Controller Board", 0, 1) == SEDS_OK);
-    assert(node_init(&powerBoard,        &bus, "Power Board",           0, 0) == SEDS_OK);
+    assert(node_init(&powerBoard, &bus, "Power Board", 0, 0) == SEDS_OK);
 
     // 2) Processor threads (one per node)
     pthread_t procA, procB, procC;
@@ -118,7 +132,7 @@ int main(void) {
     pthread_create(&procC, NULL, processor_thread, &powerBoard);
 
     // 3) Sender threads (A, B, C)
-    Topo topo = { .nodeA = &radioBoard, .nodeB = &flightControllerBoard, .nodeC = &powerBoard };
+    Topo topo = {.nodeA = &radioBoard, .nodeB = &flightControllerBoard, .nodeC = &powerBoard};
     pthread_t thA, thB, thC;
     pthread_create(&thA, NULL, sender_A, &topo);
     pthread_create(&thB, NULL, sender_B, &topo);
@@ -135,14 +149,16 @@ int main(void) {
     struct timeval start, now;
     gettimeofday(&start, NULL);
 
-    for (;;) {
+    for (;;)
+    {
         if (radioBoard.radio_hits == 25 && flightControllerBoard.sd_hits == 25) break;
 
         gettimeofday(&now, NULL);
         uint64_t elapsed_us =
-            (uint64_t)(now.tv_sec - start.tv_sec) * 1000000ULL +
-            (uint64_t)(now.tv_usec - start.tv_usec);
-        if (elapsed_us > deadline_us) {
+                (uint64_t) (now.tv_sec - start.tv_sec) * 1000000ULL +
+                (uint64_t) (now.tv_usec - start.tv_usec);
+        if (elapsed_us > deadline_us)
+        {
             fprintf(stderr, "Timeout waiting for processors to drain queues\n");
             break;
         }

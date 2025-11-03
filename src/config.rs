@@ -108,7 +108,7 @@ pub const fn get_message_info_types(message_type: DataType) -> MessageType {
 /// For dynamic sized data, use DYNAMIC_ELEMENT.
 pub const fn get_message_elements(datatype: DataType) -> usize {
     match datatype {
-        DataType::TelemetryError => STRING_VALUE_ELEMENTS, // Telemetry Error messages carry 1 string element
+        DataType::TelemetryError => DYNAMIC_ELEMENT, // Telemetry Error messages carry 1 string element
         DataType::GpsData => 3, // GPS Data messages carry 3 float32 elements (latitude, longitude, altitude)
         DataType::ImuData => 6, // IMU Data messages carry 6 float32 elements (accel x,y,z and gyro x,y,z)
         DataType::BatteryStatus => 4, // Battery Status messages carry 2 float32 elements (voltage, current)
