@@ -1,13 +1,14 @@
 #![allow(dead_code)]
 
 
-// ---- core/alloc imports usable in both std and no_std ----
-use crate::config::MessageSizeType;
+use crate::config::MessageElementCount;
 pub use crate::config::{DataEndpoint, DataType, DEVICE_IDENTIFIER, MAX_PRECISION_IN_STRINGS};
 use crate::router::LeBytes;
+// ---- core/alloc imports usable in both std and no_std ----
+use crate::MessageDataType::Float32;
 use crate::{
-    get_data_type, get_info_type, message_meta, MessageDataType, MessageType, TelemetryError,
-    TelemetryResult,
+    data_type_size, get_data_type, get_info_type, message_meta, MessageDataType, MessageType,
+    TelemetryError, TelemetryResult,
 };
 use alloc::{string::String, string::ToString, sync::Arc, vec::Vec};
 use core::fmt::Write;
@@ -160,16 +161,16 @@ impl TelemetryPacket {
         }
 
         let meta = message_meta(ty);
-        match meta.data_size {
-            MessageSizeType::Static(need) => {
-                if payload.len() != need {
+        match meta.element_count {
+            MessageElementCount::Static(need) => {
+                if payload.len() != (need * data_type_size(get_data_type(ty))) {
                     return Err(TelemetryError::SizeMismatch {
                         expected: need,
                         got: payload.len(),
                     });
                 }
             }
-            MessageSizeType::Dynamic => {
+            MessageElementCount::Dynamic => {
                 validate_dynamic_len_and_content(ty, &payload)?;
             }
         }
@@ -208,12 +209,12 @@ impl TelemetryPacket {
         timestamp: u64,
     ) -> TelemetryResult<Self> {
         let meta = message_meta(ty);
-        let need = values.len() * 4;
+        let need = values.len() * data_type_size(Float32);
 
-        match meta.data_size {
+        match meta.element_count {
             // Static: exact byte count must match
-            MessageSizeType::Static(exact) => {
-                if need != exact {
+            MessageElementCount::Static(exact) => {
+                if need != (exact * data_type_size(Float32)) {
                     return Err(TelemetryError::SizeMismatch {
                         expected: exact,
                         got: need,
@@ -221,8 +222,8 @@ impl TelemetryPacket {
                 }
             }
             // Dynamic: just ensure it's a multiple of element width (4 for f32)
-            MessageSizeType::Dynamic => {
-                if need % 4 != 0 {
+            MessageElementCount::Dynamic => {
+                if need % data_type_size(Float32) != 0 {
                     return Err(TelemetryError::SizeMismatch {
                         expected: 4,
                         got: need,
@@ -263,16 +264,16 @@ impl TelemetryPacket {
         }
 
         let meta = message_meta(self.ty);
-        match meta.data_size {
-            MessageSizeType::Static(need) => {
-                if self.data_size != need {
+        match meta.element_count {
+            MessageElementCount::Static(need) => {
+                if self.data_size != (need * data_type_size(get_data_type(self.ty))) {
                     return Err(TelemetryError::SizeMismatch {
                         expected: need,
                         got: self.data_size,
                     });
                 }
             }
-            MessageSizeType::Dynamic => {
+            MessageElementCount::Dynamic => {
                 validate_dynamic_len_and_content(self.ty, &self.payload)?;
             }
         }

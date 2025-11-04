@@ -1,8 +1,8 @@
 // src/config.rs
 #[allow(unused_imports)]
 pub(crate) use crate::{
-    get_needed_message_size, MessageDataType, MessageMeta, MessageSizeType, MessageType,
-    DYNAMIC_ELEMENT, STRING_VALUE_ELEMENTS,
+    get_needed_message_size, MessageDataType, MessageElementCount, MessageMeta, MessageType,
+    STRING_VALUE_ELEMENT,
 };
 use strum_macros::EnumCount;
 
@@ -108,20 +108,6 @@ pub const fn get_message_info_types(message_type: DataType) -> MessageType {
     }
 }
 
-/// Gow many elements each message carries, For static sized strings or hex data, use the constant MAX_STATIC_STRING_LENGTH or MAX_STATIC_HEX_LENGTH respectively.
-/// For dynamic sized data, use DYNAMIC_ELEMENT.
-pub const fn get_message_elements(datatype: DataType) -> usize {
-    match datatype {
-        DataType::TelemetryError => DYNAMIC_ELEMENT, // Telemetry Error messages carry 1 string element
-        DataType::GpsData => 3, // GPS Data messages carry 3 float32 elements (latitude, longitude, altitude)
-        DataType::ImuData => 6, // IMU Data messages carry 6 float32 elements (accel x,y,z and gyro x,y,z)
-        DataType::BatteryStatus => 3, // Battery Status messages carry 2 float32 elements (voltage, current)
-        DataType::GyroData => 3,      // Gyro Data messages carry 3 float32 elements (gyro x,y,z)
-        DataType::AccelData => 3,     // Accel Data messages carry 3 float32 elements (accel x,y,z)
-        DataType::BarometerData => 3, // Barometer Data messages carry 2 float32 elements (pressure, temperature)
-        DataType::MessageData => DYNAMIC_ELEMENT, // Message Data messages have dynamic length
-    }
-}
 /// All message types with their metadata. The size is either Static with the needed size in bytes, or Dynamic for variable-length messages.
 /// For static sized messages, there are helpers to compute the needed size based on the data type and number of elements.
 /// Each message type also specifies the endpoints to which it should be sent.
@@ -130,56 +116,56 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
         DataType::TelemetryError => {
             MessageMeta {
                 // Telemetry Error
-                data_size: MessageSizeType::Dynamic,
+                element_count: MessageElementCount::Dynamic, // Telemetry Error messages carry 1 string element
                 endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
             }
         }
         DataType::GpsData => {
             MessageMeta {
                 // GPS Data
-                data_size: MessageSizeType::Static(get_needed_message_size(data_type)),
+                element_count: MessageElementCount::Static(3), // GPS Data messages carry 3 float32 elements (latitude, longitude, altitude)
                 endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
             }
         }
         DataType::ImuData => {
             MessageMeta {
                 // IMU Data
-                data_size: MessageSizeType::Static(get_needed_message_size(data_type)),
+                element_count: MessageElementCount::Static(6), // IMU Data messages carry 6 float32 elements (accel x,y,z and gyro x,y,z)
                 endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
             }
         }
         DataType::BatteryStatus => {
             MessageMeta {
                 // Battery Status
-                data_size: MessageSizeType::Static(get_needed_message_size(data_type)),
+                element_count: MessageElementCount::Static(2), // Battery Status messages carry 2 float32 elements (voltage, current)
                 endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
             }
         }
         DataType::GyroData => {
             MessageMeta {
                 // System Status
-                data_size: MessageSizeType::Static(get_needed_message_size(data_type)),
-                endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
+                element_count: MessageElementCount::Static(1), // Gyro data messages carry 3 float32 elements (Gyro x, y,z)
+                endpoints: &[DataEndpoint::SdCard],
             }
         }
         DataType::BarometerData => {
             MessageMeta {
                 // Barometer Data
-                data_size: MessageSizeType::Static(get_needed_message_size(data_type)),
+                element_count: MessageElementCount::Static(3), // Barometer Data messages carry 2 float32 elements (pressure, temperature)
                 endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
             }
         }
         DataType::AccelData => {
             MessageMeta {
                 // Barometer Data
-                data_size: MessageSizeType::Static(get_needed_message_size(data_type)),
+                element_count: MessageElementCount::Static(3), // // Accel data messages carry 3 float32 elements (Accel x, y,z)
                 endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
             }
         }
         DataType::MessageData => {
             MessageMeta {
                 // Message Data
-                data_size: MessageSizeType::Dynamic,
+                element_count: MessageElementCount::Dynamic, // Message Data messages have dynamic length
                 endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
             }
         }

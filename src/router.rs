@@ -1,11 +1,11 @@
 #![allow(dead_code)]
 
 
-use crate::config::{MessageSizeType, DEVICE_IDENTIFIER};
+use crate::config::{MessageElementCount, DEVICE_IDENTIFIER};
 use crate::{
-    config::{DataEndpoint, DataType}, impl_letype_num,
-    lock::RouterMutex,
-    message_meta,
+    config::{DataEndpoint, DataType}, get_needed_message_size,
+    impl_letype_num
+    , lock::RouterMutex, message_meta,
     serialize,
     telemetry_packet::TelemetryPacket, TelemetryError,
     TelemetryResult,
@@ -98,11 +98,11 @@ pub(crate) fn encode_slice_le<T: LeBytes>(data: &[T]) -> Arc<[u8]> {
 
 fn make_error_vec() -> Vec<u8> {
     let meta = message_meta(DataType::TelemetryError);
-    match meta.data_size {
-        MessageSizeType::Static(n) => {
-            alloc::vec![0u8; n]
+    match meta.element_count {
+        MessageElementCount::Static(_) => {
+            alloc::vec![0u8; get_needed_message_size(DataType::TelemetryError)]
         }
-        MessageSizeType::Dynamic => {
+        MessageElementCount::Dynamic => {
             alloc::vec![0u8]
         }
     }
@@ -122,16 +122,16 @@ where
     let meta = message_meta(ty);
     let got = data.len() * T::WIDTH;
 
-    match meta.data_size {
-        MessageSizeType::Static(need) => {
-            if got != need {
+    match meta.element_count {
+        MessageElementCount::Static(_) => {
+            if got != get_needed_message_size(ty) {
                 return Err(TelemetryError::SizeMismatch {
-                    expected: need,
+                    expected: get_needed_message_size(ty),
                     got,
                 });
             }
         }
-        MessageSizeType::Dynamic => {
+        MessageElementCount::Dynamic => {
             // For dynamic numeric/bool payloads, require length to be a multiple of element width.
             if got % T::WIDTH != 0 {
                 return Err(TelemetryError::SizeMismatch {

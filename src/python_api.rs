@@ -2,7 +2,7 @@
 #![allow(dead_code)]
 
 
-use crate::config::MessageSizeType;
+use crate::config::MessageElementCount;
 use alloc::{boxed::Box, string::String, sync::Arc as AArc, vec::Vec};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -10,9 +10,9 @@ use pyo3::types::{PyBytes, PyDict, PyList, PyModule, PyTuple};
 use std::sync::{Arc as SArc, Mutex};
 
 use crate::{
-    config::DataEndpoint, message_meta, router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, LeBytes, Router}, serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet},
-    telemetry_packet::{DataType, TelemetryPacket},
-    try_enum_from_u32,
+    config::DataEndpoint, get_needed_message_size,
+    message_meta,
+    router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, LeBytes, Router}, serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet}, telemetry_packet::{DataType, TelemetryPacket}, try_enum_from_u32,
     TelemetryError,
     TelemetryResult,
     MAX_VALUE_DATA_ENDPOINT,
@@ -38,9 +38,9 @@ fn endpoint_from_u32(x: u32) -> TelemetryResult<DataEndpoint> {
 }
 
 fn required_payload_size_for(ty: DataType) -> Option<usize> {
-    match message_meta(ty).data_size {
-        MessageSizeType::Static(n) => Some(n),
-        MessageSizeType::Dynamic => None,
+    match message_meta(ty).element_count {
+        MessageElementCount::Static(_) => Some(get_needed_message_size(ty)),
+        MessageElementCount::Dynamic => None,
     }
 }
 

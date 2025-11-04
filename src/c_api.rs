@@ -4,10 +4,10 @@
 
 use crate::router::{Clock, LeBytes};
 use crate::{
-    config::DataEndpoint, config::MessageSizeType, do_vec_log_typed,
-    message_meta,
-    router,
-    router::{BoardConfig, EndpointHandler, Router}, serialize::deserialize_packet, serialize::packet_wire_size,
+    config::DataEndpoint, config::MessageElementCount, do_vec_log_typed,
+    get_needed_message_size,
+    message_meta
+    , router, router::{BoardConfig, EndpointHandler, Router}, serialize::deserialize_packet, serialize::packet_wire_size,
     serialize::peek_envelope,
     serialize::serialize_packet,
     telemetry_packet::{DataType, TelemetryPacket},
@@ -74,9 +74,9 @@ fn ok_or_status(r: TelemetryResult<()>) -> i32 {
 
 #[inline]
 fn fixed_payload_size_if_static(ty: DataType) -> Option<usize> {
-    match message_meta(ty).data_size {
-        MessageSizeType::Static(n) => Some(n),
-        MessageSizeType::Dynamic => None,
+    match message_meta(ty).element_count {
+        MessageElementCount::Static(_) => Some(get_needed_message_size(ty)),
+        MessageElementCount::Dynamic => None,
     }
 }
 
