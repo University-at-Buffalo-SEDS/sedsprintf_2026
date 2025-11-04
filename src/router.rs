@@ -1,13 +1,12 @@
 #![allow(dead_code)]
 
 
-use crate::config::{MessageElementCount, DEVICE_IDENTIFIER};
 use crate::{
-    config::{DataEndpoint, DataType}, get_needed_message_size,
-    impl_letype_num
-    , lock::RouterMutex, message_meta,
-    serialize,
-    telemetry_packet::TelemetryPacket, TelemetryError,
+    config::{DataEndpoint, DataType, DEVICE_IDENTIFIER}, get_needed_message_size, impl_letype_num,
+    lock::RouterMutex,
+    message_meta, serialize,
+    telemetry_packet::TelemetryPacket,
+    MessageElementCount, TelemetryError,
     TelemetryResult,
 };
 use alloc::{boxed::Box, collections::VecDeque, format, sync::Arc, vec::Vec};

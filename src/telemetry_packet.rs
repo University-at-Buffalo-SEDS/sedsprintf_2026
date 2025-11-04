@@ -1,14 +1,11 @@
 #![allow(dead_code)]
 
 
-use crate::config::MessageElementCount;
-pub use crate::config::{DataEndpoint, DataType, DEVICE_IDENTIFIER, MAX_PRECISION_IN_STRINGS};
-use crate::router::LeBytes;
-// ---- core/alloc imports usable in both std and no_std ----
-use crate::MessageDataType::Float32;
-use crate::{
-    data_type_size, get_data_type, get_info_type, message_meta, MessageDataType, MessageType,
-    TelemetryError, TelemetryResult,
+pub(crate) use crate::{
+    config::{DataEndpoint, DataType, DEVICE_IDENTIFIER, MAX_PRECISION_IN_STRINGS}, data_type_size, get_data_type, get_info_type, message_meta,
+    router::LeBytes,
+    MessageDataType, MessageElementCount, MessageType, TelemetryError,
+    TelemetryResult,
 };
 use alloc::{string::String, string::ToString, sync::Arc, vec::Vec};
 use core::fmt::Write;
@@ -209,12 +206,12 @@ impl TelemetryPacket {
         timestamp: u64,
     ) -> TelemetryResult<Self> {
         let meta = message_meta(ty);
-        let need = values.len() * data_type_size(Float32);
+        let need = values.len() * data_type_size(MessageDataType::Float32);
 
         match meta.element_count {
             // Static: exact byte count must match
             MessageElementCount::Static(exact) => {
-                if need != (exact * data_type_size(Float32)) {
+                if need != (exact * data_type_size(MessageDataType::Float32)) {
                     return Err(TelemetryError::SizeMismatch {
                         expected: exact,
                         got: need,
@@ -223,7 +220,7 @@ impl TelemetryPacket {
             }
             // Dynamic: just ensure it's a multiple of element width (4 for f32)
             MessageElementCount::Dynamic => {
-                if need % data_type_size(Float32) != 0 {
+                if need % data_type_size(MessageDataType::Float32) != 0 {
                     return Err(TelemetryError::SizeMismatch {
                         expected: 4,
                         got: need,

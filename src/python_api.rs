@@ -2,7 +2,6 @@
 #![allow(dead_code)]
 
 
-use crate::config::MessageElementCount;
 use alloc::{boxed::Box, string::String, sync::Arc as AArc, vec::Vec};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -10,9 +9,10 @@ use pyo3::types::{PyBytes, PyDict, PyList, PyModule, PyTuple};
 use std::sync::{Arc as SArc, Mutex};
 
 use crate::{
-    config::DataEndpoint, get_needed_message_size,
-    message_meta,
-    router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, LeBytes, Router}, serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet}, telemetry_packet::{DataType, TelemetryPacket}, try_enum_from_u32,
+    config::DataEndpoint, get_needed_message_size, message_meta, router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, LeBytes, Router},
+    serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet},
+    telemetry_packet::{DataType, TelemetryPacket},
+    try_enum_from_u32, MessageElementCount,
     TelemetryError,
     TelemetryResult,
     MAX_VALUE_DATA_ENDPOINT,
