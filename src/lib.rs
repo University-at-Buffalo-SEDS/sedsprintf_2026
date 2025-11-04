@@ -17,10 +17,11 @@ extern crate std;
 
 
 use crate::config::{
-    get_message_data_type, get_message_elements, get_message_info_types, get_message_meta, DataEndpoint,
-    DataType, MAX_STATIC_HEX_LENGTH, MAX_STATIC_STRING_LENGTH,
+    get_message_data_type, get_message_info_types, get_message_meta, DataEndpoint, DataType,
+    MAX_STATIC_HEX_LENGTH, MAX_STATIC_STRING_LENGTH,
 };
 use crate::macros::{ReprI32Enum, ReprU32Enum};
+use core::ops::Mul;
 use strum::EnumCount;
 
 
@@ -89,8 +90,7 @@ mod telemetry_packet;
 
 // ----------------------Not User Editable----------------------
 #[allow(dead_code)]
-pub const STRING_VALUE_ELEMENTS: usize = 1;
-pub const DYNAMIC_ELEMENT: usize = 0;
+pub const STRING_VALUE_ELEMENT: usize = 1;
 pub const MAX_VALUE_DATA_ENDPOINT: u32 = (DataEndpoint::COUNT - 1) as u32;
 pub const MAX_VALUE_DATA_TYPE: u32 = (DataType::COUNT - 1) as u32;
 
@@ -98,25 +98,49 @@ impl_repr_u32_enum!(DataType, MAX_VALUE_DATA_TYPE);
 impl_repr_u32_enum!(DataEndpoint, MAX_VALUE_DATA_TYPE);
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
-pub enum MessageSizeType {
+pub enum MessageElementCount {
     Static(usize),
     Dynamic,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct MessageMeta {
-    pub data_size: MessageSizeType,
+    pub element_count: MessageElementCount,
     pub endpoints: &'static [DataEndpoint],
 }
-
 #[inline(always)]
 pub fn message_meta(ty: DataType) -> MessageMeta {
     get_message_meta(ty)
 }
 
+impl Mul<MessageElementCount> for usize {
+    type Output = usize;
+
+    fn mul(self, rhs: MessageElementCount) -> usize {
+        self * rhs.into()
+    }
+}
+
+impl Mul<usize> for MessageElementCount {
+    type Output = usize;
+
+    fn mul(self, rhs: usize) -> usize {
+        self.into() * rhs
+    }
+}
+
+impl MessageElementCount {
+    fn into(self) -> usize {
+        match self {
+            MessageElementCount::Static(a) => a,
+            _ => 0,
+        }
+    }
+}
+
 #[inline(always)]
-pub const fn get_needed_message_size(ty: DataType) -> usize {
-    data_type_size(get_data_type(ty)) * get_message_elements(ty)
+pub fn get_needed_message_size(ty: DataType) -> usize {
+    data_type_size(get_data_type(ty)) * get_message_meta(ty).element_count
 }
 
 #[inline(always)]
