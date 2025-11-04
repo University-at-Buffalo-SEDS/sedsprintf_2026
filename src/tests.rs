@@ -1,6 +1,5 @@
-use crate::config::{
-    get_message_meta, get_needed_message_size, MAX_STATIC_HEX_LENGTH, MAX_STATIC_STRING_LENGTH,
-};
+use crate::config::{get_message_meta, MAX_STATIC_HEX_LENGTH, MAX_STATIC_STRING_LENGTH};
+use crate::get_needed_message_size;
 use crate::router::EndpointHandler;
 use crate::telemetry_packet::{DataEndpoint, DataType, TelemetryPacket};
 use crate::{get_data_type, message_meta, router, MessageDataType, TelemetryError};
@@ -10,8 +9,8 @@ use std::sync::{Arc, Mutex};
 
 fn test_payload_len_for(ty: DataType) -> usize {
     match message_meta(ty).element_count {
-        crate::config::MessageElementCount::Static(_) => get_needed_message_size(ty),
-        crate::config::MessageElementCount::Dynamic => {
+        crate::MessageElementCount::Static(_) => get_needed_message_size(ty),
+        crate::MessageElementCount::Dynamic => {
             // Pick reasonable defaults per data kind
             match get_data_type(ty) {
                 MessageDataType::String => MAX_STATIC_STRING_LENGTH, // router error-path expects this
@@ -1433,10 +1432,10 @@ mod tests_more {
 
     use crate::config::get_message_meta;
     use crate::{
-        config::{DataEndpoint, DataType, MessageElementCount}, get_data_type, get_needed_message_size, message_meta,
-        router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, Router}, serialize,
-        telemetry_packet::TelemetryPacket,
-        MessageDataType, TelemetryError, TelemetryErrorCode,
+        config::{DataEndpoint, DataType}, get_data_type, get_needed_message_size, message_meta,
+        router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, Router}, serialize, telemetry_packet::TelemetryPacket,
+        MessageDataType,
+        MessageElementCount, TelemetryError, TelemetryErrorCode,
         TelemetryResult,
         MAX_VALUE_DATA_ENDPOINT,
         MAX_VALUE_DATA_TYPE,

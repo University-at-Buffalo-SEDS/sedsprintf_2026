@@ -2,9 +2,12 @@
 #![allow(dead_code)]
 
 
-use crate::telemetry_packet::{DataEndpoint, TelemetryPacket};
-use crate::{config::DataType, MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE};
-use crate::{try_enum_from_u32, TelemetryError, TelemetryResult};
+use crate::{
+    telemetry_packet::{DataEndpoint, TelemetryPacket}, try_enum_from_u32,
+    TelemetryError,
+    TelemetryResult,
+    {config::DataType, MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE},
+};
 use alloc::{sync::Arc, vec::Vec};
 
 // =========================== Public Types ===========================
