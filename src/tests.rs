@@ -1,5 +1,5 @@
 use crate::config::{
-    get_message_elements, get_needed_message_size, MAX_STATIC_HEX_LENGTH, MAX_STATIC_STRING_LENGTH,
+    get_message_meta, get_needed_message_size, MAX_STATIC_HEX_LENGTH, MAX_STATIC_STRING_LENGTH,
 };
 use crate::router::EndpointHandler;
 use crate::telemetry_packet::{DataEndpoint, DataType, TelemetryPacket};
@@ -9,9 +9,9 @@ use std::sync::{Arc, Mutex};
 
 
 fn test_payload_len_for(ty: DataType) -> usize {
-    match message_meta(ty).data_size {
-        crate::config::MessageSizeType::Static(n) => n,
-        crate::config::MessageSizeType::Dynamic => {
+    match message_meta(ty).element_count {
+        crate::config::MessageElementCount::Static(_) => get_needed_message_size(ty),
+        crate::config::MessageElementCount::Dynamic => {
             // Pick reasonable defaults per data kind
             match get_data_type(ty) {
                 MessageDataType::String => MAX_STATIC_STRING_LENGTH, // router error-path expects this
@@ -30,7 +30,7 @@ fn test_payload_len_for(ty: DataType) -> usize {
                         MessageDataType::UInt128 | MessageDataType::Int128 => 16,
                         MessageDataType::String | MessageDataType::Hex => 1,
                     };
-                    let elems = get_message_elements(ty).max(1);
+                    let elems = get_message_meta(ty).element_count.into().max(1);
                     w * elems
                 }
             }
@@ -52,7 +52,7 @@ fn get_sd_card_handler(sd_seen_c: Arc<Mutex<Option<(DataType, Vec<f32>)>>>) -> E
         endpoint: DataEndpoint::SdCard,
         handler: router::EndpointHandlerFn::Packet(Box::new(move |pkt: &TelemetryPacket| {
             // sanity: element sizing must be 4 bytes (f32) for GPS_DATA
-            let elems = get_message_elements(pkt.ty).max(1);
+            let elems = get_message_meta(pkt.ty).element_count.into().max(1);
             let per_elem = get_needed_message_size(pkt.ty) / elems;
             assert_eq!(pkt.ty, DataType::GpsData);
             assert_eq!(per_elem, 4, "GPS_DATA expected f32 elements");
@@ -288,7 +288,7 @@ mod tests {
         let data = [10.0_f32, 10.25, 10.5];
         router.log_queue(DataType::GpsData, &data).unwrap();
 
-        let data = [10.0_f32, 10.25, 10.5, 12.3];
+        let data = [10.0_f32, 10.25];
         router.log_queue(DataType::BatteryStatus, &data).unwrap();
 
         let data = [10.0_f32, 10.25, 10.5];
@@ -876,10 +876,10 @@ mod tests_extra {
     #![cfg(test)]
 
 
-    use crate::config::DataEndpoint::{Radio, SdCard};
+    use crate::config::DataEndpoint;
     use crate::tests::test_payload_len_for;
     use crate::{
-        config::{DataEndpoint, DataType}, router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, Router}, serialize,
+        config::DataType, router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, Router}, serialize,
         telemetry_packet::TelemetryPacket,
         TelemetryError,
         TelemetryErrorCode,
@@ -1065,7 +1065,7 @@ mod tests_extra {
         let back = serialize::deserialize_packet(&wire).unwrap();
         assert_eq!(
             &*back.endpoints,
-            [SdCard, Radio],
+            [DataEndpoint::SdCard, DataEndpoint::Radio],
             "endpoints must roundtrip 1:1"
         );
         assert_eq!(back.ty, pkt.ty);
@@ -1141,7 +1141,7 @@ mod tests_extra {
 
         // Overwrite the *first* endpoint with an out-of-range value in the bitstream.
         // Bits are packed LSB-first.
-        let mut v = upper_val as u64;
+        let mut v = upper_val;
         let mut bitpos = 0usize;
         for _ in 0..ep_bits {
             let byte_idx = ep_offset + (bitpos / 8);
@@ -1159,7 +1159,7 @@ mod tests_extra {
         // Now deserialization must fail with a Deserialize("bad endpoint") error.
         let err = serialize::deserialize_packet(&wire).unwrap_err();
         match err {
-            crate::TelemetryError::Deserialize(msg) if msg.contains("endpoint") => {}
+            TelemetryError::Deserialize(msg) if msg.contains("endpoint") => {}
             other => panic!("expected bad endpoint deserialize error, got {other:?}"),
         }
     }
@@ -1431,12 +1431,12 @@ mod tests_more {
     #![cfg(test)]
 
 
-    use crate::config::get_message_elements;
+    use crate::config::get_message_meta;
     use crate::{
-        config::{DataEndpoint, DataType, MessageSizeType}, get_data_type, message_meta, router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, Router},
-        serialize, telemetry_packet::TelemetryPacket,
-        MessageDataType,
-        TelemetryError, TelemetryErrorCode,
+        config::{DataEndpoint, DataType, MessageElementCount}, get_data_type, get_needed_message_size, message_meta,
+        router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, Router}, serialize,
+        telemetry_packet::TelemetryPacket,
+        MessageDataType, TelemetryError, TelemetryErrorCode,
         TelemetryResult,
         MAX_VALUE_DATA_ENDPOINT,
         MAX_VALUE_DATA_TYPE,
@@ -1455,9 +1455,9 @@ mod tests_more {
     // ---------------------------------------------------------------------------
 
     fn concrete_len_for_test(ty: DataType) -> usize {
-        match message_meta(ty).data_size {
-            MessageSizeType::Static(n) => n,
-            MessageSizeType::Dynamic => {
+        match message_meta(ty).element_count {
+            MessageElementCount::Static(_) => get_needed_message_size(ty),
+            MessageElementCount::Dynamic => {
                 // Choose a reasonable dynamic size for tests:
                 // numeric/bool → element_width * MESSAGE_ELEMENTS
                 // string/hex    → 1 * MESSAGE_ELEMENTS (or any positive size)
@@ -1473,7 +1473,7 @@ mod tests_more {
                     MessageDataType::UInt128 | MessageDataType::Int128 => 16,
                     MessageDataType::String | MessageDataType::Hex => 1,
                 };
-                let elems = get_message_elements(ty).max(1);
+                let elems = get_message_meta(ty).element_count.into().max(1);
                 core::cmp::max(1, w * elems)
             }
         }

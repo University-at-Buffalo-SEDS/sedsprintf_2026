@@ -103,8 +103,8 @@ static void * sender_C(void * arg)
     float buf[8];
     for (int i = 0; i < 5; ++i)
     {
-        make_series(buf, 4, 3.7f);
-        assert(node_log(C, SEDS_DT_BATTERY_STATUS, buf, 4, sizeof(buf[0])) == SEDS_OK);
+        make_series(buf, 2, 3.7f);
+        assert(node_log(C, SEDS_DT_BATTERY_STATUS, buf, 2, sizeof(buf[0])) == SEDS_OK);
         usleep(gen_random_us());
 
         const char * msg = "hello world!";
