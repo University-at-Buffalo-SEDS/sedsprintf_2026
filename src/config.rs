@@ -1,9 +1,6 @@
 // src/config.rs
 #[allow(unused_imports)]
-pub(crate) use crate::{
-    get_needed_message_size, MessageDataType, MessageElementCount, MessageMeta, MessageType,
-    STRING_VALUE_ELEMENT,
-};
+use crate::{MessageDataType, MessageElementCount, MessageMeta, MessageType, STRING_VALUE_ELEMENT};
 use strum_macros::EnumCount;
 
 
@@ -30,8 +27,8 @@ pub enum DataEndpoint {
 }
 
 impl DataEndpoint {
-    // Get the string representation of the DataEndpoint
-    // This must be set for each enum variant
+    /// Get the string representation of the DataEndpoint
+    /// This must be set for each enum variant
     pub fn as_str(self) -> &'static str {
         match self {
             DataEndpoint::SdCard => "SD_CARD",
@@ -40,16 +37,10 @@ impl DataEndpoint {
     }
 }
 
-/// All data types that can be logged.
-/// Each data type corresponds to a specific message format.
-/// /// When adding new data types, ensure to update MESSAGE_DATA_TYPES,
-/// MESSAGE_INFO_TYPES, MESSAGE_ELEMENTS, and MESSAGE_TYPES accordingly.
-/// These must increase sequentially from 0 without gaps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, EnumCount)]
 #[repr(u32)]
 /// The different types of data that can be logged.
 /// Each data type corresponds to a specific message format.
-/// When adding new data types, ensure to update MESSAGE_DATA_TYPES,
 /// MESSAGE_INFO_TYPES, MESSAGE_ELEMENTS, and MESSAGE_TYPES accordingly.
 /// These must increase sequentially from 0 without gaps if you are specifying custom values.
 pub enum DataType {
@@ -63,8 +54,8 @@ pub enum DataType {
 }
 
 impl DataType {
-    // Get the string representation of the DataType
-    // This must be set for each enum variant
+    /// Get the string representation of the DataType
+    /// This must be set for each enum variant
     pub fn as_str(&self) -> &'static str {
         match self {
             DataType::TelemetryError => "TELEMETRY_ERROR",
@@ -77,8 +68,9 @@ impl DataType {
         }
     }
 }
-// The data type of each messages payload, the order of this array must match the order of DataType enum
-// The available options are String, Float32, UInt8, UInt16, UInt32, UInt64, UInt128, Int8, Int16, Int32, Int64, Int128
+
+/// The data type of each messages payload, the order of this array must match the order of DataType enum
+/// The available options are String, Float32, UInt8, UInt16, UInt32, UInt64, UInt128, Int8, Int16, Int32, Int64, Int128
 pub const fn get_message_data_type(data_type: DataType) -> MessageDataType {
     match data_type {
         DataType::TelemetryError => MessageDataType::String,
@@ -90,8 +82,9 @@ pub const fn get_message_data_type(data_type: DataType) -> MessageDataType {
         DataType::MessageData => MessageDataType::String,
     }
 }
-// The type of message info for each data type, the order of this array must match the order of DataType enum
-// The two available options are MessageType::Error and MessageType::Info and this affects how the message is logged and displayed
+
+/// The type of message info for each data type.
+/// The two available options are MessageType::Error and MessageType::Info and this affects how the message is logged and displayed
 pub const fn get_message_info_types(message_type: DataType) -> MessageType {
     match message_type {
         DataType::TelemetryError => MessageType::Error,
@@ -104,8 +97,7 @@ pub const fn get_message_info_types(message_type: DataType) -> MessageType {
     }
 }
 
-/// All message types with their metadata. The size is either Static with the needed size in bytes, or Dynamic for variable-length messages.
-/// For static sized messages, there are helpers to compute the needed size based on the data type and number of elements.
+/// All message types with their metadata. The size is either Static with the needed number of elements, or Dynamic for variable-length payloads.
 /// Each message type also specifies the endpoints to which it should be sent.
 pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
     match data_type {

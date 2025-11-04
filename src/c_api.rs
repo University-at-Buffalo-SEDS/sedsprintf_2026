@@ -2,15 +2,14 @@
 #![allow(dead_code)]
 
 
-use crate::router::{Clock, LeBytes};
 use crate::{
-    config::DataEndpoint, config::MessageElementCount, do_vec_log_typed,
-    get_needed_message_size,
-    message_meta
-    , router, router::{BoardConfig, EndpointHandler, Router}, serialize::deserialize_packet, serialize::packet_wire_size,
+    config::DataEndpoint, do_vec_log_typed, get_needed_message_size, message_meta,
+    router,
+    router::{BoardConfig, EndpointHandler, Router}, router::{Clock, LeBytes}, serialize::deserialize_packet, serialize::packet_wire_size,
     serialize::peek_envelope,
     serialize::serialize_packet,
     telemetry_packet::{DataType, TelemetryPacket},
+    MessageElementCount,
     TelemetryError,
     TelemetryErrorCode,
     TelemetryResult,
