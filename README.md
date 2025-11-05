@@ -76,7 +76,7 @@ and then only changing the sender string on each system, this will ensure that t
 
 - To add this repo as a subtree to allow for modifications, use the following command:
   ```bash
-  git remote add sedsprintf-upstream https://github.com/Rylan-Meilutis/sedsprintf_rs.git
+  git remote add sedsprintf-upstream https://github.com/University-at-Buffalo-SEDS/sedsprintf_2026.git
   git fetch sedsprintf-upstream
   git subtree add --prefix=sedsprintf_rs sedsprintf-upstream main
 
