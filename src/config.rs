@@ -45,6 +45,7 @@ impl DataEndpoint {
 /// These must increase sequentially from 0 without gaps if you are specifying custom values.
 pub enum DataType {
     TelemetryError,
+    GenericError,
     GpsData,
     ImuData,
     GyroData,
@@ -60,6 +61,7 @@ impl DataType {
     pub fn as_str(&self) -> &'static str {
         match self {
             DataType::TelemetryError => "TELEMETRY_ERROR",
+            DataType::GenericError => "GENERIC_ERROR",
             DataType::GpsData => "GPS_DATA",
             DataType::ImuData => "IMU_DATA",
             DataType::GyroData => "GYRO_DATA",
@@ -76,6 +78,7 @@ impl DataType {
 pub const fn get_message_data_type(data_type: DataType) -> MessageDataType {
     match data_type {
         DataType::TelemetryError => MessageDataType::String,
+        DataType::GenericError => MessageDataType::String,
         DataType::GpsData => MessageDataType::Float32,
         DataType::ImuData => MessageDataType::Float32,
         DataType::BatteryStatus => MessageDataType::Float32,
@@ -91,6 +94,7 @@ pub const fn get_message_data_type(data_type: DataType) -> MessageDataType {
 pub const fn get_message_info_types(message_type: DataType) -> MessageType {
     match message_type {
         DataType::TelemetryError => MessageType::Error,
+        DataType::GenericError => MessageType::Error,
         DataType::GpsData => MessageType::Info,
         DataType::ImuData => MessageType::Info,
         DataType::BatteryStatus => MessageType::Info,
@@ -108,7 +112,14 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
         DataType::TelemetryError => {
             MessageMeta {
                 // Telemetry Error
-                element_count: MessageElementCount::Dynamic, // Telemetry Error messages carry 1 string element
+                element_count: MessageElementCount::Dynamic, // Telemetry Error messages have dynamic length
+                endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
+            }
+        }
+        DataType::GenericError => {
+            MessageMeta {
+                // Telemetry Error
+                element_count: MessageElementCount::Dynamic, // Generic Error messages have dynamic length
                 endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
             }
         }
