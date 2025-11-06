@@ -25,13 +25,17 @@ to be used in embedded systems and used by a C program, but can also be used in 
 codebases.
 
 This library also supports python bindings via pyo3. to use you need maturin installed to build the python package.
-The size of the header in a serialized packet is around 20 bytes (the size will change based on the total number of 
-endpoints in your system and the length of the sender string), so a packet containing three floats is 32 bytes total. This small size makes it ideal for 
+The size of the header in a serialized packet is around 20 bytes (the size will change based on the total number of
+endpoints in your system and the length of the sender string), so a packet containing three floats is 32 bytes total.
+This small size makes it ideal for
 use in low bandwidth environments.
 
 ## Building
-To build the library in a C project, just include the library as a submodule or subtree and link it in your cmakelists.txt as shown below.
-For other build systems, you can build the library as a static or dynamic library using cargo and link it to your project.
+
+To build the library in a C project, just include the library as a submodule or subtree and link it in your
+cmakelists.txt as shown below.
+For other build systems, you can build the library as a static or dynamic library using cargo and link it to your
+project.
 
 Building with python bindings can be done with the build script on posix systems:
 
@@ -42,7 +46,6 @@ Building with python bindings can be done with the build script on posix systems
 When building in an embedded environment the library will compile to a static library that can be linked to your C code.
 this library takes up about 100kb of flash and does require heap allocation to be available through either freertos, or
 by creating shims that expose pvPortMalloc and vPortFree.
-
 
 ## Dependencies
 
@@ -62,16 +65,19 @@ by creating shims that expose pvPortMalloc and vPortFree.
 ## Usage
 
 - When using this library as a submodule or subtree in a C or C++ project, make sure to add the following to your
-cmakelists.txt
+  cmakelists.txt
   ```cmake
   add_subdirectory(${CMAKE_SOURCE_DIR}/sedsprintf_rs)
   target_link_libraries(${CMAKE_PROJECT_NAME} sedsprintf_rs)
   ```
-- Setup the config.rs to match your application needs. All config options are in the config.rs file and are very self-explanatory.
-NOTE: (ON EVERY SYSTEM THIS LIBRARY IS USED, THE CONFIG ENUMS MUST BE THE SAME OR UNDEFINED BEHAVIOR MAY OCCUR). So for most
-applications I would recommend making a fork and setting the config values you need for your application minus the sender,
-and then only changing the sender string on each system, this will ensure that the enum values are the same on all systems.
-
+- Setup the config.rs to match your application needs. All config options are in the config.rs file and are very
+  self-explanatory.
+  NOTE: (ON EVERY SYSTEM THIS LIBRARY IS USED, THE CONFIG ENUMS MUST BE THE SAME OR UNDEFINED BEHAVIOR MAY OCCUR). So
+  for most
+  applications I would recommend making a fork and setting the config values you need for your application minus the
+  sender,
+  and then only changing the sender string on each system, this will ensure that the enum values are the same on all
+  systems.
 
 
 - To add this repo as a subtree to allow for modifications, use the following command:
@@ -84,3 +90,33 @@ and then only changing the sender string on each system, this will ensure that t
   ```bash
   git subtree pull --prefix=sedsprintf_rs sedsprintf-upstream main -m "Merge sedsprintf_rs upstream main"
   ```
+
+
+- If using in an embedded environment, make sure to provide the necessary allocation functions if using a custom
+  allocator.
+  Below is an example implementation using malloc and free, feel free to implement ot use your own allocator or ones
+  provided by your RTOS.
+
+```C
+// telemetry_alloc.c
+#include <stddef.h>
+#include <stdlib.h>
+
+/*
+ * Rust expects these functions to exist for heap allocations:
+ *
+ *   void *telemetryMalloc(size_t);
+ *   void telemetryFree(void *);
+ *
+ */
+
+void *telemetryMalloc(size_t xSize)
+{
+     return malloc(xSize);
+}
+
+void telemetryFree(void *pv)
+{
+    free(pv);
+}
+```

@@ -1,6 +1,4 @@
 // src/py_api.rs
-#![allow(dead_code)]
-
 
 use alloc::{boxed::Box, string::String, sync::Arc as AArc, vec::Vec};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};

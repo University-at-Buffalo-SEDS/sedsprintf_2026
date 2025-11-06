@@ -1,6 +1,4 @@
 // src/lock.rs
-#![allow(dead_code)]
-
 #[cfg(feature = "std")]
 pub struct RouterMutex<T>(std::sync::Mutex<T>);
 
