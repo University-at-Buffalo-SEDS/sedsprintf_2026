@@ -2034,9 +2034,10 @@ mod concurrency_tests {
         // ---------- Logger thread ----------
         let r_logger = r.clone();
         let t_logger = thread::spawn(move || {
+            let data: [f32; 3] = [1.0, 2.0, 3.0];
             for _ in 0..LOG_ITERS {
                 r_logger
-                    .log_queue(DataType::GpsData, &[1.0, 2.0, 3.0])
+                    .log_queue(DataType::GpsData, &data)
                     .expect("log_queue failed");
             }
         });
