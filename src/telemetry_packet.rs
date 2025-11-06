@@ -1,13 +1,12 @@
-#![allow(dead_code)]
-
-
+use crate::config::MAX_PRECISION_IN_STRINGS;
 pub(crate) use crate::{
-    config::{DataEndpoint, DataType, DEVICE_IDENTIFIER, MAX_PRECISION_IN_STRINGS}, data_type_size, get_data_type, get_info_type, message_meta,
+    config::{DataEndpoint, DataType, DEVICE_IDENTIFIER}, data_type_size, get_data_type, get_info_type, message_meta,
     router::LeBytes,
     MessageDataType, MessageElementCount, MessageType, TelemetryError,
     TelemetryResult,
 };
-use alloc::{string::String, string::ToString, sync::Arc, vec::Vec};
+use alloc::{string::String, sync::Arc, vec::Vec};
+use core::any::TypeId;
 use core::fmt::Write;
 
 
@@ -25,76 +24,6 @@ pub struct TelemetryPacket {
 }
 
 // ---------------------Helpers for to_string()---------------------
-#[inline]
-fn print_sep(s: &mut String, i: usize) {
-    if i > 0 {
-        s.push_str(", ");
-    }
-}
-
-fn print_unsigned_chunks(bytes: &[u8], w: usize, s: &mut String) {
-    let mut it = bytes.chunks_exact(w);
-    for (i, chunk) in it.by_ref().enumerate() {
-        print_sep(s, i);
-        // LE accumulate into u128
-        let mut v: u128 = 0;
-        for (k, b) in chunk.iter().enumerate() {
-            v |= (*b as u128) << (8 * k);
-        }
-        let _ = write!(s, "{v}");
-    }
-    debug_assert!(it.remainder().is_empty());
-}
-
-fn print_signed_chunks(bytes: &[u8], w: usize, s: &mut String) {
-    let mut it = bytes.chunks_exact(w);
-    for (i, chunk) in it.by_ref().enumerate() {
-        print_sep(s, i);
-        let mut u: u128 = 0;
-        for (k, b) in chunk.iter().enumerate() {
-            u |= (*b as u128) << (8 * k);
-        }
-        let bits = (w * 8) as u32;
-        let shift = 128 - bits;
-        let v = ((u as i128) << shift) >> shift; // sign-extend
-        let _ = write!(s, "{v}");
-    }
-    debug_assert!(it.remainder().is_empty());
-}
-
-fn print_float_chunks(bytes: &[u8], w: usize, s: &mut String) {
-    match w {
-        4 => {
-            let mut it = bytes.chunks_exact(4);
-            for (i, chunk) in it.by_ref().enumerate() {
-                print_sep(s, i);
-                let arr: [u8; 4] = chunk.try_into().unwrap();
-                let v = f32::from_le_bytes(arr);
-                let _ = write!(s, "{v:.prec$}", prec = MAX_PRECISION_IN_STRINGS);
-            }
-            debug_assert!(it.remainder().is_empty());
-        }
-        8 => {
-            let mut it = bytes.chunks_exact(8);
-            for (i, chunk) in it.by_ref().enumerate() {
-                print_sep(s, i);
-                let arr: [u8; 8] = chunk.try_into().unwrap();
-                let v = f64::from_le_bytes(arr);
-                let _ = write!(s, "{v:.prec$}", prec = MAX_PRECISION_IN_STRINGS);
-            }
-            debug_assert!(it.remainder().is_empty());
-        }
-        _ => unreachable!("unsupported float width {w}"),
-    }
-}
-
-fn print_bools(bytes: &[u8], s: &mut String) {
-    for (i, b) in bytes.iter().enumerate() {
-        print_sep(s, i);
-        let _ = write!(s, "{}", *b != 0);
-    }
-}
-
 #[inline(always)]
 const fn element_width(dt: MessageDataType) -> usize {
     match dt {
@@ -183,6 +112,7 @@ impl TelemetryPacket {
     }
 
     /// Convenience: create from a slice of `u8` (copied).
+    #[allow(dead_code)]
     pub fn from_u8_slice(
         ty: DataType,
         bytes: &[u8],
@@ -194,11 +124,12 @@ impl TelemetryPacket {
             endpoints,
             Arc::<str>::from(DEVICE_IDENTIFIER),
             timestamp,
-            Arc::<[u8]>::from(bytes.to_vec()),
+            Arc::<[u8]>::from(bytes),
         )
     }
 
     /// Convenience: create from a slice of `f32` (copied, little-endian).
+    #[allow(dead_code)]
     pub fn from_f32_slice(
         ty: DataType,
         values: &[f32],
@@ -277,15 +208,6 @@ impl TelemetryPacket {
         Ok(())
     }
 
-    fn build_endpoint_string(&self, endpoints: &mut String) {
-        for (i, ep) in self.endpoints.iter().enumerate() {
-            if i > 0 {
-                endpoints.push_str(", ");
-            }
-            endpoints.push_str(ep.as_str());
-        }
-    }
-
     /// Header line without data payload.
     pub fn header_string(&self) -> String {
         let mut out = String::with_capacity(DEFAULT_STRING_CAPACITY);
@@ -322,15 +244,10 @@ impl TelemetryPacket {
         core::str::from_utf8(&bytes[..end]).ok()
     }
 
-    /// Back-compat helper if you truly need an owned String.
-    pub fn data_as_utf8(&self) -> Option<String> {
-        self.data_as_utf8_ref().map(|s| s.to_string())
-    }
-
     #[inline]
     fn data_to_string<T>(&self, s: &mut String)
     where
-        T: LeBytes + core::fmt::Display,
+        T: LeBytes + core::fmt::Display + 'static,
     {
         let mut it = self.payload.chunks_exact(T::WIDTH);
         let mut first = true;
@@ -342,7 +259,15 @@ impl TelemetryPacket {
             first = false;
 
             let v = T::from_le_slice(chunk);
-            let _ = write!(s, "{v}");
+
+            // If this is a float type, use precision; otherwise, default formatting.
+            if TypeId::of::<T>() == TypeId::of::<f32>() || TypeId::of::<T>() == TypeId::of::<f64>()
+            {
+                // `{:.*}` = "use this precision argument"
+                let _ = write!(s, "{:.*}", MAX_PRECISION_IN_STRINGS, v);
+            } else {
+                let _ = write!(s, "{v}");
+            }
         }
     }
     /// Full pretty string including decoded data portion.

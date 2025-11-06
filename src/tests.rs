@@ -925,12 +925,12 @@ mod tests_extra {
 
         // Case A: only NEP present (0 endpoints), but no bytes for `ty` varint.
         let tiny = [0x00u8]; // NEP = 0
-        let err = serialize::deserialize_packet_header_only(&tiny).unwrap_err();
+        let err = serialize::peek_envelope(&tiny).unwrap_err();
         matches_deser_err(err);
 
         // Case B: NEP present, and a *truncated* varint (continuation bit set, but no following byte).
         let truncated = [0x00u8, 0x80]; // NEP=0, then start varint with continuation bit
-        let err = serialize::deserialize_packet_header_only(&truncated).unwrap_err();
+        let err = serialize::peek_envelope(&truncated).unwrap_err();
         matches_deser_err(err);
     }
     #[test]
@@ -1091,7 +1091,7 @@ mod tests_extra {
         .unwrap();
 
         let wire = serialize::serialize_packet(&pkt);
-        let env = serialize::deserialize_packet_header_only(&wire).unwrap();
+        let env = serialize::peek_envelope(&wire).unwrap();
         let full = serialize::deserialize_packet(&wire).unwrap();
 
         assert_eq!(env.ty, pkt.ty);
@@ -1355,7 +1355,7 @@ mod tests_extra {
         .unwrap();
         let wire = serialize::serialize_packet(&pkt);
 
-        let env = serialize::deserialize_packet_header_only(&wire).unwrap();
+        let env = serialize::peek_envelope(&wire).unwrap();
         assert_eq!(env.ty, pkt.ty);
         assert_eq!(&*env.endpoints, &*pkt.endpoints);
         assert_eq!(env.sender.as_ref(), pkt.sender.as_ref());

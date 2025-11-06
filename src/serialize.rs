@@ -1,6 +1,4 @@
 // src/serialize.rs
-#![allow(dead_code)]
-
 
 use crate::{
     telemetry_packet::{DataEndpoint, TelemetryPacket}, try_enum_from_u32,
@@ -173,25 +171,6 @@ pub fn serialize_packet(pkt: &TelemetryPacket) -> Arc<[u8]> {
     Arc::<[u8]>::from(out)
 }
 
-pub fn serialize_packet_into(pkt: &TelemetryPacket, out: &mut Vec<u8>) {
-    let bm = build_endpoint_bitmap(&pkt.endpoints);
-
-    out.clear();
-    out.reserve_exact(16 + EP_BITMAP_BYTES + pkt.sender.len() + pkt.payload.len());
-
-    let nep_unique = bitmap_popcount(&bm);
-    out.push(nep_unique as u8);
-
-    write_uleb128(pkt.ty as u64, out);
-    write_uleb128(pkt.data_size as u64, out);
-    write_uleb128(pkt.timestamp, out);
-    write_uleb128(pkt.sender.len() as u64, out);
-
-    out.extend_from_slice(&bm);
-    out.extend_from_slice(pkt.sender.as_bytes());
-    out.extend_from_slice(&pkt.payload);
-}
-
 // =========================== Deserialize ===========================
 
 pub fn deserialize_packet(buf: &[u8]) -> Result<TelemetryPacket, TelemetryError> {
@@ -277,12 +256,6 @@ pub fn peek_envelope(buf: &[u8]) -> TelemetryResult<TelemetryEnvelope> {
         sender: Arc::<str>::from(sender_str),
         timestamp_ms: ts_v,
     })
-}
-
-/// Deserialize only the packet header (type, timestamp, endpoints, sender).
-/// Skips payload. Returns a lightweight `TelemetryEnvelope`.
-pub fn deserialize_packet_header_only(buf: &[u8]) -> Result<TelemetryEnvelope, TelemetryError> {
-    peek_envelope(buf)
 }
 
 // =========================== Size Helpers ===========================
