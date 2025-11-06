@@ -34,32 +34,32 @@ mod tests;
 mod python_api;
 
 // ---------- Allocator & panic handlers ----------
-// For EMBEDDED builds (no_std + bare-metal target), provide FreeRTOS allocator + panic.
+// For EMBEDDED builds (no_std + bare-metal target), provide Telemetry allocator + panic.
 #[cfg(all(not(feature = "std"), target_os = "none"))]
 mod embedded_alloc {
     use core::alloc::{GlobalAlloc, Layout};
 
 
     unsafe extern "C" {
-        fn pvPortMalloc(size: usize) -> *mut core::ffi::c_void;
-        fn vPortFree(ptr: *mut core::ffi::c_void);
+        fn telemetryMalloc(size: usize) -> *mut core::ffi::c_void;
+        fn telemetryFree(ptr: *mut core::ffi::c_void);
     }
 
-    pub struct FreeRtosAlloc;
+    pub struct TelemetryAlloc;
 
-    unsafe impl GlobalAlloc for FreeRtosAlloc {
+    unsafe impl GlobalAlloc for TelemetryAlloc {
         unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-            let p = unsafe { pvPortMalloc(layout.size()) as *mut u8 };
+            let p = unsafe { telemetryMalloc(layout.size()) as *mut u8 };
             debug_assert!(p.is_null() || (p as usize) % layout.align() == 0);
             p
         }
         unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
-            unsafe { vPortFree(ptr as *mut _) }
+            unsafe { telemetryFree(ptr as *mut _) }
         }
     }
 
     #[global_allocator]
-    static A: FreeRtosAlloc = FreeRtosAlloc;
+    static A: TelemetryAlloc = TelemetryAlloc;
 
 
     // Panic handler for embedded
