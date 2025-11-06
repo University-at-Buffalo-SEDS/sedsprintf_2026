@@ -113,7 +113,7 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
             MessageMeta {
                 // Telemetry Error
                 element_count: MessageElementCount::Dynamic, // Telemetry Error messages have dynamic length
-                endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
+                endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
             }
         }
         DataType::GenericError => {

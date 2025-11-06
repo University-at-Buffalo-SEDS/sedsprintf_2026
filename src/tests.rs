@@ -1771,3 +1771,316 @@ mod tests_more {
         }
     }
 }
+
+#[cfg(test)]
+mod concurrency_tests {
+    use crate::{
+        config::{DataEndpoint, DataType},
+        router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, Router},
+        serialize,
+        telemetry_packet::TelemetryPacket,
+        TelemetryResult,
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::thread;
+
+
+    // Simple clock that always returns 0 (blanket impl<Fn() -> u64> for Clock).
+    fn zero_clock() -> Box<dyn Clock + Send + Sync> {
+        Box::new(|| 0u64)
+    }
+
+    // ------------------------------------------------------------------------
+    // Trait sanity: Router must be Send + Sync to be safely shared between
+    // threads. This is a compile-time check only.
+    // ------------------------------------------------------------------------
+    #[test]
+    fn router_is_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<Router>();
+    }
+
+    // ------------------------------------------------------------------------
+    // Concurrent producers pushing into the RX queue.
+    //
+    // Multiple threads call rx_packet_to_queue(&self, ...) on the same Router.
+    // We then drain the RX queue once and assert the local handler was
+    // invoked exactly as many times as packets enqueued.
+    // ------------------------------------------------------------------------
+    #[test]
+    fn concurrent_rx_queue_is_thread_safe() {
+        const THREADS: usize = 4;
+        const ITERS_PER_THREAD: usize = 50;
+        let total = THREADS * ITERS_PER_THREAD;
+
+        // Local handler that counts how many packets it sees.
+        let hits = Arc::new(AtomicUsize::new(0));
+        let hits_c = hits.clone();
+        let handler = EndpointHandler {
+            endpoint: DataEndpoint::SdCard,
+            handler: EndpointHandlerFn::Packet(Box::new(move |_pkt: &TelemetryPacket| {
+                hits_c.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            })),
+        };
+
+        // Router with no TX; we only care about RX + local delivery.
+        let router = Router::new::<fn(&[u8]) -> TelemetryResult<()>>(
+            None,
+            BoardConfig::new(vec![handler]),
+            zero_clock(),
+        );
+        let r = Arc::new(router);
+
+        // Spawn multiple producers that enqueue RX packets concurrently.
+        let mut threads_vec = Vec::new();
+        for _ in 0..THREADS {
+            let r_cloned = r.clone();
+            threads_vec.push(thread::spawn(move || {
+                for _ in 0..ITERS_PER_THREAD {
+                    let pkt = TelemetryPacket::from_f32_slice(
+                        DataType::GpsData,
+                        &[1.0_f32, 2.0, 3.0],
+                        &[DataEndpoint::SdCard], // only-local endpoint
+                        0,
+                    )
+                    .unwrap();
+                    r_cloned.rx_packet_to_queue(pkt).unwrap();
+                }
+            }));
+        }
+
+        // Join all producer threads.
+        for t in threads_vec {
+            t.join().expect("producer thread panicked");
+        }
+
+        // Single-threaded drain of the received queue.
+        r.process_received_queue().unwrap();
+
+        // We should see exactly one handler call per enqueued packet.
+        assert_eq!(
+            hits.load(Ordering::SeqCst),
+            total,
+            "expected {total} handler invocations from RX queue"
+        );
+    }
+
+    // ------------------------------------------------------------------------
+    // Concurrent calls to receive_serialized on the same Router.
+    //
+    // Each thread calls receive_serialized(&self, wire) repeatedly. We verify
+    // the handler fan-out count matches the total number of calls.
+    // ------------------------------------------------------------------------
+    #[test]
+    fn concurrent_receive_serialized_is_thread_safe() {
+        const THREADS: usize = 4;
+        const ITERS_PER_THREAD: usize = 50;
+        let total = THREADS * ITERS_PER_THREAD;
+
+        // Build a single wire frame that we'll reuse across threads.
+        let pkt = TelemetryPacket::from_f32_slice(
+            DataType::GpsData,
+            &[1.0_f32, 2.0, 3.0],
+            &[DataEndpoint::SdCard], // only-local endpoint → one handler per receive
+            123,
+        )
+        .unwrap();
+        let wire = serialize::serialize_packet(&pkt);
+        let wire_shared = Arc::new(wire);
+
+        // Handler that counts how many times it is invoked.
+        let hits = Arc::new(AtomicUsize::new(0));
+        let hits_c = hits.clone();
+        let handler = EndpointHandler {
+            endpoint: DataEndpoint::SdCard,
+            handler: EndpointHandlerFn::Packet(Box::new(move |_pkt: &TelemetryPacket| {
+                hits_c.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            })),
+        };
+
+        // Router with no TX; only exercising receive path + fan-out.
+        let router = Router::new::<fn(&[u8]) -> TelemetryResult<()>>(
+            None,
+            BoardConfig::new(vec![handler]),
+            zero_clock(),
+        );
+        let r = Arc::new(router);
+
+        // Spawn multiple threads that all call receive_serialized on the same Router.
+        let mut threads_vec = Vec::new();
+        for _ in 0..THREADS {
+            let r_cloned = r.clone();
+            let w_cloned = wire_shared.clone();
+            threads_vec.push(thread::spawn(move || {
+                for _ in 0..ITERS_PER_THREAD {
+                    r_cloned
+                        .receive_serialized(&w_cloned)
+                        .expect("receive_serialized failed");
+                }
+            }));
+        }
+
+        for t in threads_vec {
+            t.join().expect("receive thread panicked");
+        }
+
+        // One handler call per receive.
+        assert_eq!(
+            hits.load(Ordering::SeqCst),
+            total,
+            "expected {total} handler invocations from receive_serialized"
+        );
+    }
+
+    #[test]
+    fn concurrent_logging_and_processing_is_thread_safe() {
+        use std::thread;
+
+        const ITERS: usize = 200;
+
+        // Count how many frames are actually transmitted on the "bus".
+        let tx_count = Arc::new(AtomicUsize::new(0));
+        let txc = tx_count.clone();
+        let tx = move |bytes: &[u8]| -> TelemetryResult<()> {
+            assert!(!bytes.is_empty());
+            txc.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        };
+
+        // Local handler that counts how many packets it sees.
+        let rx_count = Arc::new(AtomicUsize::new(0));
+        let rxc = rx_count.clone();
+        let handler = EndpointHandler {
+            endpoint: DataEndpoint::SdCard,
+            handler: EndpointHandlerFn::Packet(Box::new(move |_pkt: &TelemetryPacket| {
+                rxc.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            })),
+        };
+
+        // Shared router: TX + one local endpoint.
+        let router = Router::new(Some(tx), BoardConfig::new(vec![handler]), zero_clock());
+        let r = Arc::new(router);
+
+        // ---------------- Logger thread ----------------
+        let r_logger = r.clone();
+        let logger = thread::spawn(move || {
+            for _ in 0..ITERS {
+                r_logger
+                    .log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0])
+                    .expect("log_queue failed");
+                // optional: tiny yield to mix scheduling, but not required
+                // thread::yield_now();
+            }
+        });
+
+        // ---------------- Drainer thread ----------------
+        let r_drain = r.clone();
+        let rx_counter = rx_count.clone();
+        let drainer = thread::spawn(move || {
+            // Keep draining until we've seen all expected local handler invocations.
+            while rx_counter.load(Ordering::SeqCst) < ITERS {
+                r_drain
+                    .process_all_queues()
+                    .expect("process_all_queues failed");
+                thread::yield_now();
+            }
+        });
+
+        // Wait for both threads to finish.
+        logger.join().expect("logger thread panicked");
+        drainer.join().expect("drainer thread panicked");
+
+        // After both threads are done, all queued messages should have been
+        // transmitted and delivered to the local handler exactly once each.
+        let rx = rx_count.load(Ordering::SeqCst);
+        let tx = tx_count.load(Ordering::SeqCst);
+
+        assert_eq!(rx, ITERS, "expected {ITERS} handler calls, got {rx}");
+        assert_eq!(tx, ITERS, "expected {ITERS} TX frames, got {tx}");
+    }
+    #[test]
+    fn concurrent_log_receive_and_process_mix_is_thread_safe() {
+        use std::thread;
+
+        const LOG_ITERS: usize = 100;
+        const RX_ITERS: usize = 100;
+
+        let tx_count = Arc::new(AtomicUsize::new(0));
+        let txc = tx_count.clone();
+        let tx = move |bytes: &[u8]| -> TelemetryResult<()> {
+            assert!(!bytes.is_empty());
+            txc.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        };
+
+        // Handler that counts packets (both TX-local and RX-delivered).
+        let rx_count = Arc::new(AtomicUsize::new(0));
+        let rxc = rx_count.clone();
+        let handler = EndpointHandler {
+            endpoint: DataEndpoint::SdCard,
+            handler: EndpointHandlerFn::Packet(Box::new(move |_pkt: &TelemetryPacket| {
+                rxc.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            })),
+        };
+
+        let router = Router::new(Some(tx), BoardConfig::new(vec![handler]), zero_clock());
+        let r = Arc::new(router);
+
+        // ---------- Logger thread ----------
+        let r_logger = r.clone();
+        let t_logger = thread::spawn(move || {
+            for _ in 0..LOG_ITERS {
+                r_logger
+                    .log_queue(DataType::GpsData, &[1.0, 2.0, 3.0])
+                    .expect("log_queue failed");
+            }
+        });
+
+        // ---------- RX thread ----------
+        let r_rx = r.clone();
+        let t_rx = thread::spawn(move || {
+            for _ in 0..RX_ITERS {
+                let pkt = TelemetryPacket::from_f32_slice(
+                    DataType::GpsData,
+                    &[4.0, 5.0, 6.0],
+                    &[DataEndpoint::SdCard],
+                    0,
+                )
+                .unwrap();
+                r_rx.rx_packet_to_queue(pkt)
+                    .expect("rx_packet_to_queue failed");
+            }
+        });
+
+        // ---------- Processor thread ----------
+        let r_proc = r.clone();
+        let rx_counter = rx_count.clone();
+        let t_proc = thread::spawn(move || {
+            // Loop until handler count reaches expected total
+            while rx_counter.load(Ordering::SeqCst) < LOG_ITERS + RX_ITERS {
+                r_proc
+                    .process_all_queues()
+                    .expect("process_all_queues failed");
+                thread::yield_now();
+            }
+        });
+
+        t_logger.join().expect("logger thread panicked");
+        t_rx.join().expect("rx thread panicked");
+        t_proc.join().expect("processor thread panicked");
+
+        let tx = tx_count.load(Ordering::SeqCst);
+        let rx = rx_count.load(Ordering::SeqCst);
+        assert_eq!(tx, LOG_ITERS, "expected {LOG_ITERS} TX frames");
+        assert_eq!(
+            rx,
+            LOG_ITERS + RX_ITERS,
+            "expected {LOG_ITERS}+{RX_ITERS} handler invocations"
+        );
+    }
+}

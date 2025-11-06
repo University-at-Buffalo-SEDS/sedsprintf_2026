@@ -14,40 +14,6 @@
 
 /* ===================== Global recursive lock ===================== */
 
-#ifdef _WIN32
-static INIT_ONCE g_once = INIT_ONCE_STATIC_INIT;
-static CRITICAL_SECTION g_cs;
-
-static BOOL CALLBACK win_init_mutex(PINIT_ONCE once, PVOID param, PVOID * ctx)
-{
-    (void) once;
-    (void) param;
-    (void) ctx;
-    InitializeCriticalSection(&g_cs); // recursive by design
-    return TRUE;
-}
-static inline void lock_init_once(void) { InitOnceExecuteOnce(&g_once, win_init_mutex, NULL, NULL); }
-static inline void LOCK(void) { EnterCriticalSection(&g_cs); }
-static inline void UNLOCK(void) { LeaveCriticalSection(&g_cs); }
-
-#else
-static pthread_mutex_t g_mtx;
-static pthread_once_t g_once = PTHREAD_ONCE_INIT;
-
-static void posix_init_mutex(void)
-{
-    pthread_mutexattr_t attr;
-    pthread_mutexattr_init(&attr);
-    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
-    pthread_mutex_init(&g_mtx, &attr);
-    pthread_mutexattr_destroy(&attr);
-}
-
-static inline void lock_init_once(void) { pthread_once(&g_once, posix_init_mutex); }
-static inline void LOCK(void) { pthread_mutex_lock(&g_mtx); }
-static inline void UNLOCK(void) { pthread_mutex_unlock(&g_mtx); }
-#endif
-
 /* ===================== Time ===================== */
 
 // Monotonic milliseconds (used by nodes + bus t0)
@@ -72,32 +38,27 @@ uint64_t host_now_ms(const void * user)
 void bus_init(SimBus * bus)
 {
     if (!bus) return;
-    lock_init_once();
-    LOCK();
+
     bus->nodes = NULL;
     bus->count = 0;
     bus->cap = 0;
     bus->t0_ms = host_now_ms(NULL); // zero point
-    UNLOCK();
 }
 
 void bus_free(SimBus * bus)
 {
     if (!bus) return;
-    lock_init_once();
-    LOCK();
+
     free(bus->nodes);
     bus->nodes = NULL;
     bus->count = 0;
     bus->cap = 0;
-    UNLOCK();
 }
 
 size_t bus_register(SimBus * bus, SimNode * n)
 {
     if (!bus || !n) return (size_t) -1;
-    lock_init_once();
-    LOCK();
+
 
     if (bus->count == bus->cap)
     {
@@ -106,7 +67,7 @@ size_t bus_register(SimBus * bus, SimNode * n)
         if (!tmp)
         {
             fprintf(stderr, "bus_register: OOM\n");
-            UNLOCK();
+
             return (size_t) -1;
         }
         bus->nodes = tmp;
@@ -114,15 +75,14 @@ size_t bus_register(SimBus * bus, SimNode * n)
     }
     bus->nodes[bus->count] = n;
     size_t id = bus->count++;
-    UNLOCK();
+
     return id;
 }
 
 SedsResult bus_send(SimBus * bus, const SimNode * from, const uint8_t * bytes, size_t len)
 {
     if (!bus || !bytes || !len) return SEDS_ERR;
-    lock_init_once();
-    LOCK();
+
 
     // Broadcast to all nodes except sender
     for (size_t i = 0; i < bus->count; ++i)
@@ -133,7 +93,7 @@ SedsResult bus_send(SimBus * bus, const SimNode * from, const uint8_t * bytes, s
         node_rx(n, bytes, len);
     }
 
-    UNLOCK();
+
     return SEDS_OK;
 }
 
@@ -178,11 +138,10 @@ SedsResult radio_handler_serial(const uint8_t * bytes, const size_t len, void * 
         return s;
     }
 
-    lock_init_once();
-    LOCK();
+
     if (self) self->radio_hits++;
     printf("[RADIO] %s\n", buf);
-    UNLOCK();
+
 
     seds_owned_pkt_free(owned);
     return SEDS_OK;
@@ -199,11 +158,10 @@ SedsResult sdcard_handler(const SedsPacketView * pkt, void * user)
         return s;
     }
 
-    lock_init_once();
-    LOCK();
+
     if (self) self->sd_hits++;
     printf("[SD] wrote: %s\n", buf);
-    UNLOCK();
+
 
     return SEDS_OK;
 }
@@ -220,8 +178,6 @@ SedsResult node_init(SimNode * n, SimBus * bus, const char * name, int radio, in
 {
     if (!n || !bus) return SEDS_ERR;
 
-    lock_init_once();
-    LOCK();
 
     n->r = NULL;
     n->bus = bus;
@@ -262,36 +218,32 @@ SedsResult node_init(SimNode * n, SimBus * bus, const char * name, int radio, in
     if (!n->r)
     {
         fprintf(stderr, "[%s] Failed to create router\n", n->name);
-        UNLOCK();
+
         return SEDS_ERR;
     }
 
     bus_register(bus, n);
-    UNLOCK();
+
     return SEDS_OK;
 }
 
 void node_free(SimNode * n)
 {
     if (!n) return;
-    lock_init_once();
-    LOCK();
+
     if (n->r)
     {
         seds_router_free(n->r);
         n->r = NULL;
     }
     n->bus = NULL;
-    UNLOCK();
 }
 
 void node_rx(SimNode * n, const uint8_t * bytes, const size_t len)
 {
     if (!n || !n->r || !bytes || !len) return;
-    lock_init_once();
-    LOCK();
+    // LOCK();
     seds_router_rx_serialized_packet_to_queue(n->r, bytes, len);
-    UNLOCK();
 }
 
 SedsResult node_log(
@@ -304,9 +256,8 @@ SedsResult node_log(
     if (!n || !n->r || !data || element_count == 0 || element_size == 0) return SEDS_ERR;
 
     const size_t total_bytes = element_count * element_size;
-    lock_init_once();
-    LOCK();
+    // LOCK();
     SedsResult r = seds_router_log_queue(n->r, data_type, data, total_bytes);
-    UNLOCK();
+
     return r;
 }

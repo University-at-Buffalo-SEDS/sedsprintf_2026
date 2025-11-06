@@ -153,7 +153,7 @@ fn finish_with<T: LeBytes + Copy>(
 
 #[repr(C)]
 pub struct SedsRouter {
-    inner: Router,
+    inner: Arc<Router>,
 }
 
 // Must match the C header layout
@@ -507,7 +507,9 @@ pub extern "C" fn seds_router_new(
     let box_clock = Box::new(clock);
     let cfg = BoardConfig::new(v);
     let router = Router::new(transmit, cfg, box_clock);
-    Box::into_raw(Box::new(SedsRouter { inner: router }))
+    Box::into_raw(Box::new(SedsRouter {
+        inner: Arc::from(router),
+    }))
 }
 
 #[unsafe(no_mangle)]
