@@ -1,6 +1,4 @@
 // src/c_api.rs
-#![allow(dead_code)]
-
 
 use crate::{
     config::DataEndpoint, do_vec_log_typed, get_needed_message_size, message_meta,
@@ -24,13 +22,7 @@ const SEDS_EK_SIGNED: u32 = 1;
 const SEDS_EK_FLOAT: u32 = 2;
 const STACK_EPS: usize = 16; // number of endpoints to store on stack for callback
 
-const SIZE_OF_U8: usize = 1;
-const SIZE_OF_U16: usize = 2;
-const SIZE_OF_U32: usize = 4;
-const SIZE_OF_F64: usize = 8;
-
 #[repr(i32)]
-#[allow(dead_code)]
 enum SedsResult {
     SedsOk = 0,
     SedsErr = 1,
@@ -182,16 +174,6 @@ pub struct SedsHandlerDesc {
     pub serialized_handler: CSerializedHandler, // optional
     pub user: *mut c_void,
 }
-
-// Keep user pointer as usize to make closures Send + Sync
-#[derive(Copy, Clone)]
-struct CHandler {
-    cb: CEndpointHandler,
-    user_addr: usize,
-}
-
-unsafe impl Send for CHandler {}
-unsafe impl Sync for CHandler {}
 
 #[derive(Copy, Clone)]
 struct TxCtx {

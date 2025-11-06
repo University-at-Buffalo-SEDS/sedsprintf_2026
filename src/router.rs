@@ -1,6 +1,3 @@
-#![allow(dead_code)]
-
-
 use crate::{
     config::{DataEndpoint, DataType, DEVICE_IDENTIFIER}, get_needed_message_size, impl_letype_num,
     lock::RouterMutex,
@@ -703,14 +700,5 @@ impl Router {
         log_raw(self.sender.clone(), ty, data, timestamp, |pkt| {
             self.queue_tx_message(pkt)
         })
-    }
-
-    #[inline]
-    pub fn log_bytes(&self, ty: DataType, bytes: &[u8]) -> TelemetryResult<()> {
-        self.log::<u8>(ty, bytes)
-    }
-    #[inline]
-    pub fn log_f32(&self, ty: DataType, vals: &[f32]) -> TelemetryResult<()> {
-        self.log::<f32>(ty, vals)
     }
 }
