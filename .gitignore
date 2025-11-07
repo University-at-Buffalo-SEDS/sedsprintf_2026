@@ -5,6 +5,7 @@
 /cmake_install.cmake
 .DS_Store
 .idea
+venv/
 
 c-system-test/build/
 
