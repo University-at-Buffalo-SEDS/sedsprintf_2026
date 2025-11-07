@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.22)
 project(sedsprintf_rs_cmake NONE)
+# --- Find Python interpreter ---
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+set(PYTHON_EXECUTABLE "${Python3_EXECUTABLE}")
 
 set(SEDSPRINTF_RS_DIR_DEFAULT "${CMAKE_CURRENT_LIST_DIR}/")
 set(SEDSPRINTF_RS_DIR "${SEDSPRINTF_RS_DIR_DEFAULT}" CACHE PATH "Path to sedsprintf_rs crate root")
@@ -51,7 +54,7 @@ file(MAKE_DIRECTORY "${RS_INCLUDE}")
 if (NOT EXISTS "${RS_HEADER}")
     message(STATUS "sedsprintf_rs: header not found (${RS_HEADER}); attempting to build once to generate it…")
     execute_process(
-        COMMAND bash -lc "./build.sh ${RS_ARGS_BOOTSTRAP}"
+        COMMAND "${PYTHON_EXECUTABLE}" build.py ${RS_ARGS_BOOTSTRAP}
         WORKING_DIRECTORY "${RUST_DIR}"
         RESULT_VARIABLE _hdr_build_res
     )
@@ -72,7 +75,7 @@ file(GLOB_RECURSE RS_SRC CONFIGURE_DEPENDS
 add_custom_command(
     OUTPUT
         "${RS_LIB_DBG}" "${RS_LIB_REL}" "${RS_HEADER}"
-    COMMAND ${CMAKE_COMMAND} -E chdir "${RUST_DIR}" bash -lc "./build.sh ${RS_ARGS_STR}"
+    COMMAND ${CMAKE_COMMAND} -E chdir "${RUST_DIR}" "${PYTHON_EXECUTABLE}" build.py ${RS_ARGS_BOOTSTRAP}
     DEPENDS ${RS_SRC}
     COMMENT "Building sedsprintf_rs (${RUST_PROFILE}) for ${RUST_TRIPLE}"
     USES_TERMINAL
