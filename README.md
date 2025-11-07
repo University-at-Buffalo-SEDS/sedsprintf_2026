@@ -40,7 +40,7 @@ project.
 Building with python bindings can be done with the build script on posix systems:
 
 ```bash
-./build.sh release maturin-develop 
+./build.py release maturin-develop 
 ```
 
 When building in an embedded environment the library will compile to a static library that can be linked to your C code.
