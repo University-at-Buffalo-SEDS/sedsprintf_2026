@@ -287,8 +287,8 @@ mod tests {
         let data = [10.0_f32, 10.25, 10.5];
         router.log_queue(DataType::GpsData, &data).unwrap();
 
-        let data = [10.0_f32, 10.25];
-        router.log_queue(DataType::BatteryStatus, &data).unwrap();
+        let data = [10.0_f32];
+        router.log_queue(DataType::BatteryVoltage, &data).unwrap();
 
         let data = [10.0_f32, 10.25, 10.5];
         router.log_queue(DataType::GpsData, &data).unwrap();

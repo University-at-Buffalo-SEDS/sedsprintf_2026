@@ -47,10 +47,11 @@ pub enum DataType {
     TelemetryError,
     GenericError,
     GpsData,
-    ImuData,
+    KalmanFilterData,
     GyroData,
     AccelData,
-    BatteryStatus,
+    BatteryVoltage,
+    BatteryCurrent,
     BarometerData,
     MessageData,
 }
@@ -63,10 +64,11 @@ impl DataType {
             DataType::TelemetryError => "TELEMETRY_ERROR",
             DataType::GenericError => "GENERIC_ERROR",
             DataType::GpsData => "GPS_DATA",
-            DataType::ImuData => "IMU_DATA",
+            DataType::KalmanFilterData => "Kalman_Filter_Data",
             DataType::GyroData => "GYRO_DATA",
             DataType::AccelData => "ACCEL_DATA",
-            DataType::BatteryStatus => "BATTERY_STATUS",
+            DataType::BatteryVoltage => "BATTERY_VOLTAGE",
+            DataType::BatteryCurrent => "BATTERY_CURRENT",
             DataType::BarometerData => "BAROMETER_DATA",
             DataType::MessageData => "MESSAGE_DATA",
         }
@@ -80,8 +82,9 @@ pub const fn get_message_data_type(data_type: DataType) -> MessageDataType {
         DataType::TelemetryError => MessageDataType::String,
         DataType::GenericError => MessageDataType::String,
         DataType::GpsData => MessageDataType::Float32,
-        DataType::ImuData => MessageDataType::Float32,
-        DataType::BatteryStatus => MessageDataType::Float32,
+        DataType::KalmanFilterData => MessageDataType::Float32,
+        DataType::BatteryVoltage => MessageDataType::Float32,
+        DataType::BatteryCurrent => MessageDataType::Float32,
         DataType::GyroData => MessageDataType::Float32,
         DataType::AccelData => MessageDataType::Float32,
         DataType::BarometerData => MessageDataType::Float32,
@@ -96,8 +99,9 @@ pub const fn get_message_info_types(message_type: DataType) -> MessageType {
         DataType::TelemetryError => MessageType::Error,
         DataType::GenericError => MessageType::Error,
         DataType::GpsData => MessageType::Info,
-        DataType::ImuData => MessageType::Info,
-        DataType::BatteryStatus => MessageType::Info,
+        DataType::KalmanFilterData => MessageType::Info,
+        DataType::BatteryVoltage => MessageType::Info,
+        DataType::BatteryCurrent => MessageType::Info,
         DataType::GyroData => MessageType::Info,
         DataType::AccelData => MessageType::Info,
         DataType::BarometerData => MessageType::Info,
@@ -130,17 +134,24 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
                 endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
             }
         }
-        DataType::ImuData => {
+        DataType::KalmanFilterData => {
             MessageMeta {
                 // IMU Data
-                element_count: MessageElementCount::Static(6), // IMU Data messages carry 6 float32 elements (accel x,y,z and gyro x,y,z)
+                element_count: MessageElementCount::Static(3), // Kalman Filter Data messages carry 3 float32 elements
                 endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
             }
         }
-        DataType::BatteryStatus => {
+        DataType::BatteryVoltage => {
             MessageMeta {
                 // Battery Status
-                element_count: MessageElementCount::Static(2), // Battery Status messages carry 2 float32 elements (voltage, current)
+                element_count: MessageElementCount::Static(1), // Battery Status messages carry 1 float32 element (voltage)
+                endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
+            }
+        }
+        DataType::BatteryCurrent => {
+            MessageMeta {
+                // Battery Status
+                element_count: MessageElementCount::Static(1), // Battery Status messages carry 1 float32 elements (current)
                 endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
             }
         }
