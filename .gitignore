@@ -6,6 +6,7 @@
 .DS_Store
 .idea
 venv/
+__pycache__/
 
 c-system-test/build/
 
