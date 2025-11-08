@@ -6,7 +6,7 @@ use crate::{
     MessageElementCount, TelemetryError,
     TelemetryResult,
 };
-use alloc::{boxed::Box, collections::VecDeque, format, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, collections::VecDeque, format, sync::Arc, vec, vec::Vec};
 
 
 pub enum RxItem {
