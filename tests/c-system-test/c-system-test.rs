@@ -1,4 +1,7 @@
 mod c_system_test {
+    use std::path::PathBuf;
+    use std::process::Command;
+
 
     #[test]
     fn run_c_system_test() {
