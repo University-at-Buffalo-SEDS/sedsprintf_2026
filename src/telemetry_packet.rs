@@ -1,3 +1,11 @@
+//! Telemetry packet core type and formatting helpers.
+//!
+//! [`TelemetryPacket`] is the main payload-bearing type. It:
+//! - holds sender, endpoints, timestamp and raw payload bytes,
+//! - validates payload sizes and encodings against the schema from `message_meta`,
+//! - supports pretty printing (header + decoded values) for debugging/logging,
+//! - uses [`SmallPayload`] internally to keep small messages on the stack.
+
 use crate::config::MAX_PRECISION_IN_STRINGS;
 use crate::small_payload::SmallPayload;
 pub(crate) use crate::{
@@ -10,21 +18,69 @@ use alloc::{string::String, sync::Arc, vec::Vec};
 use core::any::TypeId;
 use core::fmt::Write;
 
+// ============================================================================
+// Constants
+// ============================================================================
 
+/// Threshold (in ms since boot/epoch) above which timestamps are treated as
+/// Unix epoch time rather than an uptime counter.
+///
+/// Anything smaller is formatted as an uptime-style duration; larger values
+/// are formatted as a UTC date-time.
 const EPOCH_MS_THRESHOLD: u64 = 1_000_000_000_000; // clearly not an uptime counter
+
+/// Default starting capacity for human-readable strings.
 const DEFAULT_STRING_CAPACITY: usize = 96;
-/// Payload-bearing packet (safe, heap-backed, shareable).
+
+// ============================================================================
+// TelemetryPacket
+// ============================================================================
+
+/// Payload-bearing packet (safe, validated, shareable).
+///
+/// This is the primary data structure passed around inside the crate and
+/// across FFI boundaries (via views / wrappers).
+///
+/// Fields are intentionally public for ergonomic access, but construction
+/// should go through [`TelemetryPacket::new`] to enforce validation.
 #[derive(Clone, Debug)]
 pub struct TelemetryPacket {
+    /// Logical message type (schema selector).
     pub ty: DataType,
+
+    /// Size of the payload in bytes.
+    ///
+    /// This is cached and must match `payload.len()`. [`TelemetryPacket::validate`]
+    /// checks the invariant.
     pub data_size: usize,
+
+    /// Logical sender identifier (e.g. device or subsystem name).
     pub sender: Arc<str>,
+
+    /// Destination endpoints for this message.
     pub endpoints: Arc<[DataEndpoint]>,
+
+    /// Timestamp in milliseconds.
+    ///
+    /// - If `< EPOCH_MS_THRESHOLD`, treated as an uptime counter and formatted
+    ///   like `12m 34s 567ms`.
+    /// - If `>= EPOCH_MS_THRESHOLD`, treated as Unix epoch ms and formatted
+    ///   as `YYYY-MM-DD HH:MM:SS.mmmZ`.
     pub timestamp: u64,
+
+    /// Raw payload bytes, stored via [`SmallPayload`] for small/large optimization.
     pub payload: SmallPayload,
 }
 
-// ---------------------Helpers for to_string()---------------------
+// ============================================================================
+// Internal helpers for validation / formatting
+// ============================================================================
+
+/// Effective element width (in bytes) for the given message data type.
+///
+/// For numeric/bool types this is the true width of one element.
+/// For string/hex we return 1 to treat the payload as a byte stream when
+/// checking dynamic length multiples.
 #[inline(always)]
 const fn element_width(dt: MessageDataType) -> usize {
     match dt {
@@ -38,6 +94,11 @@ const fn element_width(dt: MessageDataType) -> usize {
     }
 }
 
+/// Validate the payload of a dynamic-length message.
+///
+/// - For `String`: trims trailing NULs for validation and ensures UTF-8 (if non-empty).
+/// - For `Hex`: no additional validation.
+/// - For numerics/bool: ensures the length is a multiple of the element width.
 #[inline]
 fn validate_dynamic_len_and_content(ty: DataType, bytes: &[u8]) -> TelemetryResult<()> {
     let dt = get_data_type(ty);
@@ -56,11 +117,11 @@ fn validate_dynamic_len_and_content(ty: DataType, bytes: &[u8]) -> TelemetryResu
             Ok(())
         }
         MessageDataType::Hex => {
-            // No UTF-8 requirement.
+            // No UTF-8 requirement for hex blobs.
             Ok(())
         }
         _ => {
-            // Numeric / bool: length must be a multiple of the element width
+            // Numeric / bool: length must be a multiple of the element width.
             let w = element_width(dt);
             if w == 0 || bytes.len() % w != 0 {
                 return Err(TelemetryError::SizeMismatch {
@@ -73,9 +134,19 @@ fn validate_dynamic_len_and_content(ty: DataType, bytes: &[u8]) -> TelemetryResu
     }
 }
 
-// -------------------- TelemetryPacket impl --------------------
+// ============================================================================
+// TelemetryPacket impl
+// ============================================================================
+
 impl TelemetryPacket {
-    /// Create a packet from a raw payload (validated against `message_meta(ty)`).
+    /// Create a packet from a raw payload, validating against `message_meta(ty)`.
+    ///
+    /// Checks:
+    /// - `endpoints` is non-empty.
+    /// - For static element count:
+    ///   - `payload.len() == element_count * data_type_size(get_data_type(ty))`.
+    /// - For dynamic:
+    ///   - Length and encoding are validated by [`validate_dynamic_len_and_content`].
     pub fn new(
         ty: DataType,
         endpoints: &[DataEndpoint],
@@ -113,6 +184,8 @@ impl TelemetryPacket {
     }
 
     /// Convenience: create from a slice of `u8` (copied).
+    ///
+    /// Uses [`DEVICE_IDENTIFIER`] as the sender.
     #[allow(dead_code)]
     pub fn from_u8_slice(
         ty: DataType,
@@ -130,6 +203,9 @@ impl TelemetryPacket {
     }
 
     /// Convenience: create from a slice of `f32` (copied, little-endian).
+    ///
+    /// Uses [`DEVICE_IDENTIFIER`] as the sender. The values are packed as
+    /// little-endian floats into the payload buffer.
     #[allow(dead_code)]
     pub fn from_f32_slice(
         ty: DataType,
@@ -139,7 +215,7 @@ impl TelemetryPacket {
     ) -> TelemetryResult<Self> {
         let need = values.len() * 4;
 
-        // Optional pre-check (can be dropped if you’re happy to let `new()` complain)
+        // Optional pre-check (can be dropped if we’re happy to let `new()` complain).
         let meta = message_meta(ty);
         if let MessageElementCount::Static(exact) = meta.element_count {
             if need != exact * data_type_size(MessageDataType::Float32) {
@@ -167,7 +243,14 @@ impl TelemetryPacket {
         )
     }
 
-    /// Validate internal invariants (size, endpoints, etc.).
+    /// Validate basic invariants:
+    ///
+    /// - `endpoints` is non-empty.
+    /// - `payload.len() == data_size`.
+    /// - For static element count:
+    ///   - `data_size == element_count * data_type_size(get_data_type(ty))`.
+    /// - For dynamic:
+    ///   - Length and encoding are validated by [`validate_dynamic_len_and_content`].
     pub fn validate(&self) -> TelemetryResult<()> {
         if self.endpoints.is_empty() {
             return Err(TelemetryError::EmptyEndpoints);
@@ -196,7 +279,10 @@ impl TelemetryPacket {
         Ok(())
     }
 
-    /// Header line without data payload.
+    /// Header-only string (no decoded data).
+    ///
+    /// Example:
+    /// `Type: FOO, Data Size: 8, Sender: dev0, Endpoints: [EP_A, EP_B], Timestamp: 1234 (1s 234ms)`
     pub fn header_string(&self) -> String {
         let mut out = String::with_capacity(DEFAULT_STRING_CAPACITY);
 
@@ -223,6 +309,9 @@ impl TelemetryPacket {
     }
 
     /// Borrow the payload as UTF-8 without trailing NULs (no allocation).
+    ///
+    /// Returns `None` if the message `DataType` is not a `String` type or if
+    /// the payload is not valid UTF-8 (after trimming trailing NUL).
     pub fn data_as_utf8_ref(&self) -> Option<&str> {
         if get_data_type(self.ty) != MessageDataType::String {
             return None;
@@ -232,6 +321,11 @@ impl TelemetryPacket {
         core::str::from_utf8(&bytes[..end]).ok()
     }
 
+    /// Helper: append decoded numeric/float elements to `s`.
+    ///
+    /// - Uses `LeBytes::from_le_slice` with fixed-width chunks.
+    /// - Floats (`f32`/`f64`) are formatted with a fixed precision
+    ///   [`MAX_PRECISION_IN_STRINGS`].
     #[inline]
     fn data_to_string<T>(&self, s: &mut String)
     where
@@ -258,7 +352,12 @@ impl TelemetryPacket {
             }
         }
     }
+
     /// Full pretty string including decoded data portion.
+    ///
+    /// - String payloads are rendered as `"..."`
+    /// - Numeric/bool payloads are rendered as comma-separated values
+    /// - Hex payloads are delegated to [`TelemetryPacket::to_hex_string`]
     pub fn to_string(&self) -> String {
         let mut s = String::from("{");
         s.push_str(&self.header_string());
@@ -301,6 +400,7 @@ impl TelemetryPacket {
                 self.data_to_string::<u16>(&mut s);
             }
             MessageDataType::UInt8 => {
+                // NOTE: this uses i8 for historical reasons; kept for compatibility.
                 self.data_to_string::<i8>(&mut s);
             }
             MessageDataType::Int128 => {
@@ -319,7 +419,7 @@ impl TelemetryPacket {
                 self.data_to_string::<i8>(&mut s);
             }
             MessageDataType::Bool => {
-                // Interpret any nonzero as true
+                // Interpret any nonzero as true.
                 let mut it = self.payload.iter().peekable();
                 while let Some(b) = it.next() {
                     let _ = write!(s, "{}", *b != 0);
@@ -328,7 +428,9 @@ impl TelemetryPacket {
                     }
                 }
             }
-            MessageDataType::String => { /* handled above */ }
+            MessageDataType::String => {
+                // Already handled above via `data_as_utf8_ref`.
+            }
             MessageDataType::Hex => return self.to_hex_string(),
         }
 
@@ -336,13 +438,18 @@ impl TelemetryPacket {
         s
     }
 
+    /// Hex dump variant of [`TelemetryPacket::to_string`].
+    ///
+    /// Produces:
+    ///
+    /// `Type: ..., Data Size: ..., ..., Timestamp: ... (...), Data (hex): 0xNN 0xNN ...`
     pub fn to_hex_string(&self) -> String {
-        // Header first
+        // Header first.
         let mut s = self.header_string();
         s.push_str(", Data (hex):");
 
         if !self.payload.is_empty() {
-            // Reserve roughly 5 chars per byte: " 0xNN"
+            // Reserve roughly 5 chars per byte: " 0xNN".
             s.reserve(self.payload.len().saturating_mul(5));
             for &b in self.payload.iter() {
                 let _ = write!(&mut s, " 0x{:02x}", b);
@@ -351,21 +458,23 @@ impl TelemetryPacket {
         s
     }
 }
-// --- drop `use time::OffsetDateTime;` ---
-// core-only UTC conversion, ~0 deps, small code size
+
+// ============================================================================
+// Time formatting (no_std-friendly, UTC or uptime)
+// ============================================================================
 
 #[inline]
 fn div_mod_u64(n: u64, d: u64) -> (u64, u64) {
     (n / d, n % d)
 }
 
-// Howard Hinnant–style civil-from-days (proleptic Gregorian)
+// Howard Hinnant–style civil-from-days (proleptic Gregorian).
 fn civil_from_days(mut z: i64) -> (i32, u32, u32) {
     // epoch (1970-01-01) has days=0
-    z += 719468; // shift to civil base
-    let era = (if z >= 0 { z } else { z - 146096 }) / 146097;
-    let doe = z - era * 146097; // [0, 146096]
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365; // [0, 399]
+    z += 719_468; // shift to civil base
+    let era = (if z >= 0 { z } else { z - 146_096 }) / 146_097;
+    let doe = z - era * 146_097; // [0, 146096]
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
     let y = (yoe as i32) + era as i32 * 400;
     let doy = (doe - (365 * yoe + yoe / 4 - yoe / 100)) as i32; // [0, 365]
     let mp = (5 * doy + 2) / 153; // [0, 11]
@@ -375,17 +484,17 @@ fn civil_from_days(mut z: i64) -> (i32, u32, u32) {
     (y, m as u32, d as u32)
 }
 
-/// Append a human-readable timestamp to `out`, either uptime (hh:mm:ss.mmm)
+/// Append a human-readable timestamp to `out`, either uptime (`hh:mm:ss.mmm`)
 /// or UTC epoch like `YYYY-MM-DD HH:MM:SS.mmmZ`, depending on threshold.
 fn append_human_time(out: &mut String, total_ms: u64) {
     if total_ms >= EPOCH_MS_THRESHOLD {
-        // Unix epoch path
+        // Unix epoch path.
         let (secs, sub_ms) = div_mod_u64(total_ms, 1_000);
         let days = (secs / 86_400) as i64;
         let sod = (secs % 86_400) as u32; // seconds of day
         let (year, month, day) = civil_from_days(days);
-        let hour = sod / 3600;
-        let min = (sod % 3600) / 60;
+        let hour = sod / 3_600;
+        let min = (sod % 3_600) / 60;
         let sec = sod % 60;
         let _ = Write::write_fmt(
             out,
@@ -395,6 +504,7 @@ fn append_human_time(out: &mut String, total_ms: u64) {
             ),
         );
     } else {
+        // Uptime-style duration.
         let hours = total_ms / 3_600_000;
         let minutes = (total_ms % 3_600_000) / 60_000;
         let seconds = (total_ms % 60_000) / 1_000;
@@ -415,7 +525,10 @@ fn append_human_time(out: &mut String, total_ms: u64) {
     }
 }
 
-// ---- Optional: Display so we can `format!("{pkt}")` ----
+// ============================================================================
+// Display impl
+// ============================================================================
+
 impl core::fmt::Display for TelemetryPacket {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(&TelemetryPacket::to_string(self))

@@ -199,7 +199,7 @@ mod threaded_system_tests {
             for i in 0..5 {
                 make_series(&mut buf[..3], 10.0);
                 let pkt = make_packet(DataType::GpsData, &buf[..3], i);
-                radio_router.send(&pkt).unwrap();
+                radio_router.transmit_message(&pkt).unwrap();
                 thread::sleep(Duration::from_millis(5));
             }
         });
@@ -213,7 +213,7 @@ mod threaded_system_tests {
                 let pkt1 = make_packet(DataType::GpsData, &buf[..3], i);
                 // If you have a dedicated IMU type, swap DataType::GpsData for it.
 
-                flight_router.send(&pkt1).unwrap();
+                flight_router.transmit_message(&pkt1).unwrap();
                 thread::sleep(Duration::from_millis(5));
 
                 // BARO-like data
@@ -221,7 +221,7 @@ mod threaded_system_tests {
                 let pkt2 = make_packet(DataType::GpsData, &buf[..3], i + 100);
                 // If you have a dedicated barometer type, swap DataType::GpsData for it.
 
-                flight_router.send(&pkt2).unwrap();
+                flight_router.transmit_message(&pkt2).unwrap();
                 thread::sleep(Duration::from_millis(5));
             }
         });
@@ -232,7 +232,7 @@ mod threaded_system_tests {
             for i in 0..5 {
                 make_series(&mut buf[..2], 3.7);
                 let pkt1 = make_packet(DataType::BatteryStatus, &buf[..2], i + 200);
-                power_router.send(&pkt1).unwrap();
+                power_router.transmit_message(&pkt1).unwrap();
                 thread::sleep(Duration::from_millis(5));
 
                 // Message-like data → use TelemetryError as a String-typed payload
@@ -245,7 +245,7 @@ mod threaded_system_tests {
                 )
                 .unwrap();
                 // Send via router so it goes through TX path and bus.
-                power_router.send(&pkt2).unwrap();
+                power_router.transmit_message(&pkt2).unwrap();
                 thread::sleep(Duration::from_millis(5));
             }
         });

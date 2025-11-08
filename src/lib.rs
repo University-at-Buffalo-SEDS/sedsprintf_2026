@@ -9,6 +9,21 @@
 // total hours wasted on this project = 80
 
 #![cfg_attr(not(feature = "std"), no_std)]
+#![allow(unused_doc_comments)]
+//! Crate root: common telemetry types, error codes, and feature-gated glue.
+//!
+//! This module:
+//! - Sets up `no_std` vs `std` behavior.
+//! - Provides an embedded allocator / panic handler when targeting bare metal.
+//! - Re-exports core telemetry configuration and metadata helpers
+//!   (`MessageElementCount`, `MessageMeta`, `TelemetryError`, etc.).
+//! - Wires in the C and Python FFI layers (`c_api`, `python_api`).
+//!
+//! Most user-facing APIs live in:
+//! - [`config`]: schema + data type/endpoint configuration.
+//! - [`router`]: the core Router abstraction.
+//! - [`telemetry_packet`]: `TelemetryPacket` and friends.
+//! - [`serialize`]: wire serialization helpers.
 
 extern crate alloc;
 extern crate core;
@@ -16,14 +31,19 @@ extern crate core;
 extern crate std;
 
 
+use core::mem::size_of;
+use core::ops::Mul;
+use strum::EnumCount;
+
 use crate::config::{
     get_message_data_type, get_message_info_types, get_message_meta, DataEndpoint, DataType,
     MAX_STATIC_HEX_LENGTH, MAX_STATIC_STRING_LENGTH,
 };
 use crate::macros::{ReprI32Enum, ReprU32Enum};
-use core::ops::Mul;
-use strum::EnumCount;
 
+// ============================================================================
+//  Test / Python FFI modules (std-only)
+// ============================================================================
 
 #[cfg(feature = "std")]
 #[cfg(test)]
@@ -33,8 +53,13 @@ mod tests;
 #[cfg(feature = "std")]
 mod python_api;
 
-// ---------- Allocator & panic handlers ----------
-// For EMBEDDED builds (no_std + bare-metal target), provide Telemetry allocator + panic.
+// ============================================================================
+//  Allocator & panic handlers (embedded no_std)
+// ============================================================================
+//
+// For EMBEDDED builds (no_std + bare-metal target), provide Telemetry allocator
+// + panic handler. Host builds rely on the system allocator / default panic.
+
 #[cfg(all(not(feature = "std"), target_os = "none"))]
 mod embedded_alloc {
     use core::alloc::{GlobalAlloc, Layout};
@@ -45,6 +70,8 @@ mod embedded_alloc {
         fn telemetryFree(ptr: *mut core::ffi::c_void);
     }
 
+    /// Global allocator that forwards to `telemetryMalloc` / `telemetryFree`
+    /// provided by the host environment.
     pub struct TelemetryAlloc;
 
     unsafe impl GlobalAlloc for TelemetryAlloc {
@@ -53,6 +80,7 @@ mod embedded_alloc {
             debug_assert!(p.is_null() || (p as usize) % layout.align() == 0);
             p
         }
+
         unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
             unsafe { telemetryFree(ptr as *mut _) }
         }
@@ -68,7 +96,7 @@ mod embedded_alloc {
 
     #[panic_handler]
     fn panic(_info: &PanicInfo) -> ! {
-        // Halt forever after that
+        // Halt forever after panic
         loop {}
     }
 
@@ -79,7 +107,10 @@ mod embedded_alloc {
 // For HOST builds (std is ON), the system allocator is used automatically.
 // No custom panic handler needed.
 
-// ---------- Portable core logic ----------
+// ============================================================================
+//  Portable core logic: modules
+// ============================================================================
+
 mod c_api;
 pub mod config;
 mod lock;
@@ -89,30 +120,56 @@ pub mod serialize;
 mod small_payload;
 pub mod telemetry_packet;
 
-// ----------------------Not User Editable----------------------
+// ============================================================================
+//  Schema-derived global constants
+// ============================================================================
+
+/// Element count used for "string value" schema entries.
 #[allow(dead_code)]
 pub const STRING_VALUE_ELEMENT: usize = 1;
+
+/// Maximum enum value for `DataEndpoint` (inclusive), derived from the schema.
 pub const MAX_VALUE_DATA_ENDPOINT: u32 = (DataEndpoint::COUNT - 1) as u32;
+
+/// Maximum enum value for `DataType` (inclusive), derived from the schema.
 pub const MAX_VALUE_DATA_TYPE: u32 = (DataType::COUNT - 1) as u32;
 
+/// Implement `ReprU32Enum` helpers for `DataType`.
 impl_repr_u32_enum!(DataType, MAX_VALUE_DATA_TYPE);
-impl_repr_u32_enum!(DataEndpoint, MAX_VALUE_DATA_TYPE);
+
+/// Implement `ReprU32Enum` helpers for `DataEndpoint`.
+impl_repr_u32_enum!(DataEndpoint, MAX_VALUE_DATA_ENDPOINT);
+
+// ============================================================================
+//  Message metadata (element counts, data types, sizes)
+// ============================================================================
+
+/// Describes how many elements are present for a given message type.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub enum MessageElementCount {
+    /// Fixed number of elements.
     Static(usize),
+    /// Variable number of elements (payload size can vary).
     Dynamic,
 }
 
+/// Static metadata for a message type: element count and valid endpoints.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct MessageMeta {
+    /// How many elements are present (fixed vs dynamic).
     pub element_count: MessageElementCount,
+    /// Allowed endpoints for this message type.
     pub endpoints: &'static [DataEndpoint],
 }
+
+/// Lookup `MessageMeta` for a given [`DataType`] using the generated config.
 #[inline(always)]
 pub fn message_meta(ty: DataType) -> MessageMeta {
     get_message_meta(ty)
 }
+
+// ---- Convenience multiplication helpers ----
 
 impl Mul<MessageElementCount> for usize {
     type Output = usize;
@@ -131,6 +188,10 @@ impl Mul<usize> for MessageElementCount {
 }
 
 impl MessageElementCount {
+    /// Convert the element count to a `usize`.
+    ///
+    /// - `Static(n)` → `n`
+    /// - `Dynamic`   → `0` (caller must handle dynamic sizing separately)
     fn into(self) -> usize {
         match self {
             MessageElementCount::Static(a) => a,
@@ -139,23 +200,35 @@ impl MessageElementCount {
     }
 }
 
+/// Return the total payload size (in bytes) required for a given `DataType`
+/// under the *static* schema.
+///
+/// This is `element_size * element_count`. For dynamic types, the
+/// configuration ensures we only call this where it makes sense.
 #[inline(always)]
 pub fn get_needed_message_size(ty: DataType) -> usize {
     data_type_size(get_data_type(ty)) * get_message_meta(ty).element_count
 }
 
+/// Return the logical "info" type (Info/Error) for a given `DataType`.
 #[inline(always)]
 pub const fn get_info_type(ty: DataType) -> MessageType {
     get_message_info_types(ty)
 }
 
+/// Return the *element* data type (e.g., `Float32`, `Int16`, `String`) for a
+/// given `DataType`.
 #[inline(always)]
 pub const fn get_data_type(ty: DataType) -> MessageDataType {
     get_message_data_type(ty)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+/// Primitive element type used by a message.
+///
+/// This is the underlying "slot" type, not the high-level `DataType`
+/// (which is the logical schema type).
 #[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub enum MessageDataType {
     Float64,
     Float32,
@@ -173,6 +246,11 @@ pub enum MessageDataType {
     String,
     Hex,
 }
+
+/// Size in bytes of a single element for the given [`MessageDataType`].
+///
+/// For `String` / `Hex`, this returns the fixed maximum static length
+/// configured by the schema (`MAX_STATIC_STRING_LENGTH`, `MAX_STATIC_HEX_LENGTH`).
 pub const fn data_type_size(dt: MessageDataType) -> usize {
     match dt {
         MessageDataType::Float64 => size_of::<f64>(),
@@ -193,30 +271,66 @@ pub const fn data_type_size(dt: MessageDataType) -> usize {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+/// High-level classification of message kind.
 #[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub enum MessageType {
+    /// Informational telemetry.
     Info,
+    /// Error / fault telemetry.
     Error,
 }
 
+// ============================================================================
+//  Error types and error codes
+// ============================================================================
+
+/// Rich error type used throughout the telemetry crate.
+///
+/// Most public APIs expose a `TelemetryResult<T>` alias for
+/// `Result<T, TelemetryError>`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TelemetryError {
+    /// Logical type ID is not a valid [`DataType`].
     InvalidType,
+
+    /// Payload size doesn't match the schema's expectations.
     SizeMismatch { expected: usize, got: usize },
+
+    /// Legacy / generic size mismatch error (for C/Python parity).
     SizeMismatchError,
+
+    /// No endpoints were supplied where they are required.
     EmptyEndpoints,
+
+    /// Timestamp is invalid (e.g., zero when disallowed).
     TimestampInvalid,
+
+    /// A packet is missing its payload bytes.
     MissingPayload,
+
+    /// A handler (C/Python callback) returned an error.
     HandlerError(&'static str),
+
+    /// Generic invalid argument from caller.
     BadArg,
+
+    /// Serialization error.
     Serialize(&'static str),
+
+    /// Deserialization error.
     Deserialize(&'static str),
+
+    /// IO / transport error.
     Io(&'static str),
+
+    /// UTF-8 decoding failed where string payloads are expected.
     InvalidUtf8,
 }
 
 impl TelemetryError {
+    /// Map a rich [`TelemetryError`] to a stable numeric error code
+    /// used by the FFI layers.
     pub const fn to_error_code(&self) -> TelemetryErrorCode {
         match self {
             TelemetryError::InvalidType => TelemetryErrorCode::InvalidType,
@@ -234,6 +348,11 @@ impl TelemetryError {
         }
     }
 }
+
+/// Numeric error codes used on the C/Python FFI boundary.
+///
+/// Negative values are used to avoid collisions with success codes
+/// and other positive return values (e.g. lengths).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
 pub enum TelemetryErrorCode {
@@ -251,14 +370,21 @@ pub enum TelemetryErrorCode {
     InvalidUtf8 = -13,
 }
 
+// Generate ReprI32Enum helpers for TelemetryErrorCode
 impl_repr_i32_enum!(
     TelemetryErrorCode,
     TelemetryErrorCode::MAX,
     TelemetryErrorCode::MIN
 );
+
 impl TelemetryErrorCode {
+    /// Maximum valid numeric error code value.
     pub const MAX: i32 = TelemetryErrorCode::InvalidType as i32;
+
+    /// Minimum valid numeric error code value.
     pub const MIN: i32 = TelemetryErrorCode::Io as i32;
+
+    /// Human-readable string for logging / debugging.
     pub fn as_str(&self) -> &'static str {
         match self {
             TelemetryErrorCode::InvalidType => "{Invalid Type}",
@@ -276,12 +402,24 @@ impl TelemetryErrorCode {
         }
     }
 
+    /// Try to convert a raw i32 error code into a [`TelemetryErrorCode`].
+    ///
+    /// Returns `None` if the code is out of range or not recognized.
     pub fn try_from_i32(x: i32) -> Option<Self> {
         try_enum_from_i32(x)
     }
 }
 
+/// Common result alias for telemetry operations.
 pub type TelemetryResult<T> = Result<T, TelemetryError>;
+
+// ============================================================================
+//  Generic enum helpers (repr(u32) / repr(i32))
+// ============================================================================
+
+/// Try to convert a `u32` into a `#[repr(u32)]` enum `E`.
+///
+/// Returns `None` if the value is out of range (greater than `E::MAX`).
 pub fn try_enum_from_u32<E: ReprU32Enum>(x: u32) -> Option<E> {
     if x > E::MAX {
         return None;
@@ -292,12 +430,15 @@ pub fn try_enum_from_u32<E: ReprU32Enum>(x: u32) -> Option<E> {
     Some(e)
 }
 
+/// Try to convert an `i32` into a `#[repr(i32)]` enum `E`.
+///
+/// Returns `None` if the value is outside the `[E::MIN, E::MAX]` range.
 pub fn try_enum_from_i32<E: ReprI32Enum>(x: i32) -> Option<E> {
     if x < E::MIN || x > E::MAX {
         return None;
     }
 
-    // SAFETY: `E` is promised to be a fieldless #[repr(u32)] enum (thus 4 bytes, Copy).
+    // SAFETY: `E` is promised to be a fieldless #[repr(i32)] enum (thus 4 bytes, Copy).
     let e = unsafe { (&x as *const i32 as *const E).read() };
     Some(e)
 }
