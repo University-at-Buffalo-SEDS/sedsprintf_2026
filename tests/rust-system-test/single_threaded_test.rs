@@ -26,7 +26,7 @@ mod single_threaded_test {
     /// Build a handler that counts packets received on the Radio endpoint.
     fn make_radio_handler(counter: Arc<AtomicUsize>) -> EndpointHandler {
         EndpointHandler {
-            endpoint: DataEndpoint::Radio,
+            endpoint: DataEndpoint::GroundStation,
             handler: EndpointHandlerFn::Packet(Box::new(move |_pkt: &TelemetryPacket| {
                 counter.fetch_add(1, Ordering::SeqCst);
                 Ok(())
@@ -54,8 +54,13 @@ mod single_threaded_test {
 
     /// Build a packet with endpoints [SD_CARD, Radio], mirroring the C system.
     fn make_packet(ty: DataType, vals: &[f32], ts: u64) -> TelemetryPacket {
-        TelemetryPacket::from_f32_slice(ty, vals, &[DataEndpoint::SdCard, DataEndpoint::Radio], ts)
-            .unwrap()
+        TelemetryPacket::from_f32_slice(
+            ty,
+            vals,
+            &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
+            ts,
+        )
+        .unwrap()
     }
 
     /// Single-threaded stress test to profile router performance.
@@ -166,16 +171,19 @@ mod single_threaded_test {
                 let node = &mut nodes[2];
 
                 // battery
-                make_series(&mut batt_buf[..2], 3.7);
-                let pkt1 =
-                    make_packet(DataType::BatteryStatus, &batt_buf[..2], (i + 30_000) as u64);
+                make_series(&mut batt_buf[..1], 3.7);
+                let pkt1 = make_packet(
+                    DataType::BatteryVoltage,
+                    &batt_buf[..1],
+                    (i + 30_000) as u64,
+                );
                 node.router.send(&pkt1).unwrap();
 
                 // message as bytes
                 let pkt2 = TelemetryPacket::from_u8_slice(
                     DataType::TelemetryError,
                     msg.as_bytes(),
-                    &[DataEndpoint::SdCard, DataEndpoint::Radio],
+                    &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
                     (i + 40_000) as u64,
                 )
                 .unwrap();

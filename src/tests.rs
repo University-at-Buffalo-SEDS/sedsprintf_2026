@@ -1745,8 +1745,8 @@ mod tests_more {
         use crate::config::{DataEndpoint, DataType};
         use crate::{serialize, telemetry_packet::TelemetryPacket};
 
-        let eps_a = &[DataEndpoint::Radio, DataEndpoint::SdCard];
-        let eps_b = &[DataEndpoint::SdCard, DataEndpoint::Radio];
+        let eps_a = &[DataEndpoint::GroundStation, DataEndpoint::SdCard];
+        let eps_b = &[DataEndpoint::SdCard, DataEndpoint::GroundStation];
 
         let pkt_a =
             TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], eps_a, 0).unwrap();

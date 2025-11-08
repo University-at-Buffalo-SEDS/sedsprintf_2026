@@ -57,8 +57,13 @@ mod threaded_system_tests {
     /// Build a packet with endpoints [SD_CARD, Radio], mirroring the C
     /// system’s idea that every message goes to both "radio" and "SD".
     fn make_packet(ty: DataType, vals: &[f32], ts: u64) -> TelemetryPacket {
-        TelemetryPacket::from_f32_slice(ty, vals, &[DataEndpoint::SdCard, DataEndpoint::Radio], ts)
-            .unwrap()
+        TelemetryPacket::from_f32_slice(
+            ty,
+            vals,
+            &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
+            ts,
+        )
+        .unwrap()
     }
 
     /// Threaded system test that mirrors `main.c` but uses the Rust
