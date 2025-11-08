@@ -239,7 +239,7 @@ mod single_threaded_test {
         }
 
         // ---------- 5) Assertions (scaled by ITERS) ----------
-        let expected_total = (ITERS * PACKETS_PER_ITER) as usize;
+        let expected_total = ITERS * PACKETS_PER_ITER;
 
         let radio_board = &nodes[0];
         let flight_board = &nodes[1];
@@ -255,9 +255,9 @@ mod single_threaded_test {
             a_radio, b_sd, c_radio, c_sd
         );
 
-        assert_eq!(a_radio as usize, expected_total, "Radio Board hit count");
+        assert_eq!(a_radio, expected_total, "Radio Board hit count");
         assert_eq!(
-            b_sd as usize, expected_total,
+            b_sd, expected_total,
             "Flight Controller SD hit count"
         );
         assert_eq!(c_radio, 0, "Power Board must not have a radio handler");
