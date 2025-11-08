@@ -159,7 +159,7 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
             MessageMeta {
                 // System Status
                 element_count: MessageElementCount::Static(1), // Gyro data messages carry 3 float32 elements (Gyro x, y,z)
-                endpoints: &[DataEndpoint::SdCard],
+                endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
             }
         }
         DataType::BarometerData => {

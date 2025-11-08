@@ -86,8 +86,8 @@ static void * sender_B(void * arg)
     float buf[8];
     for (int i = 0; i < 5; ++i)
     {
-        make_series(buf, 6, 0.5f);
-        assert(node_log(B, SEDS_DT_IMU_DATA, buf, 6, sizeof(buf[0])) == SEDS_OK);
+        make_series(buf, 3, 0.5f);
+        assert(node_log(B, SEDS_DT_GYRO_DATA, buf, 3, sizeof(buf[0])) == SEDS_OK);
         usleep(gen_random_us());
 
         make_series(buf, 3, 101.3f);
@@ -103,8 +103,8 @@ static void * sender_C(void * arg)
     float buf[8];
     for (int i = 0; i < 5; ++i)
     {
-        make_series(buf, 2, 3.7f);
-        assert(node_log(C, SEDS_DT_BATTERY_STATUS, buf, 2, sizeof(buf[0])) == SEDS_OK);
+        make_series(buf, 1, 3.7f);
+        assert(node_log(C, SEDS_DT_BATTERY_VOLTAGE, buf, 1, sizeof(buf[0])) == SEDS_OK);
         usleep(gen_random_us());
 
         const char * msg = "hello world!";

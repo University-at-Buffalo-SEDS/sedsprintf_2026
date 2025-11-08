@@ -26,7 +26,7 @@ mod threaded_system_tests {
     /// (this plays the role of the "radio" handler in the C test).
     fn make_radio_handler(counter: Arc<AtomicUsize>) -> EndpointHandler {
         EndpointHandler {
-            endpoint: DataEndpoint::Radio,
+            endpoint: DataEndpoint::GroundStation,
             handler: EndpointHandlerFn::Packet(Box::new(move |_pkt: &TelemetryPacket| {
                 counter.fetch_add(1, Ordering::SeqCst);
                 Ok(())
@@ -59,7 +59,7 @@ mod threaded_system_tests {
         TelemetryPacket::from_f32_slice(
             ty,
             vals,
-            &[DataEndpoint::SdCard, DataEndpoint::Radio],
+            &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
             ts,
         )
             .unwrap()
@@ -234,8 +234,8 @@ mod threaded_system_tests {
         let sender_c = thread::spawn(move || {
             let mut buf = [0.0_f32; 8];
             for i in 0..5 {
-                make_series(&mut buf[..2], 3.7);
-                let pkt1 = make_packet(DataType::BatteryStatus, &buf[..2], i + 200);
+                make_series(&mut buf[..1], 3.7);
+                let pkt1 = make_packet(DataType::BatteryVoltage, &buf[..1], i + 200);
                 power_router.send(&pkt1).unwrap();
                 thread::sleep(Duration::from_millis(5));
 
@@ -244,7 +244,7 @@ mod threaded_system_tests {
                 let pkt2 = TelemetryPacket::from_u8_slice(
                     DataType::TelemetryError,
                     msg.as_bytes(),
-                    &[DataEndpoint::SdCard, DataEndpoint::Radio],
+                    &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
                     i + 300,
                 )
                     .unwrap();
