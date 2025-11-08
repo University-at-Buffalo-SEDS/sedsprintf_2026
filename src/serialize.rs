@@ -129,12 +129,21 @@ fn build_endpoint_bitmap(eps: &[DataEndpoint]) -> [u8; EP_BITMAP_BYTES] {
     bm
 }
 
-#[inline]
-fn expand_endpoint_bitmap(bm: &[u8]) -> Result<Vec<DataEndpoint>, TelemetryError> {
+fn expand_endpoint_bitmap(
+    bm: &[u8],
+) -> Result<([DataEndpoint; EP_BITMAP_BITS], usize), TelemetryError> {
     if bm.len() != EP_BITMAP_BYTES {
         return Err(TelemetryError::Deserialize("bad endpoint bitmap size"));
     }
-    let mut eps = Vec::new();
+
+    // Pick *any* valid endpoint as a filler/dummy.
+    // If you have a more natural “default” variant, use that instead.
+    let dummy = DataEndpoint::try_from_u32(0).expect("0 must be a valid DataEndpoint discriminant");
+
+    // Entire array is initialized to a valid value ⇒ completely safe.
+    let mut arr = [dummy; EP_BITMAP_BITS];
+
+    let mut len = 0usize;
     for idx in 0..EP_BITMAP_BITS {
         let byte = idx / 8;
         let bit = idx % 8;
@@ -142,10 +151,12 @@ fn expand_endpoint_bitmap(bm: &[u8]) -> Result<Vec<DataEndpoint>, TelemetryError
             let v = idx as u32;
             let ep = DataEndpoint::try_from_u32(v)
                 .ok_or(TelemetryError::Deserialize("bad endpoint bit set"))?;
-            eps.push(ep);
+            arr[len] = ep;
+            len += 1;
         }
     }
-    Ok(eps)
+
+    Ok((arr, len))
 }
 
 // =========================== Serialize ===========================
@@ -190,10 +201,11 @@ pub fn deserialize_packet(buf: &[u8]) -> Result<TelemetryPacket, TelemetryError>
     }
 
     let bm = r.read_bytes(EP_BITMAP_BYTES)?;
-    let eps = expand_endpoint_bitmap(bm)?;
-    if eps.len() != nep {
+    let (ep_buf, ep_len) = expand_endpoint_bitmap(bm)?;
+    if ep_len != nep {
         return Err(TelemetryError::Deserialize("endpoint count mismatch"));
     }
+    let eps: Arc<[DataEndpoint]> = Arc::from(&ep_buf[..ep_len]);
 
     let sender_bytes = r.read_bytes(slen)?;
     let sender_str = core::str::from_utf8(sender_bytes)
@@ -206,14 +218,13 @@ pub fn deserialize_packet(buf: &[u8]) -> Result<TelemetryPacket, TelemetryError>
     }
     let ty = DataType::try_from_u32(ty_u32).ok_or(TelemetryError::InvalidType)?;
 
-    Ok(TelemetryPacket {
+    TelemetryPacket::new(
         ty,
-        data_size: dsz,
-        sender: Arc::<str>::from(sender_str),
-        endpoints: Arc::<[_]>::from(eps),
-        timestamp: ts_v,
-        payload: Arc::<[u8]>::from(payload_slice),
-    })
+        &eps,
+        Arc::<str>::from(sender_str),
+        ts_v,
+        Arc::<[u8]>::from(payload_slice),
+    )
 }
 
 // =========================== Peek / Envelope ===========================
@@ -235,10 +246,11 @@ pub fn peek_envelope(buf: &[u8]) -> TelemetryResult<TelemetryEnvelope> {
     }
 
     let bm = r.read_bytes(EP_BITMAP_BYTES)?;
-    let eps = expand_endpoint_bitmap(bm)?;
-    if eps.len() != nep {
+    let (ep_buf, ep_len) = expand_endpoint_bitmap(bm)?;
+    if ep_len != nep {
         return Err(TelemetryError::Deserialize("endpoint count mismatch"));
     }
+    let eps: Arc<[DataEndpoint]> = Arc::from(&ep_buf[..ep_len]);
 
     let sender_bytes = r.read_bytes(slen)?;
     let sender_str = core::str::from_utf8(sender_bytes)

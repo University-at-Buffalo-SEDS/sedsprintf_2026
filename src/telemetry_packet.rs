@@ -1,4 +1,5 @@
 use crate::config::MAX_PRECISION_IN_STRINGS;
+use crate::small_payload::SmallPayload;
 pub(crate) use crate::{
     config::{DataEndpoint, DataType, DEVICE_IDENTIFIER}, data_type_size, get_data_type, get_info_type, message_meta,
     router::LeBytes,
@@ -20,7 +21,7 @@ pub struct TelemetryPacket {
     pub sender: Arc<str>,
     pub endpoints: Arc<[DataEndpoint]>,
     pub timestamp: u64,
-    pub payload: Arc<[u8]>,
+    pub payload: SmallPayload,
 }
 
 // ---------------------Helpers for to_string()---------------------
@@ -107,7 +108,7 @@ impl TelemetryPacket {
             sender: sender.into(),
             endpoints: Arc::<[DataEndpoint]>::from(endpoints),
             timestamp,
-            payload,
+            payload: SmallPayload::new(&payload),
         })
     }
 
@@ -136,40 +137,27 @@ impl TelemetryPacket {
         endpoints: &[DataEndpoint],
         timestamp: u64,
     ) -> TelemetryResult<Self> {
-        let meta = message_meta(ty);
-        let need = values.len() * data_type_size(MessageDataType::Float32);
+        let need = values.len() * 4;
 
-        match meta.element_count {
-            // Static: exact byte count must match
-            MessageElementCount::Static(exact) => {
-                if need != (exact * data_type_size(MessageDataType::Float32)) {
-                    return Err(TelemetryError::SizeMismatch {
-                        expected: exact,
-                        got: need,
-                    });
-                }
-            }
-            // Dynamic: just ensure it's a multiple of element width (4 for f32)
-            MessageElementCount::Dynamic => {
-                if need % data_type_size(MessageDataType::Float32) != 0 {
-                    return Err(TelemetryError::SizeMismatch {
-                        expected: 4,
-                        got: need,
-                    });
-                }
+        // Optional pre-check (can be dropped if you’re happy to let `new()` complain)
+        let meta = message_meta(ty);
+        if let MessageElementCount::Static(exact) = meta.element_count {
+            if need != exact * data_type_size(MessageDataType::Float32) {
+                return Err(TelemetryError::SizeMismatch {
+                    expected: exact,
+                    got: need,
+                });
             }
         }
 
-        // Build LE bytes
         let mut bytes = Vec::with_capacity(need);
-        unsafe { bytes.set_len(need) }; // we fill every byte below
+        unsafe { bytes.set_len(need) };
         for (i, v) in values.iter().copied().enumerate() {
             let b = v.to_le_bytes();
             let off = i * 4;
             bytes[off..off + 4].copy_from_slice(&b);
         }
 
-        // Let `new()` run the final validation (incl. any dynamic rules)
         Self::new(
             ty,
             endpoints,
