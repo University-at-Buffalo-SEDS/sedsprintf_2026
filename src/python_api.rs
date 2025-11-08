@@ -1,4 +1,26 @@
-// src/py_api.rs
+//! Python bindings for the SEDS telemetry router.
+//!
+//! Exposes a small, opinionated API to Python via `pyo3`:
+//!
+//! - `Packet`
+//!   - Immutable view of a `TelemetryPacket`
+//!   - Header fields + payload access
+//!   - Serialization to bytes
+//!
+//! - `Router`
+//!   - Logging (bytes, f32, generic typed)
+//!   - RX/TX queue processing (with optional timeouts)
+//!   - Python callbacks for TX, packet handlers, and serialized handlers
+//!
+//! - Top-level helpers
+//!   - `deserialize_packet_py(data)` → `Packet`
+//!   - `peek_header_py(data)` → dict with header fields
+//!   - `make_packet(...)` → `Packet`
+//!
+//! - Dynamic enums
+//!   - `DataType`, `DataEndpoint`, `ElemKind`
+//!
+//! The Python module name is `sedsprintf_rs`.
 
 use alloc::{boxed::Box, string::String, sync::Arc as AArc, vec::Vec};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
@@ -17,24 +39,31 @@ use crate::{
     MAX_VALUE_DATA_TYPE,
 };
 
+// ============================================================================
+//  Shared helpers / constants
+// ============================================================================
 
-// ------------------ helpers ------------------
+/// Element-kind tags for typed logging (mirrors C FFI).
 const EK_UNSIGNED: u32 = 0;
 const EK_SIGNED: u32 = 1;
 const EK_FLOAT: u32 = 2;
 
+/// Map `TelemetryError` → `PyErr` with a consistent prefix.
 fn py_err_from(e: TelemetryError) -> PyErr {
     PyRuntimeError::new_err(format!("Telemetry error: {e:?}"))
 }
 
+/// Convert Python-side `int` → `DataType`, with range/validity checks.
 fn dtype_from_u32(x: u32) -> TelemetryResult<DataType> {
     DataType::try_from_u32(x).ok_or(TelemetryError::InvalidType)
 }
 
+/// Convert Python-side `int` → `DataEndpoint`, with range/validity checks.
 fn endpoint_from_u32(x: u32) -> TelemetryResult<DataEndpoint> {
     DataEndpoint::try_from_u32(x).ok_or(TelemetryError::Deserialize("bad endpoint"))
 }
 
+/// Return the fixed payload size in bytes for a type, or `None` if dynamic.
 fn required_payload_size_for(ty: DataType) -> Option<usize> {
     match message_meta(ty).element_count {
         MessageElementCount::Static(_) => Some(get_needed_message_size(ty)),
@@ -43,7 +72,7 @@ fn required_payload_size_for(ty: DataType) -> Option<usize> {
 }
 
 /// Reinterpret a byte buffer as a Vec<T> using unaligned little-endian reads,
-/// writing into `out` without realloc churn. Panic-safe w.r.t. set_len.
+/// writing into `out` without realloc churn. Panic-safe w.r.t. `set_len`.
 fn vectorize_data<T: LeBytes + Copy>(
     base: *const u8,
     count: usize,
@@ -51,9 +80,11 @@ fn vectorize_data<T: LeBytes + Copy>(
     out: &mut Vec<T>,
 ) -> Result<(), ()> {
     use core::{mem::size_of, ptr};
+
     if elem_size != size_of::<T>() || base.is_null() || count == 0 {
         return Err(());
     }
+
     out.reserve_exact(count);
     unsafe {
         let start_len = out.len();
@@ -67,8 +98,16 @@ fn vectorize_data<T: LeBytes + Copy>(
     Ok(())
 }
 
-// ------------------ Packet ------------------
+// ============================================================================
+//  Packet (PyPacket)
+// ============================================================================
 
+/// Python-visible wrapper around `TelemetryPacket`.
+///
+/// Constructed indirectly via:
+/// - `deserialize_packet_py`
+/// - `make_packet`
+/// - callbacks (router handlers)
 #[pyclass(name = "Packet")]
 pub struct PyPacket {
     pub(crate) inner: TelemetryPacket,
@@ -76,49 +115,72 @@ pub struct PyPacket {
 
 #[pymethods]
 impl PyPacket {
+    /// DataType as an integer (see `DataType` IntEnum).
     #[getter]
     fn ty(&self) -> u32 {
         self.inner.ty as u32
     }
+
+    /// Declared data size for the packet payload, in bytes.
     #[getter]
     fn data_size(&self) -> usize {
         self.inner.data_size
     }
+
+    /// Sender identifier as a UTF-8 string.
     #[getter]
     fn sender(&self) -> String {
         self.inner.sender.to_string()
     }
+
+    /// Endpoints as integer IDs (see `DataEndpoint` IntEnum).
     #[getter]
     fn endpoints(&self) -> Vec<u32> {
         self.inner.endpoints.iter().map(|e| *e as u32).collect()
     }
+
+    /// Packet timestamp in milliseconds (source-defined semantics).
     #[getter]
     fn timestamp_ms(&self) -> u64 {
         self.inner.timestamp
     }
+
+    /// Raw payload bytes.
     #[getter]
     fn payload<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
         PyBytes::new(py, &self.inner.payload)
     }
 
+    /// Human-readable header string (no payload).
     fn header_string(&self) -> String {
         self.inner.header_string()
     }
+
+    /// Full human-readable representation (header + payload summary).
     fn __str__(&self) -> String {
         self.inner.to_string()
     }
+
+    /// Wire size in bytes when serialized.
     fn wire_size(&self) -> usize {
         packet_wire_size(&self.inner)
     }
 
+    /// Serialize to wire format bytes.
     fn serialize<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
         let bytes = serialize_packet(&self.inner);
         Ok(PyBytes::new(py, &bytes))
     }
 }
 
-// ------------------ Clock ------------------
+// ============================================================================
+//  Clock (PyClock)
+// ============================================================================
 
+/// Clock implementation that delegates to an optional Python callback.
+///
+/// The callback should be a zero-arg function returning an `int`
+/// representing milliseconds.
 struct PyClock {
     cb: Option<Py<PyAny>>,
 }
@@ -136,8 +198,15 @@ impl Clock for PyClock {
     }
 }
 
-// ------------------ Router ------------------
+// ============================================================================
+//  Router (PyRouter)
+// ============================================================================
 
+/// Python-visible router wrapper.
+///
+/// The underlying `Router` is protected by a `Mutex` for host-side
+/// concurrency. Python callbacks for TX, packet handlers, and
+/// serialized handlers are kept alive in this object.
 #[pyclass(name = "Router")]
 pub struct PyRouter {
     // Host-side concurrency: protect the Router with a Mutex and share via Arc.
@@ -149,6 +218,18 @@ pub struct PyRouter {
 
 #[pymethods]
 impl PyRouter {
+    /// Create a new router.
+    ///
+    /// Parameters
+    /// ----------
+    /// tx : callable | None
+    ///     Called as `tx(bytes: bytes)` for serialized packets.
+    /// now_ms : callable | None
+    ///     Zero-arg callback returning an integer timestamp in ms.
+    /// handlers : list[tuple[int, callable | None, callable | None]] | None
+    ///     Each tuple: `(endpoint_id, packet_handler, serialized_handler)`.
+    ///     - `packet_handler(pkt: Packet)` is called with a `Packet`.
+    ///     - `serialized_handler(bytes: bytes)` is called with raw bytes.
     #[new]
     #[pyo3(signature = (tx=None, now_ms=None, handlers=None))]
     fn new(
@@ -161,6 +242,7 @@ impl PyRouter {
         let now_keep = now_ms.as_ref().map(|p| p.clone_ref(py));
         let tx_for_closure = tx_keep.as_ref().map(|p| p.clone_ref(py));
 
+        // Build TX closure
         let transmit = if let Some(cb) = tx_for_closure {
             Some(move |bytes: &[u8]| -> TelemetryResult<()> {
                 Python::attach(|py| {
@@ -182,24 +264,28 @@ impl PyRouter {
         let mut keep_pkt = Vec::new();
         let mut keep_ser = Vec::new();
 
+        // Build endpoint handlers from Python list/tuples.
         if let Some(hs) = handlers {
-            let list = hs
-                .cast::<PyList>()
-                .map_err(|_| PyValueError::new_err("handlers must be list of tuples"))?;
+            let list = hs.cast::<PyList>().map_err(|_| {
+                PyValueError::new_err("handlers must be list of (endpoint, pkt_cb, ser_cb) tuples")
+            })?;
             for item in list.iter() {
                 let tup = item
                     .cast::<PyTuple>()
-                    .map_err(|_| PyValueError::new_err("handler must be tuple"))?;
+                    .map_err(|_| PyValueError::new_err("handler must be a 3-tuple"))?;
                 if tup.len() != 3 {
                     return Err(PyValueError::new_err("tuple arity must be 3"));
                 }
+
                 let ep_u32: u32 = tup.get_item(0)?.extract()?;
                 let endpoint = endpoint_from_u32(ep_u32).map_err(py_err_from)?;
 
+                // Packet handler
                 if !tup.get_item(1)?.is_none() {
                     let cb: Py<PyAny> = tup.get_item(1)?.extract()?;
                     let cb_for_closure = cb.clone_ref(py);
                     keep_pkt.push(cb);
+
                     let eh = EndpointHandler {
                         endpoint,
                         handler: EndpointHandlerFn::Packet(Box::new(move |pkt| {
@@ -220,10 +306,12 @@ impl PyRouter {
                     handlers_vec.push(eh);
                 }
 
+                // Serialized handler
                 if !tup.get_item(2)?.is_none() {
                     let cb: Py<PyAny> = tup.get_item(2)?.extract()?;
                     let cb_for_closure = cb.clone_ref(py);
                     keep_ser.push(cb);
+
                     let eh = EndpointHandler {
                         endpoint,
                         handler: EndpointHandlerFn::Serialized(Box::new(move |bytes| {
@@ -258,10 +346,22 @@ impl PyRouter {
         })
     }
 
-    /// Log raw bytes for a given DataType.
+    // ------------------------------------------------------------------------
+    //  Logging
+    // ------------------------------------------------------------------------
+
+    /// Log raw bytes for a given `DataType`.
     ///
     /// Static-sized payloads are padded/truncated to the exact required length.
     /// Dynamic payloads are passed through verbatim.
+    ///
+    /// Parameters
+    /// ----------
+    /// ty : int
+    ///     DataType value.
+    /// data : bytes | bytearray | memoryview | any buffer-like
+    /// timestamp_ms : int | None
+    /// queue : bool
     #[pyo3(signature = (ty, data, timestamp_ms=None, queue=false))]
     fn log_bytes(
         &self,
@@ -300,7 +400,10 @@ impl PyRouter {
         r.map_err(py_err_from)
     }
 
-    /// Log f32 array quickly.
+    /// Log an array of `float32` values.
+    ///
+    /// Static-sized payloads are interpreted as an array of `f32` and
+    /// padded/truncated as needed.
     #[pyo3(signature = (ty, values, timestamp_ms=None, queue=false))]
     fn log_f32(
         &self,
@@ -345,9 +448,18 @@ impl PyRouter {
 
     /// Generic typed logger (C-parity).
     ///
-    /// - `data` can be any Python object exposing the buffer protocol (bytes/bytearray/memoryview/NumPy) or a str.
-    /// - `elem_size` must be 1, 2, 4, or 8.
-    /// - `elem_kind`: 0=unsigned, 1=signed, 2=float (parity with C).
+    /// Parameters
+    /// ----------
+    /// ty : int
+    ///     DataType value.
+    /// data : bytes | bytearray | memoryview | NumPy array | str | buffer-like
+    ///     Any object exposing the buffer protocol (or a Python `str`).
+    /// elem_size : int
+    ///     Element size in bytes (1, 2, 4, or 8).
+    /// elem_kind : ElemKind
+    ///     0=UNSIGNED, 1=SIGNED, 2=FLOAT (see `ElemKind` IntEnum).
+    /// timestamp_ms : int | None
+    /// queue : bool
     #[pyo3(signature = (ty, data, elem_size, elem_kind, timestamp_ms=None, queue=false))]
     fn log(
         &self,
@@ -387,6 +499,7 @@ impl PyRouter {
             }
         };
 
+        // Apply static-size schema, if any.
         if let Some(required) = required_payload_size_for(ty) {
             if bytes.len() < required {
                 bytes.resize(required, 0);
@@ -467,6 +580,11 @@ impl PyRouter {
         }
     }
 
+    // ------------------------------------------------------------------------
+    //  RX / TX queue plumbing
+    // ------------------------------------------------------------------------
+
+    /// Feed serialized packet bytes into the router RX path.
     fn receive_serialized(&self, _py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResult<()> {
         let bytes: &[u8] = data.extract()?;
         let rtr = self
@@ -476,22 +594,25 @@ impl PyRouter {
         rtr.receive_serialized(bytes).map_err(py_err_from)
     }
 
+    /// Process the router's send/TX queue until empty.
     fn process_send_queue(&self) -> PyResult<()> {
         let rtr = self
             .inner
             .lock()
             .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
-        rtr.process_send_queue().map_err(py_err_from)
+        rtr.process_tx_queue().map_err(py_err_from)
     }
 
+    /// Process the router's received/RX queue until empty.
     fn process_received_queue(&self) -> PyResult<()> {
         let rtr = self
             .inner
             .lock()
             .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
-        rtr.process_received_queue().map_err(py_err_from)
+        rtr.process_rx_queue().map_err(py_err_from)
     }
 
+    /// Process both RX and TX queues until empty.
     fn process_all_queues(&self) -> PyResult<()> {
         let rtr = self
             .inner
@@ -500,25 +621,33 @@ impl PyRouter {
         rtr.process_all_queues().map_err(py_err_from)
     }
 
+    /// Clear the RX queue (discard any pending received packets).
     fn clear_rx_queue(&self) {
         if let Ok(r) = self.inner.lock() {
             r.clear_rx_queue();
         }
     }
 
+    /// Clear the TX queue (discard any pending transmissions).
     fn clear_tx_queue(&self) {
         if let Ok(r) = self.inner.lock() {
             r.clear_tx_queue();
         }
     }
 
+    /// Clear both RX and TX queues.
     fn clear_queues(&self) {
         if let Ok(r) = self.inner.lock() {
             r.clear_queues();
         }
     }
 
-    /// Time-budgeted variants
+    // ------------------------------------------------------------------------
+    //  Time-budgeted variants
+    // ------------------------------------------------------------------------
+
+    /// Process the TX queue, stopping after `timeout_ms` milliseconds
+    /// or when the queue becomes empty.
     fn process_tx_queue_with_timeout(&self, timeout_ms: u32) -> PyResult<()> {
         let rtr = self
             .inner
@@ -527,6 +656,9 @@ impl PyRouter {
         rtr.process_tx_queue_with_timeout(timeout_ms)
             .map_err(py_err_from)
     }
+
+    /// Process the RX queue, stopping after `timeout_ms` milliseconds
+    /// or when the queue becomes empty.
     fn process_rx_queue_with_timeout(&self, timeout_ms: u32) -> PyResult<()> {
         let rtr = self
             .inner
@@ -535,6 +667,9 @@ impl PyRouter {
         rtr.process_rx_queue_with_timeout(timeout_ms)
             .map_err(py_err_from)
     }
+
+    /// Process both RX and TX queues, stopping after `timeout_ms` milliseconds
+    /// or when both queues are empty.
     fn process_all_queues_with_timeout(&self, timeout_ms: u32) -> PyResult<()> {
         let rtr = self
             .inner
@@ -545,8 +680,13 @@ impl PyRouter {
     }
 }
 
-// ------------------ Top-level helpers ------------------
+// ============================================================================
+//  Top-level helper functions
+// ============================================================================
 
+/// Deserialize raw packet bytes into a `Packet` instance.
+///
+/// Raises a `RuntimeError` if deserialization or validation fails.
 #[pyfunction]
 pub fn deserialize_packet_py(py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let bytes: &[u8] = data.extract()?;
@@ -557,6 +697,13 @@ pub fn deserialize_packet_py(py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResul
     Ok(Py::new(py, PyPacket { inner: pkt })?.into_any())
 }
 
+/// Peek only the header fields of a serialized packet.
+///
+/// Returns a dict with:
+/// - "ty"
+/// - "sender"
+/// - "endpoints"
+/// - "timestamp_ms"
 #[pyfunction]
 pub fn peek_header_py(py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let bytes: &[u8] = data.extract()?;
@@ -576,6 +723,10 @@ pub fn peek_header_py(py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResult<Py<Py
     Ok(out.unbind().into_any())
 }
 
+/// Construct a `Packet` from explicit fields.
+///
+/// Static-sized payloads will be padded/truncated to the exact required length.
+/// Dynamic payloads will be passed through verbatim.
 #[pyfunction]
 #[pyo3(signature = (ty, sender, endpoints, timestamp_ms, payload))]
 pub fn make_packet(
@@ -594,7 +745,7 @@ pub fn make_packet(
         .map(|e| endpoint_from_u32(e).map_err(py_err_from))
         .collect::<Result<_, _>>()?;
 
-    // Extract payload from Python
+    // Extract payload from Python (buffer protocol)
     let mut buf: Vec<u8> = payload.extract()?;
 
     // Static-sized: enforce exact length; Dynamic: pass-through
@@ -621,6 +772,13 @@ pub fn make_packet(
     Ok(Py::new(py, PyPacket { inner: pkt })?.into_any())
 }
 
+// ============================================================================
+//  Module init: classes, functions, dynamic enums
+// ============================================================================
+
+/// Python module entry point.
+///
+/// The module name is `sedsprintf_rs` on the Python side.
 #[pymodule]
 pub fn sedsprintf_rs(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // === Classes ===

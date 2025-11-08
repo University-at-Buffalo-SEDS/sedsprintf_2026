@@ -147,7 +147,7 @@ SedsResult dispatch_tx_queue(void)
 {
     if (!g_router.r) { if (init_telemetry_router() != SEDS_OK) return SEDS_ERR; }
 
-    const SedsResult res = seds_router_process_send_queue(g_router.r);
+    const SedsResult res = seds_router_process_tx_queue(g_router.r);
 
     return res;
 }
@@ -156,7 +156,7 @@ SedsResult process_rx_queue(void)
 {
     if (!g_router.r) { if (init_telemetry_router() != SEDS_OK) return SEDS_ERR; }
 
-    const SedsResult res = seds_router_process_received_queue(g_router.r);
+    const SedsResult res = seds_router_process_rx_queue(g_router.r);
 
     return res;
 }
