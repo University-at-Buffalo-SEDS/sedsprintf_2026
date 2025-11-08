@@ -29,6 +29,11 @@ path = "tests/rust-system-test/rust-system-test.rs"
 required-features = ["std"]
 
 [[test]]
+name = "rust_single_threaded_test"
+path = "tests/rust-system-test/single_threaded_test.rs"
+required-features = ["std"]
+
+[[test]]
 name = "c-system-test"
 path = "tests/c-system-test/c-system-test.rs"
 required-features = ["std"]

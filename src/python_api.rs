@@ -587,14 +587,14 @@ pub fn make_packet(
     payload: &Bound<'_, PyAny>,
 ) -> PyResult<Py<PyAny>> {
     let ty = dtype_from_u32(ty).map_err(py_err_from)?;
-    let eps = AArc::<[DataEndpoint]>::from(
-        endpoints
-            .into_iter()
-            .map(|e| endpoint_from_u32(e).map_err(py_err_from))
-            .collect::<Result<Vec<_>, _>>()?,
-    );
 
-    // Extract payload
+    // Convert endpoint IDs → DataEndpoint
+    let eps: Vec<DataEndpoint> = endpoints
+        .into_iter()
+        .map(|e| endpoint_from_u32(e).map_err(py_err_from))
+        .collect::<Result<_, _>>()?;
+
+    // Extract payload from Python
     let mut buf: Vec<u8> = payload.extract()?;
 
     // Static-sized: enforce exact length; Dynamic: pass-through
@@ -606,15 +606,18 @@ pub fn make_packet(
         }
     }
 
-    let pkt = TelemetryPacket {
+    let payload_arc = AArc::<[u8]>::from(buf);
+
+    // Go through TelemetryPacket::new for validation + consistency
+    let pkt = TelemetryPacket::new(
         ty,
-        data_size: buf.len(),
-        sender: AArc::<str>::from(sender),
-        endpoints: eps,
-        timestamp: timestamp_ms,
-        payload: AArc::<[u8]>::from(buf),
-    };
-    pkt.validate().map_err(py_err_from)?;
+        &eps,
+        AArc::<str>::from(sender),
+        timestamp_ms,
+        payload_arc,
+    )
+    .map_err(py_err_from)?;
+
     Ok(Py::new(py, PyPacket { inner: pkt })?.into_any())
 }
 

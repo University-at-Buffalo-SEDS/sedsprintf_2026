@@ -341,17 +341,24 @@ unsafe fn copy_telemetry_packet_raw(
         // same object → OK no-op
         return Ok(());
     }
+
     let s = unsafe { &*src };
     let d = unsafe { &mut *dest };
-    // Deep copy
-    *d = TelemetryPacket {
-        ty: s.ty,
-        data_size: s.data_size,
-        sender: s.sender.clone(),
-        endpoints: std::sync::Arc::from((&*s.endpoints).to_vec().into_boxed_slice()),
-        timestamp: s.timestamp,
-        payload: std::sync::Arc::from((&*s.payload).to_vec().into_boxed_slice()),
-    };
+
+    // Deep copy: new endpoints slice and new payload buffer
+    let endpoints_vec: Vec<DataEndpoint> = s.endpoints.iter().copied().collect();
+    let payload_arc: Arc<[u8]> = Arc::from(&*s.payload);
+
+    let new_pkt = TelemetryPacket::new(
+        s.ty,
+        &endpoints_vec,
+        s.sender.clone(),
+        s.timestamp,
+        payload_arc,
+    )
+    .map_err(|_| "packet validation failed")?;
+
+    *d = new_pkt;
     Ok(())
 }
 
@@ -381,14 +388,15 @@ fn helpers_copy_telemetry_packet() {
     assert!(st.is_ok());
 
     // (3) distinct objects → deep copy and equal fields
-    let mut dest = TelemetryPacket {
-        ty: src.ty, // seed; will be overwritten
-        data_size: 0,
-        sender: std::sync::Arc::clone(&src.sender), // <-- CLONE, not move
-        endpoints: std::sync::Arc::clone(&src.endpoints),
-        timestamp: 0,
-        payload: std::sync::Arc::clone(&src.payload),
-    };
+    let mut dest = TelemetryPacket::new(
+        src.ty,
+        &src.endpoints,     // &[DataEndpoint]
+        src.sender.clone(), // Arc<str>
+        src.timestamp,
+        Arc::from(&*src.payload), // deep copy payload
+    )
+    .expect("src packet should be valid");
+
     let st = unsafe { copy_telemetry_packet_raw(&mut dest as *mut _, &src as *const _) };
     assert!(st.is_ok());
 
@@ -410,17 +418,16 @@ mod handler_failure_tests {
     use crate::router::EndpointHandler;
     use crate::router::{BoardConfig, Router};
     use crate::telemetry_packet::DataType;
+    use crate::tests::timeout_tests::StepClock;
     use crate::{TelemetryError, MAX_VALUE_DATA_TYPE};
     use alloc::{sync::Arc, vec, vec::Vec};
     use core::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
-    use crate::tests::timeout_tests::StepClock;
 
 
     fn ep(idx: u32) -> DataEndpoint {
         DataEndpoint::try_from_u32(idx).expect("Need endpoint present in enum for tests")
     }
-
 
     fn pick_any_type() -> DataType {
         for i in 0..=MAX_VALUE_DATA_TYPE {
@@ -431,11 +438,9 @@ mod handler_failure_tests {
         panic!("No usable DataType found for tests");
     }
 
-
     fn payload_for(ty: DataType) -> Vec<u8> {
         vec![0u8; test_payload_len_for(ty)]
     }
-
 
     #[test]
     fn local_handler_failure_sends_error_packet_to_other_locals() {
@@ -484,7 +489,7 @@ mod handler_failure_tests {
             ts,
             Arc::<[u8]>::from(payload_for(ty)),
         )
-            .unwrap();
+        .unwrap();
 
         handle_errors(router.send(&pkt));
 
@@ -505,7 +510,6 @@ mod handler_failure_tests {
         let got = last_payload.lock().unwrap().clone();
         assert_eq!(got, expected, "mismatch in TelemetryError payload text");
     }
-
 
     #[test]
     fn tx_failure_sends_error_packet_to_all_local_endpoints() {
@@ -546,7 +550,7 @@ mod handler_failure_tests {
             ts,
             Arc::<[u8]>::from(payload_for(ty)),
         )
-            .unwrap();
+        .unwrap();
 
         handle_errors(router.send(&pkt));
 
@@ -1723,6 +1727,88 @@ mod tests_more {
                 }
             }
         }
+    }
+    #[test]
+    fn deserialize_packet_rejects_overflowed_varint() {
+        use crate::serialize;
+        // Construct a fake wire buffer with NEP=0, then an invalid varint (11 continuation bytes)
+        let mut wire = vec![0x00u8]; // NEP = 0
+        wire.extend([0xFFu8; 11]); // invalid ULEB128 (too long for u64)
+        let err = serialize::deserialize_packet(&wire).unwrap_err();
+        match err {
+            TelemetryError::Deserialize(msg) if msg.eq("uleb128 too long") => {}
+            other => panic!("expected Deserialize(uleb128 too long...) error, got {other:?}"),
+        }
+    }
+    #[test]
+    fn serialize_packet_is_order_invariant_for_endpoints() {
+        use crate::config::{DataEndpoint, DataType};
+        use crate::{serialize, telemetry_packet::TelemetryPacket};
+
+        let eps_a = &[DataEndpoint::Radio, DataEndpoint::SdCard];
+        let eps_b = &[DataEndpoint::SdCard, DataEndpoint::Radio];
+
+        let pkt_a =
+            TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], eps_a, 0).unwrap();
+        let pkt_b =
+            TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], eps_b, 0).unwrap();
+
+        let wa = serialize::serialize_packet(&pkt_a);
+        let wb = serialize::serialize_packet(&pkt_b);
+
+        assert_eq!(wa, wb, "endpoint order must not affect serialized bytes");
+    }
+    #[test]
+    fn process_all_queues_timeout_zero_handles_large_queues() {
+        use crate::config::{DataEndpoint, DataType};
+        use crate::router::{BoardConfig, Router};
+        use crate::telemetry_packet::TelemetryPacket;
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let tx_count = Arc::new(AtomicUsize::new(0));
+        let txc = tx_count.clone();
+        let tx = move |_b: &[u8]| -> TelemetryResult<()> {
+            txc.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        };
+
+        let rx_count = Arc::new(AtomicUsize::new(0));
+        let rxc = rx_count.clone();
+        let handler = EndpointHandler {
+            endpoint: DataEndpoint::SdCard,
+            handler: EndpointHandlerFn::Packet(Box::new(move |_pkt| {
+                rxc.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            })),
+        };
+
+        let router = Router::new(Some(tx), BoardConfig::new(vec![handler]), Box::new(|| 0u64));
+
+        // Enqueue many TX and RX items
+        const N: usize = 200;
+        for _ in 0..N {
+            router
+                .log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0])
+                .unwrap();
+            let pkt = TelemetryPacket::from_f32_slice(
+                DataType::GpsData,
+                &[9.0, 8.0, 7.0],
+                &[DataEndpoint::SdCard],
+                0,
+            )
+            .unwrap();
+            router.rx_packet_to_queue(pkt).unwrap();
+        }
+
+        router.process_all_queues_with_timeout(0).unwrap();
+
+        assert_eq!(tx_count.load(Ordering::SeqCst), N, "all TX should flush");
+        assert_eq!(
+            rx_count.load(Ordering::SeqCst),
+            2 * N,
+            "each TX local delivery + RX packet should invoke handler"
+        );
     }
 }
 

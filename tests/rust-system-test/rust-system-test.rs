@@ -11,6 +11,7 @@ mod threaded_system_tests {
     use std::thread;
     use std::time::{Duration, Instant};
 
+
     fn zero_clock() -> Box<dyn Clock + Send + Sync> {
         Box::new(|| 0u64)
     }
@@ -56,12 +57,7 @@ mod threaded_system_tests {
     /// Build a packet with endpoints [SD_CARD, Radio], mirroring the C
     /// system’s idea that every message goes to both "radio" and "SD".
     fn make_packet(ty: DataType, vals: &[f32], ts: u64) -> TelemetryPacket {
-        TelemetryPacket::from_f32_slice(
-            ty,
-            vals,
-            &[DataEndpoint::SdCard, DataEndpoint::Radio],
-            ts,
-        )
+        TelemetryPacket::from_f32_slice(ty, vals, &[DataEndpoint::SdCard, DataEndpoint::Radio], ts)
             .unwrap()
     }
 
@@ -247,7 +243,7 @@ mod threaded_system_tests {
                     &[DataEndpoint::SdCard, DataEndpoint::Radio],
                     i + 300,
                 )
-                    .unwrap();
+                .unwrap();
                 // Send via router so it goes through TX path and bus.
                 power_router.send(&pkt2).unwrap();
                 thread::sleep(Duration::from_millis(5));
