@@ -38,7 +38,13 @@ def main():
     import_and_run_update()
 
     # 3. Pop stash after update
-    run(["git", "stash", "pop"])
+    try:
+        run(["git", "stash", "pop"])
+    except subprocess.CalledProcessError as e:
+        if e.returncode == 1:
+            pass
+        else:
+            raise
 
 
 if __name__ == "__main__":
