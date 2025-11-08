@@ -81,12 +81,12 @@ mod embedded_alloc {
 
 // ---------- Portable core logic ----------
 mod c_api;
-mod config;
+pub mod config;
 mod lock;
 mod macros;
-mod router;
-mod serialize;
-mod telemetry_packet;
+pub mod router;
+pub mod serialize;
+pub mod telemetry_packet;
 
 // ----------------------Not User Editable----------------------
 #[allow(dead_code)]

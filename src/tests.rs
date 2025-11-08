@@ -414,11 +414,13 @@ mod handler_failure_tests {
     use alloc::{sync::Arc, vec, vec::Vec};
     use core::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
+    use crate::tests::timeout_tests::StepClock;
 
 
     fn ep(idx: u32) -> DataEndpoint {
         DataEndpoint::try_from_u32(idx).expect("Need endpoint present in enum for tests")
     }
+
 
     fn pick_any_type() -> DataType {
         for i in 0..=MAX_VALUE_DATA_TYPE {
@@ -429,9 +431,11 @@ mod handler_failure_tests {
         panic!("No usable DataType found for tests");
     }
 
+
     fn payload_for(ty: DataType) -> Vec<u8> {
         vec![0u8; test_payload_len_for(ty)]
     }
+
 
     #[test]
     fn local_handler_failure_sends_error_packet_to_other_locals() {
@@ -480,7 +484,7 @@ mod handler_failure_tests {
             ts,
             Arc::<[u8]>::from(payload_for(ty)),
         )
-        .unwrap();
+            .unwrap();
 
         handle_errors(router.send(&pkt));
 
@@ -501,6 +505,7 @@ mod handler_failure_tests {
         let got = last_payload.lock().unwrap().clone();
         assert_eq!(got, expected, "mismatch in TelemetryError payload text");
     }
+
 
     #[test]
     fn tx_failure_sends_error_packet_to_all_local_endpoints() {
@@ -541,7 +546,7 @@ mod handler_failure_tests {
             ts,
             Arc::<[u8]>::from(payload_for(ty)),
         )
-        .unwrap();
+            .unwrap();
 
         handle_errors(router.send(&pkt));
 
@@ -559,57 +564,6 @@ mod handler_failure_tests {
         );
         let got = last_payload.lock().unwrap().clone();
         assert_eq!(got, expected, "mismatch in TelemetryError payload text");
-    }
-
-
-    use crate::tests::timeout_tests::StepClock;
-    use std::path::PathBuf;
-    use std::process::Command;
-
-
-    #[test]
-    fn run_c_system_test() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("c-system-test");
-
-        let status = Command::new("cmake")
-            .arg("-S")
-            .arg(".")
-            .arg("-B")
-            .arg("build")
-            .arg("-DCMAKE_BUILD_TYPE=Debug")
-            .current_dir(&root)
-            .status()
-            .expect("Failed to config cmake build");
-        assert!(status.success(), "CMake config failed");
-
-        // Build the C project
-        let status = Command::new("cmake")
-            .arg("--build")
-            .arg("build")
-            .current_dir(&root)
-            .status()
-            .expect("Failed to invoke cmake build");
-        assert!(status.success(), "CMake build failed");
-
-        // Path to the built executable
-        let exe = root.join("build").join("c_system_test");
-
-        // Run the test executable
-        let output = Command::new(&exe)
-            .current_dir(&root)
-            .output()
-            .expect("Failed to run c_system_test");
-
-        // Print stdout/stderr for debugging
-        eprintln!("stdout:\n{}", String::from_utf8_lossy(&output.stdout));
-        eprintln!("stderr:\n{}", String::from_utf8_lossy(&output.stderr));
-
-        // Assert exit success
-        assert!(
-            output.status.success(),
-            "C system test failed with exit code {:?}",
-            output.status.code()
-        );
     }
 }
 

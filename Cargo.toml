@@ -23,6 +23,16 @@ python = ["std", "pyo3/extension-module"]
 [package.metadata.maturin]
 bindings = "pyo3"
 
+[[test]]
+name = "rust-system-test"
+path = "tests/rust-system-test/rust-system-test.rs"
+required-features = ["std"]
+
+[[test]]
+name = "c-system-test"
+path = "tests/c-system-test/c-system-test.rs"
+required-features = ["std"]
+
 [dependencies]
 strum_macros = { version = "0.27.2", default-features = false }
 strum = { version = "0.27.2", default-features = false }

@@ -18,7 +18,7 @@ pub enum RxItem {
 const MAX_NUMBER_OF_RETRIES: usize = 3;
 
 // Make handlers usable across tasks
-pub(crate) enum EndpointHandlerFn {
+pub enum EndpointHandlerFn {
     Packet(Box<dyn Fn(&TelemetryPacket) -> TelemetryResult<()> + Send + Sync>),
     Serialized(Box<dyn Fn(&[u8]) -> TelemetryResult<()> + Send + Sync>),
 }
