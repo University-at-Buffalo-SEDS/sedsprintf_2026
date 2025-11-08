@@ -15,6 +15,10 @@ pub const MAX_STATIC_STRING_LENGTH: usize = 1024;
 pub const MAX_STATIC_HEX_LENGTH: usize = 1024;
 // Maximum precision for floating point numbers when converted to strings
 pub const MAX_PRECISION_IN_STRINGS: usize = 8; // 12 is expensive; tune as needed
+// Max size of payload to be stored on the stack before switching to heap allocation
+pub const MAX_STACK_PAYLOAD_SIZE: usize = 256;
+//max Number of retries of a handler before giving up
+pub const MAX_HANDLER_RETRIES: usize = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, EnumCount)]
 #[repr(u32)]

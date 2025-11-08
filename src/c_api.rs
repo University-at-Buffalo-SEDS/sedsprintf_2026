@@ -186,16 +186,18 @@ unsafe impl Sync for TxCtx {}
 // ============================ view_to_packet (NO LEAKS) ============================
 
 fn view_to_packet(view: &SedsPacketView) -> Result<TelemetryPacket, ()> {
+    // Map type
     let ty = DataType::try_from_u32(view.ty).ok_or(())?;
 
+    // Endpoints (u32 → DataEndpoint)
     let eps_u32 = unsafe { slice::from_raw_parts(view.endpoints, view.num_endpoints) };
     let mut eps = Vec::with_capacity(eps_u32.len());
     for &e in eps_u32 {
-        eps.push(DataEndpoint::try_from_u32(e).ok_or(())?);
+        let ep = DataEndpoint::try_from_u32(e).ok_or(())?;
+        eps.push(ep);
     }
-    let endpoints = Arc::<[DataEndpoint]>::from(eps);
 
-    // OWNED sender (Arc<str>) — no leak
+    // Sender as Arc<str>
     let sender_owned: Arc<str> = if view.sender.is_null() || view.sender_len == 0 {
         Arc::<str>::from("")
     } else {
@@ -204,16 +206,17 @@ fn view_to_packet(view: &SedsPacketView) -> Result<TelemetryPacket, ()> {
         Arc::<str>::from(s)
     };
 
+    // Payload bytes
     let bytes = unsafe { slice::from_raw_parts(view.payload, view.payload_len) };
 
-    Ok(TelemetryPacket {
-        ty,
-        data_size: view.data_size,
-        sender: sender_owned,
-        endpoints,
-        timestamp: view.timestamp,
-        payload: Arc::<[u8]>::from(bytes), // (already optimal)
-    })
+    // Optional: keep the C view honest
+    if view.data_size != view.payload_len {
+        return Err(());
+    }
+
+    let payload = Arc::<[u8]>::from(bytes);
+
+    TelemetryPacket::new(ty, &eps, sender_owned, view.timestamp, payload).map_err(|_| ())
 }
 
 // ============================ small C buffer helper ============================
