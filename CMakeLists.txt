@@ -40,11 +40,12 @@ set(RS_ARGS_STR "${RS_ARGS_STR} ${RS_ARG_REL}")
 # --- configure-time bootstrap args (NO generator expressions) ---
 set(RS_ARGS_BOOTSTRAP "")
 if (SEDSPRINTF_STM_BUILD)
-    set(RS_ARGS_BOOTSTRAP "stm-build")
+    list(APPEND RS_ARGS_BOOTSTRAP "stm-build")
 endif ()
+
 if (CMAKE_BUILD_TYPE STREQUAL "Release")
     # for single-config generators like Makefile/Ninja
-    set(RS_ARGS_BOOTSTRAP "${RS_ARGS_BOOTSTRAP} release")
+    list(APPEND RS_ARGS_BOOTSTRAP "release")
 endif ()
 
 # Ensure the include directory exists (header may be generated later)
