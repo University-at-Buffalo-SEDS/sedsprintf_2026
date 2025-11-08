@@ -143,11 +143,11 @@ SedsResult seds_router_receive_serialized(SedsRouter * r, const uint8_t * bytes,
 
 SedsResult seds_router_receive(SedsRouter * r, const SedsPacketView * view);
 
-SedsResult seds_router_process_send_queue(SedsRouter * r);
+SedsResult seds_router_process_tx_queue(SedsRouter * r);
 
-SedsResult seds_router_queue_tx_message(SedsRouter * r, const SedsPacketView * view);
+SedsResult seds_router_transmit_message_queue(SedsRouter * r, const SedsPacketView * view);
 
-SedsResult seds_router_process_received_queue(SedsRouter * r);
+SedsResult seds_router_process_rx_queue(SedsRouter * r);
 
 SedsResult seds_router_rx_serialized_packet_to_queue(SedsRouter * r, const uint8_t * bytes, size_t len);
 

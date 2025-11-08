@@ -1,38 +1,74 @@
-// src/config.rs
+//! Telemetry configuration and schema description.
+//!
+//! This module defines:
+//! - Device-/build-time constants (identifiers, limits, retries).
+//! - The `DataEndpoint` and `DataType` enums.
+//! - Functions that describe per-type schema metadata:
+//!   - [`get_message_data_type`]
+//!   - [`get_message_info_types`]
+//!   - [`get_message_meta`]
+
 #[allow(unused_imports)]
 use crate::{MessageDataType, MessageElementCount, MessageMeta, MessageType, STRING_VALUE_ELEMENT};
 use strum_macros::EnumCount;
 
+// -----------------------------------------------------------------------------
+// User-editable configuration
+// -----------------------------------------------------------------------------
 
-//----------------------User Editable----------------------\\
-// Device identifier string
-// This string is used to identify the platform in the telemetry data.
-// It should be unique to the platform.
+/// Device identifier string.
+///
+/// This string is attached to every telemetry packet and is used to identify
+/// the platform in downstream tools. It should be **unique per platform**.
 pub const DEVICE_IDENTIFIER: &str = "TEST_PLATFORM";
-// Maximum lengths for static strings in bytes
+
+/// Maximum length, in bytes, of any **static** UTF-8 string payload.
+///
+/// Dynamic string messages may be longer, but many tests and error paths
+/// assume this bound when generating placeholder data.
 pub const MAX_STATIC_STRING_LENGTH: usize = 1024;
-// Maximum lengths for static hex data in bytes
+
+/// Maximum length, in bytes, of any **static** hex payload.
 pub const MAX_STATIC_HEX_LENGTH: usize = 1024;
-// Maximum precision for floating point numbers when converted to strings
+
+/// Maximum number of fractional digits when converting floating-point values
+/// to strings (e.g., for human-readable error payloads).
+///
+/// Higher values increase both payload size and formatting cost.
 pub const MAX_PRECISION_IN_STRINGS: usize = 8; // 12 is expensive; tune as needed
-// Max size of payload to be stored on the stack before switching to heap allocation
+
+/// Maximum payload size (in bytes) that is allowed to be allocated on the
+/// stack before the implementation switches to heap allocation.
 pub const MAX_STACK_PAYLOAD_SIZE: usize = 256;
-//max Number of retries of a handler before giving up
+
+/// Maximum number of times a handler is retried before giving up and
+/// surfacing a [`TelemetryError::HandlerError`](crate::TelemetryError::HandlerError).
 pub const MAX_HANDLER_RETRIES: usize = 3;
 
+// -----------------------------------------------------------------------------
+// Endpoints
+// -----------------------------------------------------------------------------
+
+/// The different destinations where telemetry packets can be sent.
+///
+/// When adding new endpoints:
+/// - Keep the discriminants sequential from `0` with no gaps (if you assign
+///   explicit values).
+/// - Update any tests that iterate over `0..=MAX_VALUE_DATA_ENDPOINT`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, EnumCount)]
 #[repr(u32)]
-/// The different data endpoints where telemetry data can be sent.
-/// When adding new endpoints make sure they increase sequentially from 0 without gaps if you are specifying custom values.
-/// Each endpoint corresponds to a specific destination for telemetry data.
 pub enum DataEndpoint {
+    /// On-board storage (e.g. SD card / flash).
     SdCard,
     GroundStation,
 }
 
 impl DataEndpoint {
-    /// Get the string representation of the DataEndpoint
-    /// This must be set for each enum variant
+    /// Return a stable string representation used in logs and in
+    /// `TelemetryPacket::to_string()` output.
+    ///
+    /// This should remain stable over time for compatibility with tests and
+    /// external tooling.
     pub fn as_str(self) -> &'static str {
         match self {
             DataEndpoint::SdCard => "SD_CARD",
@@ -41,13 +77,25 @@ impl DataEndpoint {
     }
 }
 
+// -----------------------------------------------------------------------------
+// Data types
+// -----------------------------------------------------------------------------
+
+/// Logical telemetry message kinds.
+///
+/// Each variant corresponds to:
+/// - a concrete payload element type (via [`get_message_data_type`]),
+/// - a message severity/role (via [`get_message_info_types`]),
+/// - schema metadata (via [`get_message_meta`]).
+///
+/// When adding new variants:
+/// - Keep discriminants sequential from `0` with no gaps (if assigning
+///   explicit values).
+/// - Update all mapping functions and any tests that iterate over the enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, EnumCount)]
 #[repr(u32)]
-/// The different types of data that can be logged.
-/// Each data type corresponds to a specific message format.
-/// MESSAGE_INFO_TYPES, MESSAGE_ELEMENTS, and MESSAGE_TYPES accordingly.
-/// These must increase sequentially from 0 without gaps if you are specifying custom values.
 pub enum DataType {
+    /// Encoded telemetry error text (string payload).
     TelemetryError,
     GenericError,
     GpsData,
@@ -57,12 +105,15 @@ pub enum DataType {
     BatteryVoltage,
     BatteryCurrent,
     BarometerData,
+    /// Generic string message payload.
     MessageData,
 }
 
 impl DataType {
-    /// Get the string representation of the DataType
-    /// This must be set for each enum variant
+    /// Return a stable string representation used in logs, headers, and in
+    /// `TelemetryPacket::to_string()` formatting.
+    ///
+    /// This must be kept up to date when adding new variants.
     pub fn as_str(&self) -> &'static str {
         match self {
             DataType::TelemetryError => "TELEMETRY_ERROR",
@@ -79,8 +130,19 @@ impl DataType {
     }
 }
 
-/// The data type of each messages payload, the order of this array must match the order of DataType enum
-/// The available options are String, Float32, UInt8, UInt16, UInt32, UInt64, UInt128, Int8, Int16, Int32, Int64, Int128
+// -----------------------------------------------------------------------------
+// Schema helpers: element type, message kind, and metadata
+// -----------------------------------------------------------------------------
+
+/// Return the element type for the payload of a given [`DataType`].
+///
+/// The order and mapping must stay in lock-step with [`DataType`], and with the
+/// schema used by `TelemetryPacket` validation. Available element types are:
+///
+/// - `String`
+/// - `Float32`
+/// - `UInt8`, `UInt16`, `UInt32`, `UInt64`, `UInt128`
+/// - `Int8`, `Int16`, `Int32`, `Int64`, `Int128`
 pub const fn get_message_data_type(data_type: DataType) -> MessageDataType {
     match data_type {
         DataType::TelemetryError => MessageDataType::String,
@@ -96,8 +158,10 @@ pub const fn get_message_data_type(data_type: DataType) -> MessageDataType {
     }
 }
 
-/// The type of message info for each data type.
-/// The two available options are MessageType::Error and MessageType::Info and this affects how the message is logged and displayed
+/// Return the logical message type (severity/category) for a given [`DataType`].
+///
+/// This affects how messages may be surfaced or filtered in the higher-level
+/// API (e.g. errors vs informational telemetry).
 pub const fn get_message_info_types(message_type: DataType) -> MessageType {
     match message_type {
         DataType::TelemetryError => MessageType::Error,
@@ -113,8 +177,15 @@ pub const fn get_message_info_types(message_type: DataType) -> MessageType {
     }
 }
 
-/// All message types with their metadata. The size is either Static with the needed number of elements, or Dynamic for variable-length payloads.
-/// Each message type also specifies the endpoints to which it should be sent.
+/// Return the full schema metadata for a given [`DataType`].
+///
+/// Each variant specifies:
+/// - `element_count`: either `Static(n)` (fixed number of elements) or
+///   `Dynamic` (variable-length payload—size validated at runtime).
+/// - `endpoints`: default destination list for packets of that type.
+///
+/// The element count is interpreted relative to the element type returned by
+/// [`get_message_data_type`].
 pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
     match data_type {
         DataType::TelemetryError => {
@@ -189,4 +260,3 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
         }
     }
 }
-// -------------------------------------------------------------

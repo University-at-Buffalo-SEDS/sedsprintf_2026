@@ -7,6 +7,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 
+/// Compute a valid test payload length for a given [`DataType`], respecting the
+/// schema’s static/dynamic element counts and element widths.
+///
+/// This is used throughout tests to avoid hard-coding per-type sizes.
 fn test_payload_len_for(ty: DataType) -> usize {
     match message_meta(ty).element_count {
         crate::MessageElementCount::Static(_) => get_needed_message_size(ty),
@@ -36,6 +40,11 @@ fn test_payload_len_for(ty: DataType) -> usize {
         }
     }
 }
+
+/// Build a simple handler that increments an [`AtomicUsize`] each time it sees
+/// a packet on the `SD_CARD` endpoint.
+///
+/// Used by various queue/timeout and concurrency tests.
 fn get_handler(rx_count_c: Arc<AtomicUsize>) -> EndpointHandler {
     EndpointHandler {
         endpoint: DataEndpoint::SdCard,
@@ -46,6 +55,10 @@ fn get_handler(rx_count_c: Arc<AtomicUsize>) -> EndpointHandler {
     }
 }
 
+/// Build a handler for `SD_CARD` that:
+/// - asserts `GPS_DATA` element width is `4` (f32),
+/// - decodes the payload as little-endian `f32`,
+/// - stores `(DataType, Vec<f32>)` into the shared `Mutex`.
 fn get_sd_card_handler(sd_seen_c: Arc<Mutex<Option<(DataType, Vec<f32>)>>>) -> EndpointHandler {
     EndpointHandler {
         endpoint: DataEndpoint::SdCard,
@@ -68,21 +81,27 @@ fn get_sd_card_handler(sd_seen_c: Arc<Mutex<Option<(DataType, Vec<f32>)>>>) -> E
     }
 }
 
+/// Helper that asserts `result` is a [`TelemetryError::HandlerError`].
+///
+/// Used in tests that expect error propagation from handlers/tx.
 fn handle_errors(result: Result<(), TelemetryError>) {
     match result {
         Ok(_) => panic!("Expected router.send to return Err due to handler failure"),
-        Err(e) => {
-            match e {
-                TelemetryError::HandlerError(_) => {} // expected
-                _ => panic!("Expected TelemetryError::HandlerError, got {:?}", e),
-            }
-        }
+        Err(e) => match e {
+            TelemetryError::HandlerError(_) => {} // expected
+            _ => panic!("Expected TelemetryError::HandlerError, got {:?}", e),
+        },
     }
 }
 
-// ---------- Unit tests (run anywhere with `cargo test`) ----------
+// -----------------------------------------------------------------------------
+// Basic packet + router smoke tests
+// -----------------------------------------------------------------------------
 #[cfg(test)]
 mod tests {
+    //! Basic smoke tests for packet roundtrip, string formatting, and simple
+    //! router send/receive paths.
+
     use crate::tests::get_sd_card_handler;
     use crate::tests::timeout_tests::StepClock;
     use crate::{
@@ -96,6 +115,8 @@ mod tests {
     use std::vec::Vec;
 
 
+    /// Serialize/deserialize a GPS packet and ensure all fields and payload
+    /// bytes round-trip exactly.
     #[test]
     fn serialize_roundtrip_gps() {
         // GPS: 3 * f32
@@ -121,6 +142,7 @@ mod tests {
         assert_eq!(&*rpkt.payload, &*pkt.payload);
     }
 
+    /// Verify `header_string()` format for a simple GPS packet.
     #[test]
     fn header_string_matches_expectation() {
         let endpoints = &[DataEndpoint::SdCard, DataEndpoint::GroundStation];
@@ -134,6 +156,7 @@ mod tests {
         );
     }
 
+    /// Ensure `to_string()` includes the float values and the general header.
     #[test]
     fn packet_to_string_formats_floats() {
         let endpoints = &[DataEndpoint::SdCard, DataEndpoint::GroundStation];
@@ -150,6 +173,8 @@ mod tests {
         assert!(text.contains("3.25"));
     }
 
+    /// End-to-end test: `Router::log` → TX callback (serialize/deserialize) →
+    /// local handler decoding f32 payload.
     #[test]
     fn router_sends_and_receives() {
         use crate::router::{BoardConfig, Router};
@@ -207,11 +232,15 @@ mod tests {
         assert_eq!(seen_ty, DataType::GpsData);
         assert_eq!(seen_vals, data);
     }
-    /// A small “bus” that records transmitted frames.
+
+    /// A small “bus” that records transmitted frames for TX/RX queue tests.
     struct TestBus {
         frames: Arc<Mutex<Vec<Vec<u8>>>>,
     }
+
     impl TestBus {
+        /// Create a `TestBus` and a TX function that pushes any transmitted bytes
+        /// into an internal `Vec<Vec<u8>>`.
         fn new() -> (
             Self,
             impl Fn(&[u8]) -> TelemetryResult<()> + Send + Sync + 'static,
@@ -227,6 +256,8 @@ mod tests {
         }
     }
 
+    /// TX router enqueues packets, flushes to a `TestBus`, and an RX router
+    /// consumes them from its receive queue and delivers to a local handler.
     #[test]
     fn queued_roundtrip_between_two_routers() {
         // --- Set up a TX router that only sends (no local endpoints) ---
@@ -256,7 +287,7 @@ mod tests {
         tx_router.log_queue(DataType::GpsData, &data).unwrap();
 
         // --- 2) Flush TX queue -> pushes wire frames into TestBus ---
-        tx_router.process_send_queue().unwrap();
+        tx_router.process_tx_queue().unwrap();
 
         // --- 3) Deliver captured frames into RX router's *received queue* ---
         let frames = bus.frames.lock().unwrap().clone();
@@ -266,7 +297,7 @@ mod tests {
         }
 
         // --- 4) Drain RX queue -> invokes local handlers ---
-        rx_router.process_received_queue().unwrap();
+        rx_router.process_rx_queue().unwrap();
 
         // --- Assertions: handler got the right data ---
         let (ty, vals) = seen.lock().unwrap().clone().expect("no packet delivered");
@@ -274,6 +305,8 @@ mod tests {
         assert_eq!(vals, data);
     }
 
+    /// Demonstrate “self-delivery” by feeding serialized frames from a router’s
+    /// own TX back into its RX queue.
     #[test]
     fn queued_self_delivery_via_receive_queue() {
         // If you expect a node to handle its *own* packets, you must explicitly
@@ -293,7 +326,7 @@ mod tests {
         let data = [10.0_f32, 10.25, 10.5];
         router.log_queue(DataType::GpsData, &data).unwrap();
         // Flush -> frame appears on the "bus"
-        router.process_send_queue().unwrap();
+        router.process_tx_queue().unwrap();
         let frames = bus.frames.lock().unwrap().clone();
         assert_eq!(frames.len(), 3);
 
@@ -302,16 +335,18 @@ mod tests {
 
         // Now draining the received queue should dispatch to any matching local endpoints.
         // (This router has no endpoints; this test just proves the queue path is exercised.)
-        router.process_received_queue().unwrap();
+        router.process_rx_queue().unwrap();
     }
 }
 
 // ---- Helpers (test-local) ----
 
-/// Build a deterministic packet with a raw 3-byte payload [0x13, 0x21, 0x34],
-/// endpoints [SD_CARD, GROUND_STATION], and timestamp 1123581321.
-/// Note: we intentionally do not call `validate()` because GPS_DATA usually
-/// expects f32s (size 12). We only exercise formatting/copying.
+/// Build a deterministic packet with a raw 3-byte payload [0x13, 0x21, 0x34]
+/// encoded as three `f32` values, endpoints [SD_CARD, RADIO], and timestamp
+/// `1123581321`.
+///
+/// We intentionally do not call `validate()` because `GPS_DATA` usually expects
+/// 3×`f32` (12 bytes) and this is for formatting/copying tests only.
 fn fake_telemetry_packet_bytes() -> TelemetryPacket {
     use crate::config::{DataEndpoint, DataType};
 
@@ -321,15 +356,10 @@ fn fake_telemetry_packet_bytes() -> TelemetryPacket {
     TelemetryPacket::from_f32_slice(DataType::GpsData, &payload, &endpoints, 1123581321).unwrap()
 }
 
-/// Produce the exact string the C++ test checks:
-/// "Type: GPS_DATA, Size: 3, Endpoints: [SD_CARD, GROUND_STATION], Timestamp: 1123581321, Payload (hex): 0x13 0x21 0x34"
-///
-/// We keep this as a test-local helper (no crate changes).
-
 /// Copy helper that mirrors the C++ behavior, but uses raw pointers so we can
 /// test the “same pointer” case without violating Rust’s borrow rules.
 ///
-/// Safety: Caller must ensure `dest` and `src` are valid for reads/writes as used.
+/// Safety: Caller must ensure `dest` and `src` are valid for reads/writes.
 unsafe fn copy_telemetry_packet_raw(
     dest: *mut TelemetryPacket,
     src: *const TelemetryPacket,
@@ -364,7 +394,8 @@ unsafe fn copy_telemetry_packet_raw(
 
 // ---- Converted tests ----
 
-/// Port of C++: TEST(Helpers, PacketHexToString)
+/// Port of C++: TEST(Helpers, PacketHexToString).
+/// Ensures `to_hex_string()` matches exactly the expected legacy format.
 #[test]
 fn helpers_packet_hex_to_string() {
     let pkt = fake_telemetry_packet_bytes();
@@ -373,7 +404,8 @@ fn helpers_packet_hex_to_string() {
     assert_eq!(got, expect);
 }
 
-/// Port of C++: TEST(Helpers, CopyTelemetryPacket)
+/// Port of C++: TEST(Helpers, CopyTelemetryPacket).
+/// Exercises `copy_telemetry_packet_raw` for null, self-copy, and deep copy.
 #[test]
 fn helpers_copy_telemetry_packet() {
     // (1) null dest → error
@@ -411,8 +443,14 @@ fn helpers_copy_telemetry_packet() {
     assert_eq!(&*dest.payload, &*src.payload);
 }
 
+// -----------------------------------------------------------------------------
+// Error propagation & handler-failure tests
+// -----------------------------------------------------------------------------
 #[cfg(test)]
 mod handler_failure_tests {
+    //! Tests around handler failures and how they generate/route
+    //! `TELEMETRY_ERROR` packets.
+
     use super::*;
     use crate::config::DEVICE_IDENTIFIER;
     use crate::router::EndpointHandler;
@@ -425,10 +463,12 @@ mod handler_failure_tests {
     use std::sync::Mutex;
 
 
+    /// Helper: convert an index into a valid [`DataEndpoint`] for tests.
     fn ep(idx: u32) -> DataEndpoint {
         DataEndpoint::try_from_u32(idx).expect("Need endpoint present in enum for tests")
     }
 
+    /// Pick any valid [`DataType`] from the enum range for generic tests.
     fn pick_any_type() -> DataType {
         for i in 0..=MAX_VALUE_DATA_TYPE {
             if let Some(ty) = DataType::try_from_u32(i) {
@@ -438,10 +478,15 @@ mod handler_failure_tests {
         panic!("No usable DataType found for tests");
     }
 
+    /// Build a zeroed payload of valid length for the given type using
+    /// [`test_payload_len_for`].
     fn payload_for(ty: DataType) -> Vec<u8> {
         vec![0u8; test_payload_len_for(ty)]
     }
 
+    /// If a local handler fails, ensure:
+    /// - other local endpoints get the original packet,
+    /// - and a `TELEMETRY_ERROR` packet with the right text is sent.
     #[test]
     fn local_handler_failure_sends_error_packet_to_other_locals() {
         let ty = pick_any_type();
@@ -491,7 +536,7 @@ mod handler_failure_tests {
         )
         .unwrap();
 
-        handle_errors(router.send(&pkt));
+        handle_errors(router.transmit_message(&pkt));
 
         // The capturing handler should have seen the original packet and then the error packet.
         assert!(
@@ -511,6 +556,10 @@ mod handler_failure_tests {
         assert_eq!(got, expected, "mismatch in TelemetryError payload text");
     }
 
+    /// If the TX callback fails, ensure:
+    /// - a `TELEMETRY_ERROR` is generated,
+    /// - it is delivered to all local endpoints,
+    /// - and the error text matches expectation.
     #[test]
     fn tx_failure_sends_error_packet_to_all_local_endpoints() {
         let ty = pick_any_type();
@@ -552,7 +601,7 @@ mod handler_failure_tests {
         )
         .unwrap();
 
-        handle_errors(router.send(&pkt));
+        handle_errors(router.transmit_message(&pkt));
 
         assert!(
             saw_error.load(Ordering::SeqCst) >= 1,
@@ -571,8 +620,14 @@ mod handler_failure_tests {
     }
 }
 
+// -----------------------------------------------------------------------------
+// Timeout and queue-draining behavior tests
+// -----------------------------------------------------------------------------
 #[cfg(test)]
 mod timeout_tests {
+    //! Tests for `process_*_queue*` functions and timeout semantics,
+    //! including u64 wraparound handling.
+
     use crate::config::DataEndpoint;
     use crate::tests::get_handler;
     use crate::{
@@ -582,12 +637,15 @@ mod timeout_tests {
     use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     use std::sync::Arc;
 
-
     // ---------------- Mock clock ----------------
+
+    /// A deterministic clock that steps forward by `step` ms on each `now_ms()`
+    /// call, starting from `start`. Used to test timeout budget behavior.
     pub(crate) struct StepClock {
         t: AtomicU64,
         step: u64,
     }
+
     impl StepClock {
         pub fn new_box(start: u64, step: u64) -> Box<dyn Clock + Send + Sync> {
             Box::new(StepClock::new(start, step))
@@ -602,6 +660,7 @@ mod timeout_tests {
             }
         }
     }
+
     impl Clock for StepClock {
         #[inline]
         fn now_ms(&self) -> u64 {
@@ -611,7 +670,9 @@ mod timeout_tests {
     }
 
     // ---------------- Helpers ----------------
-    // RX packet with *only local* endpoint to avoid auto-forward TX during receive.
+
+    /// Create a GPS packet with only a local endpoint (`SD_CARD`), avoiding any
+    /// implicit re-TX during receive.
     fn mk_rx_only_local(vals: &[f32], ts: u64) -> TelemetryPacket {
         TelemetryPacket::from_f32_slice(
             DataType::GpsData,
@@ -622,7 +683,7 @@ mod timeout_tests {
         .unwrap()
     }
 
-    // Counter for TX frames on the “bus”
+    /// Build a TX function that increments `counter` for each frame sent.
     fn tx_counter(
         counter: Arc<AtomicUsize>,
     ) -> impl Fn(&[u8]) -> TelemetryResult<()> + Send + Sync + 'static {
@@ -633,8 +694,8 @@ mod timeout_tests {
         }
     }
 
-    /// timeout == 0 must drain both queues fully (ignore time).
-    /// Expect local handler to see TX + RX items because TX also calls local handlers.
+    /// `timeout == 0` must drain both TX and RX queues fully, regardless of
+    /// clock, and local handlers see all packets.
     #[test]
     fn process_all_queues_timeout_zero_drains_fully() {
         let tx_count = Arc::new(AtomicUsize::new(0));
@@ -682,8 +743,8 @@ mod timeout_tests {
         );
     }
 
-    /// Non-zero timeout should limit work. Use timeout > step so one iteration occurs,
-    /// which (by impl) can process up to one TX and one RX.
+    /// With non-zero timeout and step = 10ms, timeout 5ms should allow exactly
+    /// one iteration (at most one TX and one RX).
     #[test]
     fn process_all_queues_respects_nonzero_timeout_budget_one_receive_one_send() {
         let tx_count = Arc::new(AtomicUsize::new(0));
@@ -736,6 +797,8 @@ mod timeout_tests {
         assert_eq!(rx_count.load(Ordering::SeqCst), 10); // 5 (TX locals) + 5 (RX)
     }
 
+    /// Similar to previous, but with step=5 and timeout=10 to allow up to two
+    /// iterations; expect one TX + one RX handler call.
     #[test]
     fn process_all_queues_respects_nonzero_timeout_budget_two_receive_one_send() {
         let tx_count = Arc::new(AtomicUsize::new(0));
@@ -765,7 +828,7 @@ mod timeout_tests {
             .unwrap();
         }
 
-        // Step is 10ms per call; timeout 5ms guarantees exactly one iteration
+        // Step is 5ms per call; timeout 10ms allows two iterations max
         r.process_all_queues_with_timeout(10).unwrap();
 
         // One iteration → at most one TX send
@@ -787,7 +850,9 @@ mod timeout_tests {
         assert_eq!(tx_count.load(Ordering::SeqCst), 5);
         assert_eq!(rx_count.load(Ordering::SeqCst), 10); // 5 (TX locals) + 5 (RX)
     }
-    /// Wraparound-safe: ensure we still only do one iteration worth of work.
+
+    /// Ensure timeout math remains correct near `u64::MAX`, i.e. when the clock
+    /// wraps around, and that we still do at most one iteration.
     #[test]
     fn process_all_queues_handles_u64_wraparound() {
         let tx_count = Arc::new(AtomicUsize::new(0));
@@ -806,8 +871,6 @@ mod timeout_tests {
         r.rx_packet_to_queue(mk_rx_only_local(&[4.0, 5.0, 6.0], 7))
             .unwrap();
 
-        // Start near wrap; step crosses the boundary
-
         // Small budget; with wrapping_sub this should allow one iteration then stop
         r.process_all_queues_with_timeout(1).unwrap();
 
@@ -822,6 +885,9 @@ mod timeout_tests {
     }
 }
 
+// -----------------------------------------------------------------------------
+// Extra coverage tests: error codes, header-only parsing, varints, bitmaps, etc.
+// -----------------------------------------------------------------------------
 #[cfg(test)]
 mod tests_extra {
 
@@ -847,13 +913,15 @@ mod tests_extra {
     use std::sync::Mutex;
 
 
-    // A tiny helper clock; we rely on the blanket impl<Fn() -> u64> for Clock.
+    /// A tiny helper clock; we rely on the blanket `impl<Fn() -> u64> Clock`.
     fn zero_clock() -> Box<dyn Clock + Send + Sync> {
         Box::new(|| 0u64)
     }
 
     // --------------------------- Error/Code parity ---------------------------
 
+    /// Validate that `TelemetryError` ↔ `TelemetryErrorCode` mapping is
+    /// complete and stable, including the string forms.
     #[test]
     fn error_enum_code_roundtrip_and_strings() {
         let samples = [
@@ -877,6 +945,8 @@ mod tests_extra {
 
     // --------------------------- Header-only parsing ---------------------------
 
+    /// Ensure header-only peek fails on truncated buffers (short read during
+    /// varint parsing).
     #[test]
     fn deserialize_header_only_short_buffer_fails() {
         // v2 header is varint-based. Force a definite short read in the first varint.
@@ -891,6 +961,8 @@ mod tests_extra {
         let err = serialize::peek_envelope(&truncated).unwrap_err();
         matches_deser_err(err);
     }
+
+    /// Ensure header size is a valid prefix of the serialized wire image.
     #[test]
     fn header_size_is_prefix_of_wire_image() {
         let pkt = TelemetryPacket::from_f32_slice(
@@ -906,10 +978,10 @@ mod tests_extra {
         assert!(hdr <= wire.len());
 
         // header must decode from the start (i.e., NEP + scalars exists)
-        // we can't fully verify here without re-parsing, but hdr must at least be > 0
         assert!(hdr > 0);
     }
 
+    /// Helper: assert an error is a `Deserialize` variant.
     fn matches_deser_err(e: TelemetryError) {
         match e {
             TelemetryError::Deserialize(_) => {}
@@ -917,6 +989,8 @@ mod tests_extra {
         }
     }
 
+    /// Ensure serialization is canonical: serialize → deserialize → serialize
+    /// produces identical bytes (ULEB128 canonical form).
     #[test]
     fn serializer_is_canonical_roundtrip() {
         use crate::config::{DataEndpoint, DataType};
@@ -940,6 +1014,8 @@ mod tests_extra {
         assert_eq!(&*wire1, &*wire2, "serializer must be canonical");
     }
 
+    /// Validate varint scalar growth: header and wire size should increase
+    /// when fields that are encoded as varints get larger.
     #[test]
     fn serializer_varint_scalars_grow_as_expected() {
         use crate::config::{DataEndpoint, DataType};
@@ -985,6 +1061,9 @@ mod tests_extra {
         // Size function must match exact output
         assert_eq!(serialize::packet_wire_size(&p3), w3.len());
     }
+
+    /// Stress test for endpoint bitpacking across many endpoints and repeated
+    /// copies, ensuring endpoints and payload round-trip.
     #[test]
     fn endpoints_bitpack_roundtrip_many_and_extremes() {
         use crate::{
@@ -1030,6 +1109,9 @@ mod tests_extra {
         assert_eq!(&*back.payload, &*pkt.payload);
         assert_eq!(serialize::packet_wire_size(&pkt), wire.len());
     }
+
+    /// For large sender/payload/timestamp, ensure `peek_envelope` and full
+    /// deserialization agree on header fields and payload.
     #[test]
     fn peek_envelope_matches_full_parse_on_large_values() {
         use crate::config::{DataEndpoint, DataType};
@@ -1063,6 +1145,8 @@ mod tests_extra {
         assert_eq!(&*full.payload, &*pkt.payload);
     }
 
+    /// Corrupt endpoint bits in the bitmap to encode an out-of-range value,
+    /// and ensure deserialization fails with an appropriate error.
     #[test]
     fn corrupt_endpoint_bits_yields_bad_endpoint_error() {
         use crate::{
@@ -1120,6 +1204,9 @@ mod tests_extra {
             other => panic!("expected bad endpoint deserialize error, got {other:?}"),
         }
     }
+
+    /// Sanity check that header size is between 0 and full packet size, and
+    /// that the computed wire size matches serialized length.
     #[test]
     fn header_size_is_prefix_and_less_than_total() {
         use crate::config::{DataEndpoint, DataType};
@@ -1137,13 +1224,13 @@ mod tests_extra {
         let hdr = serialize::header_size_bytes(&pkt);
 
         assert!(hdr > 0 && hdr < wire.len());
-        // Ensure header-only parse consumes exactly those bytes before endpoints.
-        // (Indirectly validated by successful full parse + size equality.)
         assert_eq!(serialize::packet_wire_size(&pkt), wire.len());
     }
 
     // --------------------------- UTF-8 trimming behavior ---------------------------
 
+    /// Ensure `data_as_utf8_ref` trims trailing NUL bytes and returns a `&str`
+    /// with just the meaningful content.
     #[test]
     fn data_as_utf8_ref_trims_trailing_nuls() {
         // Use a String-typed message kind. TelemetryError is used by the router with
@@ -1168,6 +1255,7 @@ mod tests_extra {
 
     // --------------------------- Queue clear semantics ---------------------------
 
+    /// After calling `clear_queues`, no pending TX/RX items should be processed.
     #[test]
     fn clear_queues_prevents_further_processing() {
         // Transmit "bus" that counts frames sent.
@@ -1208,7 +1296,7 @@ mod tests_extra {
         )
         .unwrap();
 
-        r.queue_tx_message(pkt_tx).unwrap();
+        r.transmit_message_queue(pkt_tx).unwrap();
         r.rx_packet_to_queue(pkt_rx).unwrap();
 
         // Clearing should drop both queues before any processing.
@@ -1229,6 +1317,8 @@ mod tests_extra {
 
     // --------------------------- Retry semantics (indirect) ---------------------------
 
+    /// Verify local handler retry count matches `MAX_NUMBER_OF_RETRYS` (assumed 3),
+    /// and that the final error is a `HandlerError`.
     #[test]
     fn local_handler_retry_attempts_are_three() {
         // This test assumes MAX_NUMBER_OF_RETRYS == 3 in router. If that constant changes,
@@ -1264,7 +1354,7 @@ mod tests_extra {
         .unwrap();
 
         // Sending should surface a HandlerError after all retries.
-        let res = r.send(&pkt);
+        let res = r.transmit_message(&pkt);
         match res {
             Err(TelemetryError::HandlerError(_)) => {}
             other => panic!("expected HandlerError after retries, got {other:?}"),
@@ -1279,6 +1369,8 @@ mod tests_extra {
 
     // --------------------------- from_u8_slice sanity ---------------------------
 
+    /// Ensure `TelemetryPacket::from_u8_slice` builds a valid GPS packet with
+    /// expected length and timestamp.
     #[test]
     fn from_u8_slice_builds_valid_packet() {
         let need = test_payload_len_for(DataType::GpsData);
@@ -1300,6 +1392,8 @@ mod tests_extra {
 
     // --------------------------- Header-only happy path smoke ---------------------------
 
+    /// Header-only peek (`peek_envelope`) should match full parse for a normal
+    /// encoded GPS packet.
     #[test]
     fn deserialize_header_only_then_full_parse_matches() {
         // Build a normal packet then compare header-only vs full.
@@ -1330,6 +1424,8 @@ mod tests_extra {
 
     // --------------------------- TX failure -> error to locals (smoke) ---------------------------
 
+    /// Smoke test: TX failure should emit a `TelemetryError` packet to local
+    /// endpoints (exact string validated by more specific tests).
     #[test]
     fn tx_failure_emits_error_to_local_endpoints() {
         // A transmitter that always fails.
@@ -1364,7 +1460,7 @@ mod tests_extra {
         )
         .unwrap();
 
-        let res = r.send(&pkt);
+        let res = r.transmit_message(&pkt);
         match res {
             Err(TelemetryError::HandlerError(_)) => {} // TX path wraps as HandlerError
             other => panic!("expected HandlerError from TX failure, got {other:?}"),
@@ -1379,10 +1475,13 @@ mod tests_extra {
     }
 }
 
+// -----------------------------------------------------------------------------
+// More tests: validation, enum bounds, router paths, payload helpers, etc.
+// -----------------------------------------------------------------------------
 #[cfg(test)]
 mod tests_more {
     //! Additional coverage tests for router, packet, and serialization logic.
-    //! These tests complement tests_extra.rs by covering boundary,
+    //! These tests complement `tests_extra` by covering boundary,
     //! error, and fast-path behaviors not previously exercised.
 
     #![cfg(test)]
@@ -1403,6 +1502,8 @@ mod tests_more {
     use std::sync::{Arc as StdArc, Mutex};
 
 
+    /// Clock that always returns 0 (via closure), used where wall-clock is
+    /// irrelevant and we only need a stable `Clock` impl.
     fn zero_clock() -> Box<dyn Clock + Send + Sync> {
         Box::new(|| 0u64)
     }
@@ -1411,6 +1512,8 @@ mod tests_more {
     // TelemetryPacket validation edge cases
     // ---------------------------------------------------------------------------
 
+    /// Compute a concrete length for test packets, respecting schema element
+    /// counts for static/dynamic payloads.
     fn concrete_len_for_test(ty: DataType) -> usize {
         match message_meta(ty).element_count {
             MessageElementCount::Static(_) => get_needed_message_size(ty),
@@ -1436,6 +1539,8 @@ mod tests_more {
         }
     }
 
+    /// Packet creation should reject empty endpoint lists and size mismatches
+    /// (for both static and dynamic payload kinds).
     #[test]
     fn packet_validate_rejects_empty_endpoints_and_size_mismatch() {
         let ty = DataType::GpsData;
@@ -1461,6 +1566,8 @@ mod tests_more {
     // Enum bounds + conversion validity
     // ---------------------------------------------------------------------------
 
+    /// Ensure `DataType`, `DataEndpoint`, and `TelemetryErrorCode` all reject
+    /// values outside their numeric ranges.
     #[test]
     fn enum_conversion_bounds_and_rejections() {
         let max_ty = MAX_VALUE_DATA_TYPE;
@@ -1483,6 +1590,7 @@ mod tests_more {
     // Serialization header math + ByteReader edge cases
     // ---------------------------------------------------------------------------
 
+    /// `packet_wire_size` must match the length of the serialized output.
     #[test]
     fn packet_wire_size_matches_serialized_len() {
         let endpoints = &[DataEndpoint::SdCard, DataEndpoint::GroundStation];
@@ -1498,6 +1606,8 @@ mod tests_more {
     // Router serialization/deserialization paths
     // ---------------------------------------------------------------------------
 
+    /// If only `Serialized` handlers exist, the router must not deserialize the
+    /// payload and just pass the raw bytes.
     #[test]
     fn serialized_only_handlers_do_not_deserialize() {
         let pkt = TelemetryPacket::from_f32_slice(
@@ -1529,6 +1639,9 @@ mod tests_more {
         assert_eq!(called.load(Ordering::SeqCst), 1);
     }
 
+    /// When mixing `Packet` and `Serialized` handlers, ensure:
+    /// - deserialization happens only once,
+    /// - each endpoint handler is invoked exactly once.
     #[test]
     fn packet_handlers_trigger_single_deserialize_and_fan_out() {
         let endpoints = &[DataEndpoint::SdCard, DataEndpoint::GroundStation];
@@ -1569,6 +1682,8 @@ mod tests_more {
         assert_eq!(serialized_called.load(Ordering::SeqCst), 1);
     }
 
+    /// If all addressed endpoints are local `Packet` handlers, router should
+    /// avoid serializing at all and never call TX.
     #[test]
     fn send_avoids_serialization_when_only_local_packet_handlers_exist() {
         let tx_called = StdArc::new(AtomicUsize::new(0));
@@ -1596,12 +1711,14 @@ mod tests_more {
             0,
         )
         .unwrap();
-        r.send(&pkt).unwrap();
+        r.transmit_message(&pkt).unwrap();
 
         assert_eq!(tx_called.load(Ordering::SeqCst), 0);
         assert_eq!(hits.load(Ordering::SeqCst), 1);
     }
 
+    /// `Router::receive` for a direct packet should invoke any matching local
+    /// packet handlers exactly once.
     #[test]
     fn receive_direct_packet_invokes_handlers() {
         let called = StdArc::new(AtomicUsize::new(0));
@@ -1635,6 +1752,8 @@ mod tests_more {
     // Error payload truncation & encode_slice_le extra types
     // ---------------------------------------------------------------------------
 
+    /// Ensure router’s internal TelemetryError payload is truncated to meta size
+    /// and doesn’t grow without bound.
     #[test]
     fn error_payload_is_truncated_to_meta_size() {
         let failing_tx = |_b: &[u8]| -> TelemetryResult<()> { Err(TelemetryError::Io("boom")) };
@@ -1663,13 +1782,14 @@ mod tests_more {
             1,
         )
         .unwrap();
-        let _ = r.send(&pkt);
+        let _ = r.transmit_message(&pkt);
 
         let s = captured.lock().unwrap().clone();
         assert!(!s.is_empty());
         assert!(s.len() < 8_192);
     }
 
+    /// Ensure `encode_slice_le` works correctly for both `u16` and `f64`.
     #[test]
     fn encode_slice_le_u16_and_f64() {
         let vals16 = [0x0102u16, 0xA1B2];
@@ -1689,6 +1809,8 @@ mod tests_more {
         assert_eq!(&*got, &exp);
     }
 
+    /// Ensure `test_payload_len_for` respects element widths and yields lengths
+    /// that are multiples of the correct width for all numeric/bool types.
     #[test]
     fn test_payload_len_for_respects_element_width() {
         use crate::tests::test_payload_len_for;
@@ -1728,6 +1850,9 @@ mod tests_more {
             }
         }
     }
+
+    /// Construct an invalid varint (11 continuation bytes), and ensure
+    /// `deserialize_packet` returns a `uleb128 too long` error.
     #[test]
     fn deserialize_packet_rejects_overflowed_varint() {
         use crate::serialize;
@@ -1740,6 +1865,8 @@ mod tests_more {
             other => panic!("expected Deserialize(uleb128 too long...) error, got {other:?}"),
         }
     }
+
+    /// Endpoint order in the `endpoints` slice must not affect serialized bytes.
     #[test]
     fn serialize_packet_is_order_invariant_for_endpoints() {
         use crate::config::{DataEndpoint, DataType};
@@ -1758,6 +1885,9 @@ mod tests_more {
 
         assert_eq!(wa, wb, "endpoint order must not affect serialized bytes");
     }
+
+    /// With a large number of TX and RX items, `process_all_queues_with_timeout(0)`
+    /// must flush all TX and deliver all packets to handlers.
     #[test]
     fn process_all_queues_timeout_zero_handles_large_queues() {
         use crate::config::{DataEndpoint, DataType};
@@ -1812,8 +1942,14 @@ mod tests_more {
     }
 }
 
+// -----------------------------------------------------------------------------
+// Concurrency tests
+// -----------------------------------------------------------------------------
 #[cfg(test)]
 mod concurrency_tests {
+    //! Concurrency-focused tests that exercise Router’s thread-safety
+    //! guarantees for logging, receiving, and processing.
+
     use crate::{
         config::{DataEndpoint, DataType},
         router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, Router},
@@ -1826,15 +1962,17 @@ mod concurrency_tests {
     use std::thread;
 
 
-    // Simple clock that always returns 0 (blanket impl<Fn() -> u64> for Clock).
+    /// Simple clock that always returns 0 (blanket impl<Fn() -> u64> for Clock).
     fn zero_clock() -> Box<dyn Clock + Send + Sync> {
         Box::new(|| 0u64)
     }
 
     // ------------------------------------------------------------------------
-    // Trait sanity: Router must be Send + Sync to be safely shared between
-    // threads. This is a compile-time check only.
+    // Trait sanity: Router must be Send + Sync
     // ------------------------------------------------------------------------
+
+    /// Compile-time check: `Router` must be `Send + Sync` to be safely shared
+    /// across threads.
     #[test]
     fn router_is_send_and_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
@@ -1842,12 +1980,11 @@ mod concurrency_tests {
     }
 
     // ------------------------------------------------------------------------
-    // Concurrent producers pushing into the RX queue.
-    //
-    // Multiple threads call rx_packet_to_queue(&self, ...) on the same Router.
-    // We then drain the RX queue once and assert the local handler was
-    // invoked exactly as many times as packets enqueued.
+    // Concurrent RX queue producers
     // ------------------------------------------------------------------------
+
+    /// Multiple producer threads call `rx_packet_to_queue` on the same Router;
+    /// a single drain must deliver all packets to the handler exactly once.
     #[test]
     fn concurrent_rx_queue_is_thread_safe() {
         const THREADS: usize = 4;
@@ -1897,7 +2034,7 @@ mod concurrency_tests {
         }
 
         // Single-threaded drain of the received queue.
-        r.process_received_queue().unwrap();
+        r.process_rx_queue().unwrap();
 
         // We should see exactly one handler call per enqueued packet.
         assert_eq!(
@@ -1908,11 +2045,11 @@ mod concurrency_tests {
     }
 
     // ------------------------------------------------------------------------
-    // Concurrent calls to receive_serialized on the same Router.
-    //
-    // Each thread calls receive_serialized(&self, wire) repeatedly. We verify
-    // the handler fan-out count matches the total number of calls.
+    // Concurrent calls to receive_serialized
     // ------------------------------------------------------------------------
+
+    /// Multiple threads call `receive_serialized` concurrently with the same
+    /// wire buffer; each call should fan out once to the handler.
     #[test]
     fn concurrent_receive_serialized_is_thread_safe() {
         const THREADS: usize = 4;
@@ -1975,6 +2112,13 @@ mod concurrency_tests {
         );
     }
 
+    // ------------------------------------------------------------------------
+    // Concurrent logging + processing
+    // ------------------------------------------------------------------------
+
+    /// One thread logs to TX queue while another drains queues; verify that
+    /// every logged packet is transmitted once and delivered once to the
+    /// local handler.
     #[test]
     fn concurrent_logging_and_processing_is_thread_safe() {
         use std::thread;
@@ -2012,8 +2156,6 @@ mod concurrency_tests {
                 r_logger
                     .log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0])
                     .expect("log_queue failed");
-                // optional: tiny yield to mix scheduling, but not required
-                // thread::yield_now();
             }
         });
 
@@ -2042,6 +2184,9 @@ mod concurrency_tests {
         assert_eq!(rx, ITERS, "expected {ITERS} handler calls, got {rx}");
         assert_eq!(tx, ITERS, "expected {ITERS} TX frames, got {tx}");
     }
+
+    /// Mix concurrent logging, RX-queue insertion, and queue draining; ensure
+    /// that all work is eventually processed exactly once.
     #[test]
     fn concurrent_log_receive_and_process_mix_is_thread_safe() {
         use std::thread;

@@ -11,7 +11,7 @@ mod single_threaded_test {
     use std::sync::Arc;
 
 
-    /// Clock that always returns 0 (matches your threaded test)
+    /// Clock that always returns 0
     fn zero_clock() -> Box<dyn Clock + Send + Sync> {
         Box::new(|| 0u64)
     }
@@ -148,7 +148,7 @@ mod single_threaded_test {
                 let node = &mut nodes[0];
                 make_series(&mut gps_buf[..3], 10.0);
                 let pkt = make_packet(DataType::GpsData, &gps_buf[..3], i as u64);
-                node.router.send(&pkt).unwrap();
+                node.router.transmit_message(&pkt).unwrap();
             }
 
             // --- Sender B (flight controller) ---
@@ -158,12 +158,12 @@ mod single_threaded_test {
                 // "gyro"
                 make_series(&mut gyro_buf[..3], 0.5);
                 let pkt1 = make_packet(DataType::GpsData, &gyro_buf[..3], (i + 10_000) as u64);
-                node.router.send(&pkt1).unwrap();
+                node.router.transmit_message(&pkt1).unwrap();
 
                 // "barometer"
                 make_series(&mut baro_buf[..3], 101.3);
                 let pkt2 = make_packet(DataType::GpsData, &baro_buf[..3], (i + 20_000) as u64);
-                node.router.send(&pkt2).unwrap();
+                node.router.transmit_message(&pkt2).unwrap();
             }
 
             // --- Sender C (power board) ---
@@ -172,12 +172,9 @@ mod single_threaded_test {
 
                 // battery
                 make_series(&mut batt_buf[..1], 3.7);
-                let pkt1 = make_packet(
-                    DataType::BatteryVoltage,
-                    &batt_buf[..1],
-                    (i + 30_000) as u64,
-                );
-                node.router.send(&pkt1).unwrap();
+                let pkt1 =
+                    make_packet(DataType::BatteryVoltage, &batt_buf[..1], (i + 30_000) as u64);
+                node.router.transmit_message(&pkt1).unwrap();
 
                 // message as bytes
                 let pkt2 = TelemetryPacket::from_u8_slice(
@@ -187,7 +184,7 @@ mod single_threaded_test {
                     (i + 40_000) as u64,
                 )
                 .unwrap();
-                node.router.send(&pkt2).unwrap();
+                node.router.transmit_message(&pkt2).unwrap();
             }
 
             // --- Deliver all bus frames for this iteration ---
@@ -264,10 +261,7 @@ mod single_threaded_test {
         );
 
         assert_eq!(a_radio, expected_total, "Radio Board hit count");
-        assert_eq!(
-            b_sd, expected_total,
-            "Flight Controller SD hit count"
-        );
+        assert_eq!(b_sd, expected_total, "Flight Controller SD hit count");
         assert_eq!(c_radio, 0, "Power Board must not have a radio handler");
         assert_eq!(c_sd, 0, "Power Board must not have an SD handler");
     }
