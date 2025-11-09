@@ -218,7 +218,7 @@ impl Router {
         };
 
         let mut locals: Vec<DataEndpoint> = pkt
-            .endpoints
+            .endpoints()
             .iter()
             .copied()
             .filter(|&ep| self.cfg.is_local_endpoint(ep))
@@ -529,7 +529,7 @@ impl Router {
             RxItem::Packet(pkt) => {
                 pkt.validate()?;
                 // No pre-serialization; serialize only if a Serialized handler exists.
-                for dest in pkt.endpoints.iter().copied() {
+                for dest in pkt.endpoints().iter().copied() {
                     for h in self.cfg.handlers.iter().filter(|h| h.endpoint == dest) {
                         self.call_handler_with_retries(dest, h, Some(item), Some(pkt), None)?;
                     }
@@ -607,12 +607,12 @@ impl Router {
         pkt.validate()?;
 
         let has_serialized_local = pkt
-            .endpoints
+            .endpoints()
             .iter()
             .copied()
             .any(|ep| self.endpoint_has_serialized_handler(ep));
         let send_remote = pkt
-            .endpoints
+            .endpoints()
             .iter()
             .any(|e| !self.cfg.is_local_endpoint(*e));
 
@@ -633,7 +633,7 @@ impl Router {
         }
 
         // Local dispatch using the best available representation.
-        for dest in pkt.endpoints.iter().copied() {
+        for dest in pkt.endpoints().iter().copied() {
             for h in self.cfg.handlers.iter().filter(|h| h.endpoint == dest) {
                 match (&h.handler, &bytes_opt) {
                     (EndpointHandlerFn::Serialized(_), Some(bytes)) => {

@@ -61,7 +61,7 @@ impl SmallPayload {
     }
 
     /// Return the payload as a borrowed byte slice.
-    #[inline(always)]
+    #[inline]
     pub fn as_slice(&self) -> &[u8] {
         match self {
             SmallPayload::Inline { len, buf } => &buf[..*len as usize],
@@ -73,7 +73,8 @@ impl SmallPayload {
     ///
     /// - For inline payloads this allocates a new `Arc<[u8]>`.
     /// - For heap-backed payloads this simply clones the existing `Arc`.
-    #[inline(always)]
+    #[inline]
+    #[allow(dead_code)]
     pub fn to_arc(&self) -> Arc<[u8]> {
         match self {
             SmallPayload::Inline { len, buf } => Arc::from(&buf[..*len as usize]),
@@ -82,7 +83,7 @@ impl SmallPayload {
     }
 
     /// Length of the payload in bytes.
-    #[inline(always)]
+    #[inline]
     pub fn len(&self) -> usize {
         match self {
             SmallPayload::Inline { len, .. } => *len as usize,
@@ -91,7 +92,8 @@ impl SmallPayload {
     }
 
     /// Returns `true` if the payload is stored inline on the stack.
-    #[inline(always)]
+    #[inline]
+    #[allow(dead_code)]
     pub fn is_inline(&self) -> bool {
         matches!(self, SmallPayload::Inline { .. })
     }

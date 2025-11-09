@@ -40,25 +40,22 @@ const DEFAULT_STRING_CAPACITY: usize = 96;
 ///
 /// This is the primary data structure passed around inside the crate and
 /// across FFI boundaries (via views / wrappers).
-///
-/// Fields are intentionally public for ergonomic access, but construction
-/// should go through [`TelemetryPacket::new`] to enforce validation.
 #[derive(Clone, Debug)]
 pub struct TelemetryPacket {
     /// Logical message type (schema selector).
-    pub ty: DataType,
+    ty: DataType,
 
     /// Size of the payload in bytes.
     ///
     /// This is cached and must match `payload.len()`. [`TelemetryPacket::validate`]
     /// checks the invariant.
-    pub data_size: usize,
+    data_size: usize,
 
     /// Logical sender identifier (e.g. device or subsystem name).
-    pub sender: Arc<str>,
+    sender: Arc<str>,
 
     /// Destination endpoints for this message.
-    pub endpoints: Arc<[DataEndpoint]>,
+    endpoints: Arc<[DataEndpoint]>,
 
     /// Timestamp in milliseconds.
     ///
@@ -66,10 +63,10 @@ pub struct TelemetryPacket {
     ///   like `12m 34s 567ms`.
     /// - If `>= EPOCH_MS_THRESHOLD`, treated as Unix epoch ms and formatted
     ///   as `YYYY-MM-DD HH:MM:SS.mmmZ`.
-    pub timestamp: u64,
+    timestamp: u64,
 
     /// Raw payload bytes, stored via [`SmallPayload`] for small/large optimization.
-    pub payload: SmallPayload,
+    payload: SmallPayload,
 }
 
 // ============================================================================
@@ -81,7 +78,7 @@ pub struct TelemetryPacket {
 /// For numeric/bool types this is the true width of one element.
 /// For string/hex we return 1 to treat the payload as a byte stream when
 /// checking dynamic length multiples.
-#[inline(always)]
+#[inline]
 const fn element_width(dt: MessageDataType) -> usize {
     match dt {
         MessageDataType::UInt8 | MessageDataType::Int8 | MessageDataType::Bool => 1,
@@ -277,6 +274,35 @@ impl TelemetryPacket {
             }
         }
         Ok(())
+    }
+
+    /* ---- Getters ---- */
+    /// Get the message data type.
+    /// This is the logical schema selector.
+    pub fn data_type(&self) -> DataType {
+        self.ty
+    }
+    /// Get the sender identifier.
+    /// This is typically a device or subsystem name.
+    pub fn sender(&self) -> &str {
+        &self.sender
+    }
+    /// Get the destination endpoints for this message.
+    pub fn endpoints(&self) -> &[DataEndpoint] {
+        &self.endpoints
+    }
+    /// Get the timestamp in milliseconds.
+    pub fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
+
+    /// Get the payload size in bytes.
+    pub fn data_size(&self) -> usize {
+        self.data_size
+    }
+    /// Get the raw payload bytes.
+    pub fn payload(&self) -> &[u8] {
+        &self.payload
     }
 
     /// Header-only string (no decoded data).

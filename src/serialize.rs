@@ -217,23 +217,24 @@ fn expand_endpoint_bitmap(
 ///
 /// The returned `Arc<[u8]>` owns the encoded bytes and can be shared cheaply.
 pub fn serialize_packet(pkt: &TelemetryPacket) -> Arc<[u8]> {
-    let bm = build_endpoint_bitmap(&pkt.endpoints);
+    let bm = build_endpoint_bitmap(&pkt.endpoints());
 
     // Heuristic capacity: fixed prelude + bitmap + sender + payload.
-    let mut out = Vec::with_capacity(16 + EP_BITMAP_BYTES + pkt.sender.len() + pkt.payload.len());
+    let mut out =
+        Vec::with_capacity(16 + EP_BITMAP_BYTES + pkt.sender().len() + pkt.payload().len());
 
     // Prelude: NEP = number of UNIQUE endpoints (bits set in bitmap).
     let nep_unique = bitmap_popcount(&bm);
     out.push(nep_unique as u8);
 
-    write_uleb128(pkt.ty as u64, &mut out);
-    write_uleb128(pkt.data_size as u64, &mut out);
-    write_uleb128(pkt.timestamp, &mut out);
-    write_uleb128(pkt.sender.len() as u64, &mut out);
+    write_uleb128(pkt.data_type() as u64, &mut out);
+    write_uleb128(pkt.data_size() as u64, &mut out);
+    write_uleb128(pkt.timestamp(), &mut out);
+    write_uleb128(pkt.sender().len() as u64, &mut out);
 
     out.extend_from_slice(&bm);
-    out.extend_from_slice(pkt.sender.as_bytes());
-    out.extend_from_slice(&pkt.payload);
+    out.extend_from_slice(pkt.sender().as_bytes());
+    out.extend_from_slice(&pkt.payload());
 
     Arc::<[u8]>::from(out)
 }
@@ -351,15 +352,15 @@ pub fn peek_envelope(buf: &[u8]) -> TelemetryResult<TelemetryEnvelope> {
 pub fn header_size_bytes(pkt: &TelemetryPacket) -> usize {
     let prelude = 1; // NEP (u8)
     prelude
-        + uleb128_size(pkt.ty as u32 as u64)
-        + uleb128_size(pkt.data_size as u64)
-        + uleb128_size(pkt.timestamp)
-        + uleb128_size(pkt.sender.len() as u64)
+        + uleb128_size(pkt.data_type() as u32 as u64)
+        + uleb128_size(pkt.data_size() as u64)
+        + uleb128_size(pkt.timestamp())
+        + uleb128_size(pkt.sender().len() as u64)
 }
 
 /// Compute the total wire size (header + bitmap + sender + payload) in bytes.
 pub fn packet_wire_size(pkt: &TelemetryPacket) -> usize {
-    header_size_bytes(pkt) + EP_BITMAP_BYTES + pkt.sender.len() + pkt.payload.len()
+    header_size_bytes(pkt) + EP_BITMAP_BYTES + pkt.sender().len() + pkt.payload().len()
 }
 
 // ===========================================================================

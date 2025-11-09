@@ -118,37 +118,37 @@ impl PyPacket {
     /// DataType as an integer (see `DataType` IntEnum).
     #[getter]
     fn ty(&self) -> u32 {
-        self.inner.ty as u32
+        self.inner.data_type() as u32
     }
 
     /// Declared data size for the packet payload, in bytes.
     #[getter]
     fn data_size(&self) -> usize {
-        self.inner.data_size
+        self.inner.data_size()
     }
 
     /// Sender identifier as a UTF-8 string.
     #[getter]
     fn sender(&self) -> String {
-        self.inner.sender.to_string()
+        self.inner.sender().to_string()
     }
 
     /// Endpoints as integer IDs (see `DataEndpoint` IntEnum).
     #[getter]
     fn endpoints(&self) -> Vec<u32> {
-        self.inner.endpoints.iter().map(|e| *e as u32).collect()
+        self.inner.endpoints().iter().map(|e| *e as u32).collect()
     }
 
     /// Packet timestamp in milliseconds (source-defined semantics).
     #[getter]
     fn timestamp_ms(&self) -> u64 {
-        self.inner.timestamp
+        self.inner.timestamp()
     }
 
     /// Raw payload bytes.
     #[getter]
     fn payload<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
-        PyBytes::new(py, &self.inner.payload)
+        PyBytes::new(py, &self.inner.payload())
     }
 
     /// Human-readable header string (no payload).

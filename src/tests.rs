@@ -64,18 +64,21 @@ fn get_sd_card_handler(sd_seen_c: Arc<Mutex<Option<(DataType, Vec<f32>)>>>) -> E
         endpoint: DataEndpoint::SdCard,
         handler: router::EndpointHandlerFn::Packet(Box::new(move |pkt: &TelemetryPacket| {
             // sanity: element sizing must be 4 bytes (f32) for GPS_DATA
-            let elems = get_message_meta(pkt.ty).element_count.into().max(1);
-            let per_elem = get_needed_message_size(pkt.ty) / elems;
-            assert_eq!(pkt.ty, DataType::GpsData);
+            let elems = get_message_meta(pkt.data_type())
+                .element_count
+                .into()
+                .max(1);
+            let per_elem = get_needed_message_size(pkt.data_type()) / elems;
+            assert_eq!(pkt.data_type(), DataType::GpsData);
             assert_eq!(per_elem, 4, "GPS_DATA expected f32 elements");
 
             // decode f32 little-endian
-            let mut vals = Vec::with_capacity(pkt.payload.len() / 4);
-            for chunk in pkt.payload.chunks_exact(4) {
+            let mut vals = Vec::with_capacity(pkt.payload().len() / 4);
+            for chunk in pkt.payload().chunks_exact(4) {
                 vals.push(f32::from_le_bytes(chunk.try_into().unwrap()));
             }
 
-            *sd_seen_c.lock().unwrap() = Some((pkt.ty, vals));
+            *sd_seen_c.lock().unwrap() = Some((pkt.data_type(), vals));
             Ok(())
         })),
     }
@@ -135,11 +138,11 @@ mod tests {
         let rpkt = serialize::deserialize_packet(&bytes).unwrap();
 
         rpkt.validate().unwrap();
-        assert_eq!(rpkt.ty, pkt.ty);
-        assert_eq!(rpkt.data_size, pkt.data_size);
-        assert_eq!(rpkt.timestamp, pkt.timestamp);
-        assert_eq!(&*rpkt.endpoints, &*pkt.endpoints);
-        assert_eq!(&*rpkt.payload, &*pkt.payload);
+        assert_eq!(rpkt.data_type(), pkt.data_type());
+        assert_eq!(rpkt.data_size(), pkt.data_size());
+        assert_eq!(rpkt.timestamp(), pkt.timestamp());
+        assert_eq!(&*rpkt.endpoints(), &*pkt.endpoints());
+        assert_eq!(&*rpkt.payload(), &*pkt.payload());
     }
 
     /// Verify `header_string()` format for a simple GPS packet.
@@ -214,14 +217,14 @@ mod tests {
             .unwrap()
             .clone()
             .expect("no tx packet recorded");
-        assert_eq!(tx_pkt.ty, DataType::GpsData);
-        assert_eq!(tx_pkt.payload.len(), 3 * 4);
+        assert_eq!(tx_pkt.data_type(), DataType::GpsData);
+        assert_eq!(tx_pkt.payload().len(), 3 * 4);
         // compare bytes exactly to what log() would have produced
         let mut expected = Vec::new();
         for v in data {
             expected.extend_from_slice(&v.to_le_bytes());
         }
-        assert_eq!(&*tx_pkt.payload, &*expected);
+        assert_eq!(&*tx_pkt.payload(), &*expected);
 
         // local SD handler decoded to f32s and recorded (type, values)
         let (seen_ty, seen_vals) = sd_seen_decoded
@@ -376,14 +379,14 @@ unsafe fn copy_telemetry_packet_raw(
     let d = unsafe { &mut *dest };
 
     // Deep copy: new endpoints slice and new payload buffer
-    let endpoints_vec: Vec<DataEndpoint> = s.endpoints.iter().copied().collect();
-    let payload_arc: Arc<[u8]> = Arc::from(&*s.payload);
+    let endpoints_vec: Vec<DataEndpoint> = s.endpoints().iter().copied().collect();
+    let payload_arc: Arc<[u8]> = Arc::from(&*s.payload());
 
     let new_pkt = TelemetryPacket::new(
-        s.ty,
+        s.data_type(),
         &endpoints_vec,
-        s.sender.clone(),
-        s.timestamp,
+        s.sender(),
+        s.timestamp(),
         payload_arc,
     )
     .map_err(|_| "packet validation failed")?;
@@ -421,11 +424,11 @@ fn helpers_copy_telemetry_packet() {
 
     // (3) distinct objects → deep copy and equal fields
     let mut dest = TelemetryPacket::new(
-        src.ty,
-        &src.endpoints,     // &[DataEndpoint]
-        src.sender.clone(), // Arc<str>
-        src.timestamp,
-        Arc::from(&*src.payload), // deep copy payload
+        src.data_type(),
+        &src.endpoints(), // &[DataEndpoint]
+        src.sender(),     // Arc<str>
+        src.timestamp(),
+        Arc::from(&*src.payload()), // deep copy payload
     )
     .expect("src packet should be valid");
 
@@ -433,14 +436,14 @@ fn helpers_copy_telemetry_packet() {
     assert!(st.is_ok());
 
     // element-by-element compare
-    assert_eq!(dest.timestamp, src.timestamp);
-    assert_eq!(dest.ty, src.ty);
-    assert_eq!(dest.data_size, src.data_size);
-    assert_eq!(dest.endpoints.len(), src.endpoints.len());
-    for i in 0..dest.endpoints.len() {
-        assert_eq!(dest.endpoints[i], src.endpoints[i]);
+    assert_eq!(dest.timestamp(), src.timestamp());
+    assert_eq!(dest.data_type(), src.data_type());
+    assert_eq!(dest.data_size(), src.data_size());
+    assert_eq!(dest.endpoints().len(), src.endpoints().len());
+    for i in 0..dest.endpoints().len() {
+        assert_eq!(dest.endpoints()[i], src.endpoints()[i]);
     }
-    assert_eq!(&*dest.payload, &*src.payload);
+    assert_eq!(&*dest.payload(), &*src.payload());
 }
 
 // -----------------------------------------------------------------------------
@@ -512,7 +515,7 @@ mod handler_failure_tests {
         let capturing = EndpointHandler {
             endpoint: other_ep,
             handler: router::EndpointHandlerFn::Packet(Box::new(move |pkt: &TelemetryPacket| {
-                if pkt.ty == DataType::TelemetryError {
+                if pkt.data_type() == DataType::TelemetryError {
                     *last_payload_c.lock().unwrap() = pkt.to_string();
                 }
                 recv_count_c.fetch_add(1, Ordering::SeqCst);
@@ -577,7 +580,7 @@ mod handler_failure_tests {
         let capturing = EndpointHandler {
             endpoint: local_ep,
             handler: router::EndpointHandlerFn::Packet(Box::new(move |pkt: &TelemetryPacket| {
-                if pkt.ty == DataType::TelemetryError {
+                if pkt.data_type() == DataType::TelemetryError {
                     *last_payload_c.lock().unwrap() = pkt.to_string();
                     saw_error_c.fetch_add(1, Ordering::SeqCst);
                 }
@@ -1100,13 +1103,13 @@ mod tests_extra {
         let wire = serialize::serialize_packet(&pkt);
         let back = serialize::deserialize_packet(&wire).unwrap();
         assert_eq!(
-            &*back.endpoints,
+            &*back.endpoints(),
             [DataEndpoint::SdCard, DataEndpoint::Radio],
             "endpoints must roundtrip 1:1"
         );
-        assert_eq!(back.ty, pkt.ty);
-        assert_eq!(back.timestamp, pkt.timestamp);
-        assert_eq!(&*back.payload, &*pkt.payload);
+        assert_eq!(back.data_type(), pkt.data_type());
+        assert_eq!(back.timestamp(), pkt.timestamp());
+        assert_eq!(&*back.payload(), &*pkt.payload());
         assert_eq!(serialize::packet_wire_size(&pkt), wire.len());
     }
 
@@ -1134,15 +1137,15 @@ mod tests_extra {
         let env = serialize::peek_envelope(&wire).unwrap();
         let full = serialize::deserialize_packet(&wire).unwrap();
 
-        assert_eq!(env.ty, pkt.ty);
-        assert_eq!(env.sender.as_ref(), pkt.sender.as_ref());
-        assert_eq!(env.timestamp_ms, pkt.timestamp);
-        assert_eq!(&*env.endpoints, &*pkt.endpoints);
+        assert_eq!(env.ty, pkt.data_type());
+        assert_eq!(env.sender.as_ref(), pkt.sender());
+        assert_eq!(env.timestamp_ms, pkt.timestamp());
+        assert_eq!(&*env.endpoints, &*pkt.endpoints());
 
-        assert_eq!(full.ty, pkt.ty);
-        assert_eq!(full.timestamp, pkt.timestamp);
-        assert_eq!(&*full.endpoints, &*pkt.endpoints);
-        assert_eq!(&*full.payload, &*pkt.payload);
+        assert_eq!(full.data_type(), pkt.data_type());
+        assert_eq!(full.timestamp(), pkt.timestamp());
+        assert_eq!(&*full.endpoints(), &*pkt.endpoints());
+        assert_eq!(&*full.payload(), &*pkt.payload());
     }
 
     /// Corrupt endpoint bits in the bitmap to encode an out-of-range value,
@@ -1385,9 +1388,9 @@ mod tests_extra {
         )
         .unwrap();
 
-        assert_eq!(pkt.payload.len(), need);
-        assert_eq!(pkt.data_size, need);
-        assert_eq!(pkt.timestamp, 12345);
+        assert_eq!(pkt.payload().len(), need);
+        assert_eq!(pkt.data_size(), need);
+        assert_eq!(pkt.timestamp(), 12345);
     }
 
     // --------------------------- Header-only happy path smoke ---------------------------
@@ -1408,18 +1411,18 @@ mod tests_extra {
         let wire = serialize::serialize_packet(&pkt);
 
         let env = serialize::peek_envelope(&wire).unwrap();
-        assert_eq!(env.ty, pkt.ty);
-        assert_eq!(&*env.endpoints, &*pkt.endpoints);
-        assert_eq!(env.sender.as_ref(), pkt.sender.as_ref());
-        assert_eq!(env.timestamp_ms, pkt.timestamp);
+        assert_eq!(env.ty, pkt.data_type());
+        assert_eq!(&*env.endpoints, &*pkt.endpoints());
+        assert_eq!(env.sender.as_ref(), pkt.sender());
+        assert_eq!(env.timestamp_ms, pkt.timestamp());
 
         let round = serialize::deserialize_packet(&wire).unwrap();
         round.validate().unwrap();
-        assert_eq!(round.ty, pkt.ty);
-        assert_eq!(round.data_size, pkt.data_size);
-        assert_eq!(round.timestamp, pkt.timestamp);
-        assert_eq!(&*round.endpoints, &*pkt.endpoints);
-        assert_eq!(&*round.payload, &*pkt.payload);
+        assert_eq!(round.data_type(), pkt.data_type());
+        assert_eq!(round.data_size(), pkt.data_size());
+        assert_eq!(round.timestamp(), pkt.timestamp());
+        assert_eq!(&*round.endpoints(), &*pkt.endpoints());
+        assert_eq!(&*round.payload(), &*pkt.payload());
     }
 
     // --------------------------- TX failure -> error to locals (smoke) ---------------------------
@@ -1438,7 +1441,7 @@ mod tests_extra {
         let capturing = EndpointHandler {
             endpoint: DataEndpoint::SdCard,
             handler: EndpointHandlerFn::Packet(Box::new(move |pkt: &TelemetryPacket| {
-                if pkt.ty == DataType::TelemetryError {
+                if pkt.data_type() == DataType::TelemetryError {
                     *last_payload_c.lock().unwrap() = pkt.to_string();
                 }
                 Ok(())
@@ -1763,7 +1766,7 @@ mod tests_more {
         let handler = EndpointHandler {
             endpoint: DataEndpoint::SdCard,
             handler: EndpointHandlerFn::Packet(Box::new(move |pkt| {
-                if pkt.ty == DataType::TelemetryError {
+                if pkt.data_type() == DataType::TelemetryError {
                     *c.lock().unwrap() = pkt.to_string();
                 }
                 Ok(())

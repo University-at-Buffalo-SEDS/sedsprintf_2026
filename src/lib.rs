@@ -158,13 +158,13 @@ pub enum MessageElementCount {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct MessageMeta {
     /// How many elements are present (fixed vs dynamic).
-    pub element_count: MessageElementCount,
+    element_count: MessageElementCount,
     /// Allowed endpoints for this message type.
-    pub endpoints: &'static [DataEndpoint],
+    endpoints: &'static [DataEndpoint],
 }
 
 /// Lookup `MessageMeta` for a given [`DataType`] using the generated config.
-#[inline(always)]
+#[inline]
 pub fn message_meta(ty: DataType) -> MessageMeta {
     get_message_meta(ty)
 }
@@ -205,20 +205,20 @@ impl MessageElementCount {
 ///
 /// This is `element_size * element_count`. For dynamic types, the
 /// configuration ensures we only call this where it makes sense.
-#[inline(always)]
+#[inline]
 pub fn get_needed_message_size(ty: DataType) -> usize {
     data_type_size(get_data_type(ty)) * get_message_meta(ty).element_count
 }
 
 /// Return the logical "info" type (Info/Error) for a given `DataType`.
-#[inline(always)]
+#[inline]
 pub const fn get_info_type(ty: DataType) -> MessageType {
     get_message_info_types(ty)
 }
 
 /// Return the *element* data type (e.g., `Float32`, `Int16`, `String`) for a
 /// given `DataType`.
-#[inline(always)]
+#[inline]
 pub const fn get_data_type(ty: DataType) -> MessageDataType {
     get_message_data_type(ty)
 }

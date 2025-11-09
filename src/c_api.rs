@@ -426,17 +426,17 @@ pub extern "C" fn seds_router_new(
                             let mut stack_eps: [u32; STACK_EPS] = [0; STACK_EPS];
 
                             let (endpoints_ptr, num_endpoints, _owned_vec);
-                            if pkt.endpoints.len() <= STACK_EPS {
-                                for (i, e) in pkt.endpoints.iter().enumerate() {
+                            if pkt.endpoints().len() <= STACK_EPS {
+                                for (i, e) in pkt.endpoints().iter().enumerate() {
                                     stack_eps[i] = *e as u32;
                                 }
                                 endpoints_ptr = stack_eps.as_ptr();
-                                num_endpoints = pkt.endpoints.len();
+                                num_endpoints = pkt.endpoints().len();
                                 _owned_vec = None::<Vec<u32>>; // lifetimes: keep binding
                             } else {
                                 // Rare path: heap
-                                let mut eps_u32 = Vec::with_capacity(pkt.endpoints.len());
-                                for e in pkt.endpoints.iter() {
+                                let mut eps_u32 = Vec::with_capacity(pkt.endpoints().len());
+                                for e in pkt.endpoints().iter() {
                                     eps_u32.push(*e as u32);
                                 }
                                 endpoints_ptr = eps_u32.as_ptr();
@@ -444,17 +444,17 @@ pub extern "C" fn seds_router_new(
                                 _owned_vec = Some(eps_u32); // ensure vec lives until after callback
                             }
 
-                            let sender_bytes = pkt.sender.as_bytes();
+                            let sender_bytes = pkt.sender().as_bytes();
                             let view = SedsPacketView {
-                                ty: pkt.ty as u32,
-                                data_size: pkt.data_size,
+                                ty: pkt.data_type() as u32,
+                                data_size: pkt.data_size(),
                                 sender: sender_bytes.as_ptr() as *const c_char,
                                 sender_len: sender_bytes.len(),
                                 endpoints: endpoints_ptr,
                                 num_endpoints,
-                                timestamp: pkt.timestamp,
-                                payload: pkt.payload.as_ptr(),
-                                payload_len: pkt.payload.len(),
+                                timestamp: pkt.timestamp(),
+                                payload: pkt.payload().as_ptr(),
+                                payload_len: pkt.payload().len(),
                             };
 
                             let code = cb_fn(&view as *const _, user_addr as *mut c_void);
@@ -1421,7 +1421,7 @@ pub extern "C" fn seds_pkt_deserialize_owned(bytes: *const u8, len: usize) -> *m
         return ptr::null_mut();
     }
 
-    let endpoints_u32: Vec<u32> = tpkt.endpoints.iter().map(|e| *e as u32).collect();
+    let endpoints_u32: Vec<u32> = tpkt.endpoints().iter().map(|e| *e as u32).collect();
     let owned = SedsOwnedPacket {
         inner: tpkt,
         endpoints_u32,
@@ -1456,18 +1456,18 @@ pub extern "C" fn seds_owned_pkt_view(
     let inner = &pkt.inner;
 
     // sender bytes (Arc<str> -> &[u8])
-    let sender_bytes = inner.sender.as_bytes();
+    let sender_bytes = inner.sender().as_bytes();
 
     let view = SedsPacketView {
-        ty: inner.ty as u32,
-        data_size: inner.data_size,
+        ty: inner.data_type() as u32,
+        data_size: inner.data_size(),
         sender: sender_bytes.as_ptr() as *const c_char,
         sender_len: sender_bytes.len(),
         endpoints: pkt.endpoints_u32.as_ptr(),
         num_endpoints: pkt.endpoints_u32.len(),
-        timestamp: inner.timestamp,
-        payload: inner.payload.as_ptr(),
-        payload_len: inner.payload.len(),
+        timestamp: inner.timestamp(),
+        payload: inner.payload().as_ptr(),
+        payload_len: inner.payload().len(),
     };
 
     unsafe {
