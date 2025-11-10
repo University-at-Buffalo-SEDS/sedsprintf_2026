@@ -27,6 +27,10 @@ pub struct EndpointHandler {
 }
 
 impl EndpointHandler {
+    /// Create a new endpoint handler for `TelemetryPacket` callbacks.
+    /// The provided function `f` will be called whenever a packet is
+    /// received for the specified endpoint.
+    /// The function must accept a reference to a `TelemetryPacket` as input and return a `SedsResult` as output.
     pub fn new_packet_handler<F>(endpoint: DataEndpoint, f: F) -> Self
     where
         F: Fn(&TelemetryPacket) -> TelemetryResult<()> + Send + Sync + 'static,
@@ -36,7 +40,10 @@ impl EndpointHandler {
             handler: EndpointHandlerFn::Packet(Arc::new(f)),
         }
     }
-
+    /// Create a new endpoint handler for serialized byte slice callbacks.
+    /// The provided function `f` will be called whenever a packet is
+    /// received for the specified endpoint.
+    /// The function must accept a byte slice (`&[u8]`) as input and return a `SedsResult` as output.
     pub fn new_serialized_handler<F>(endpoint: DataEndpoint, f: F) -> Self
     where
         F: Fn(&[u8]) -> TelemetryResult<()> + Send + Sync + 'static,
@@ -58,11 +65,13 @@ impl EndpointHandler {
 }
 
 pub trait Clock {
+    /// Return the current time in milliseconds.
     fn now_ms(&self) -> u64;
 }
 
 impl<T: Fn() -> u64> Clock for T {
     #[inline]
+    /// Return the current time in milliseconds.
     fn now_ms(&self) -> u64 {
         self()
     }
@@ -70,10 +79,12 @@ impl<T: Fn() -> u64> Clock for T {
 
 #[derive(Default)]
 pub struct BoardConfig {
+    /// Handlers for local endpoints.
     handlers: Arc<[EndpointHandler]>,
 }
 
 impl BoardConfig {
+    /// Create a new board configuration with the specified endpoint handlers.
     pub fn new<H>(handlers: H) -> Self
     where
         H: Into<Arc<[EndpointHandler]>>,
@@ -84,6 +95,7 @@ impl BoardConfig {
     }
 
     #[inline]
+    /// Check if the specified endpoint is local to this board.
     fn is_local_endpoint(&self, ep: DataEndpoint) -> bool {
         self.handlers.iter().any(|h| h.endpoint == ep)
     }
@@ -109,7 +121,7 @@ impl_letype_num!(i64, 8);
 impl_letype_num!(i128, 16);
 impl_letype_num!(f32, 4);
 impl_letype_num!(f64, 8);
-
+/// Encode a slice of `LeBytes` into a contiguous little-endian byte array.
 pub(crate) fn encode_slice_le<T: LeBytes>(data: &[T]) -> Arc<[u8]> {
     let total = data.len() * T::WIDTH;
     let mut buf = Vec::with_capacity(total);
@@ -139,7 +151,23 @@ fn make_error_payload(msg: &str) -> Arc<[u8]> {
         MessageElementCount::Dynamic => Arc::from(msg.as_bytes()),
     }
 }
-
+/// Generic raw logger function used by Router::log and Router::log_queue.
+/// Builds a TelemetryPacket from the provided data slice and passes it to the
+/// provided transmission function.
+/// # Arguments
+/// * `sender` - The sender identifier for the packet.
+/// * `ty` - The DataType of the packet.
+/// * `data` - The slice of data to log.
+/// * `timestamp` - The timestamp for the packet.
+/// * `tx_function` - A function that takes a TelemetryPacket and transmits it.
+/// # Returns
+/// A TelemetryResult indicating success or failure.
+/// # Type Parameters
+/// * `T` - The type of the data elements (must implement LeBytes).
+/// * `F` - The type of the transmission function.
+/// # Constraints
+/// * `T` must implement LeBytes.
+/// * `F` must be a function that takes a TelemetryPacket and returns a TelemetryResult.
 fn log_raw<T, F>(
     sender: Arc<str>,
     ty: DataType,
@@ -181,7 +209,8 @@ where
 
     tx_function(pkt)
 }
-
+/// Fallback stdout printing for error messages when no local endpoints exist.
+/// In `no_std` builds this is a no-op.
 fn fallback_stdout(msg: &str) {
     #[cfg(feature = "std")]
     {
@@ -189,18 +218,29 @@ fn fallback_stdout(msg: &str) {
     }
     #[cfg(not(feature = "std"))]
     {
-        let _ = msg;
+        extern "C" {
+            fn seds_println(msg: *const u8, len: usize);
+        }
+        unsafe {
+            seds_println(msg.as_ptr(), msg.len());
+        }
     }
 }
 
 // -------------------- Router --------------------
 
-// Only the queues are mutable; put them behind a mutex.
+/// Internal state of the Router, protected by a mutex.
+/// Holds the RX and TX queues.
+/// Used to allow safe concurrent access from multiple tasks.
+/// This struct is private to the Router implementation.
 struct RouterInner {
     received_queue: VecDeque<RxItem>,
     transmit_queue: VecDeque<TelemetryPacket>,
 }
 
+/// Telemetry Router for handling incoming and outgoing telemetry packets.
+/// Supports queuing, processing, and dispatching to local endpoint handlers.
+/// Thread-safe via internal locking.
 pub struct Router {
     sender: Arc<str>,
     // make TX usable across tasks
@@ -211,6 +251,37 @@ pub struct Router {
 }
 
 impl Router {
+    /// Create a new Router with the specified transmit function, board configuration, and clock.
+    /// The transmit function is called to send serialized telemetry packets.
+    /// The board configuration defines local endpoint handlers.
+    /// The clock provides the current time in milliseconds.
+    /// # Arguments
+    /// * `transmit` - Optional transmit function for sending serialized packets.
+    /// * `cfg` - Board configuration with local endpoint handlers.
+    /// * `clock` - Clock implementation for timestamping.
+    /// # Returns
+    /// A new Router instance.
+    /// # Type Parameters
+    /// * `Tx` - Type of the transmit function.
+    /// # Constraints
+    /// * `Tx` must be a function that takes a byte slice and returns a Tele
+    /// metryResult.
+    /// * `Tx` must be `Send` and `Sync` to allow safe concurrent access.
+    /// * `Tx` must have a static lifetime.
+    /// # Example
+    /// ```text
+    /// struct MyClock;
+    /// impl Clock for MyClock {
+    ///     fn now_ms(&self) -> u64 {
+    ///         // Implement your clock logic here
+    ///         0
+    ///     }
+    /// }
+    ///
+    /// let board_cfg = BoardConfig::default();
+    /// let clock = Box::new(MyClock);
+    /// let router = Router::new(None, board_cfg, clock);
+    /// ```
     pub fn new<Tx>(
         transmit: Option<Tx>,
         cfg: BoardConfig,
@@ -230,7 +301,15 @@ impl Router {
             clock,
         }
     }
-
+    /// Error helper when we have a full TelemetryPacket.
+    /// Sends a TelemetryError packet to all local endpoints except the failed one (if any).
+    /// If no local endpoints remain, falls back to stdout printing.
+    /// # Arguments
+    /// * `pkt` - The original TelemetryPacket that caused the error.
+    /// * `dest` - The endpoint that failed (if any).
+    /// * `e` - The TelemetryError that occurred.
+    /// # Returns
+    /// A TelemetryResult indicating success or failure of sending the error packet.
     fn handle_callback_error(
         &self,
         pkt: &TelemetryPacket,
@@ -282,7 +361,11 @@ impl Router {
     }
 
     // ---------- PUBLIC API: now all &self (thread-safe via internal locking) ----------
-
+    /// Process all packets in the transmit queue.
+    /// This function will dequeue and transmit all packets in the transmit queue
+    /// until the queue is empty.
+    /// # Returns
+    /// A TelemetryResult indicating success or failure.
     pub fn process_tx_queue(&self) -> TelemetryResult<()> {
         loop {
             let pkt_opt = {
@@ -296,28 +379,49 @@ impl Router {
         Ok(())
     }
 
+    /// Process all packets in the receive queue.
+    /// This function will dequeue and process all packets in the receive queue
+    /// until the queue is empty.
+    /// # Returns
+    /// A TelemetryResult indicating success or failure.
     pub fn process_all_queues(&self) -> TelemetryResult<()> {
         self.process_tx_queue()?;
         self.process_rx_queue()?;
         Ok(())
     }
 
+    /// Clear both the transmit and receive queues.
+    /// This function will remove all packets from both queues.
+    /// No processing is done on the packets.
     pub fn clear_queues(&self) {
         let mut st = self.state.lock();
         st.transmit_queue.clear();
         st.received_queue.clear();
     }
 
+    /// Clear only the receive queue.
+    /// This function will remove all packets from the receive queue.
+    /// No processing is done on the packets.
     pub fn clear_rx_queue(&self) {
         let mut st = self.state.lock();
         st.received_queue.clear();
     }
 
+    /// Clear only the transmit queue.
+    /// This function will remove all packets from the transmit queue.
+    /// No processing is done on the packets.
     pub fn clear_tx_queue(&self) {
         let mut st = self.state.lock();
         st.transmit_queue.clear();
     }
 
+    /// Process packets in the transmit queue for up to `timeout_ms` milliseconds.
+    /// This function will dequeue and transmit packets in the transmit queue
+    /// until the queue is empty or the timeout is reached.
+    /// # Arguments
+    /// * `timeout_ms` - The maximum time in milliseconds to process packets.
+    /// # Returns
+    /// A TelemetryResult indicating success or failure.
     pub fn process_tx_queue_with_timeout(&self, timeout_ms: u32) -> TelemetryResult<()> {
         let start = self.clock.now_ms();
         loop {
@@ -334,10 +438,22 @@ impl Router {
         Ok(())
     }
 
+    /// Process a single item from the receive queue.
+    /// # Arguments
+    /// * `item` - The RxItem to process.
+    /// # Returns
+    /// A TelemetryResult indicating success or failure.
     fn process_rx_queue_item(&self, item: RxItem) -> TelemetryResult<()> {
         self.receive_item(&item)
     }
 
+    /// Process packets in the receive queue for up to `timeout_ms` milliseconds.
+    /// This function will dequeue and process packets in the receive queue
+    /// until the queue is empty or the timeout is reached.
+    /// # Arguments
+    /// * `timeout_ms` - The maximum time in milliseconds to process packets.
+    /// # Returns
+    /// A TelemetryResult indicating success or failure.
     pub fn process_rx_queue_with_timeout(&self, timeout_ms: u32) -> TelemetryResult<()> {
         let start = self.clock.now_ms();
         loop {
@@ -354,6 +470,15 @@ impl Router {
         Ok(())
     }
 
+    /// Process all packets in both the transmit and receive queues
+    /// for up to `timeout_ms` milliseconds.
+    /// This function will dequeue and process packets in both queues
+    /// until both queues are empty or the timeout is reached.
+    /// # Arguments
+    /// * `timeout_ms` - The maximum time in milliseconds to process packets.
+    /// # Returns
+    /// A TelemetryResult indicating success or failure.
+    /// If `timeout_ms` is zero, the function will drain both queues fully.
     pub fn process_all_queues_with_timeout(&self, timeout_ms: u32) -> TelemetryResult<()> {
         let drain_fully = timeout_ms == 0;
         let start = if drain_fully { 0 } else { self.clock.now_ms() };
@@ -394,6 +519,12 @@ impl Router {
         Ok(())
     }
 
+    /// Enqueue a telemetry packet for transmission.
+    /// This function will validate the packet and add it to the transmit queue.
+    /// # Arguments
+    /// * `pkt` - The TelemetryPacket to enqueue.
+    /// # Returns
+    /// A TelemetryResult indicating success or failure.
     pub fn transmit_message_queue(&self, pkt: TelemetryPacket) -> TelemetryResult<()> {
         pkt.validate()?;
         let mut st = self.state.lock();
@@ -401,6 +532,11 @@ impl Router {
         Ok(())
     }
 
+    /// Process all packets in the receive queue.
+    /// This function will dequeue and process all packets in the receive queue
+    /// until the queue is empty.
+    /// # Returns
+    /// A TelemetryResult indicating success or failure.
     pub fn process_rx_queue(&self) -> TelemetryResult<()> {
         loop {
             let item_opt = {
@@ -413,6 +549,12 @@ impl Router {
         Ok(())
     }
 
+    /// Enqueue a serialized telemetry packet (byte slice) for processing.
+    /// This function will add the byte slice to the receive queue.
+    /// # Arguments
+    /// * `bytes` - The serialized telemetry packet as a byte slice.
+    /// # Returns
+    /// A TelemetryResult indicating success or failure.
     pub fn rx_serialized_packet_to_queue(&self, bytes: &[u8]) -> TelemetryResult<()> {
         let arc = Arc::from(bytes);
         let mut st = self.state.lock();
@@ -420,6 +562,12 @@ impl Router {
         Ok(())
     }
 
+    /// Enqueue a telemetry packet for processing.
+    /// This function will validate the packet and add it to the receive queue.
+    /// # Arguments
+    /// * `pkt` - The TelemetryPacket to enqueue.
+    /// # Returns
+    /// A TelemetryResult indicating success or failure.
     pub fn rx_packet_to_queue(&self, pkt: TelemetryPacket) -> TelemetryResult<()> {
         pkt.validate()?;
         let mut st = self.state.lock();
@@ -427,6 +575,12 @@ impl Router {
         Ok(())
     }
 
+    /// Retry helper function to attempt a closure multiple times.
+    /// # Arguments
+    /// * `times` - The number of times to retry.
+    /// * `f` - The closure to execute.
+    /// # Returns
+    /// A Result containing the successful value or the last error.
     fn retry<F, T, E>(&self, times: usize, mut f: F) -> Result<T, E>
     where
         F: FnMut() -> Result<T, E>,
@@ -441,6 +595,11 @@ impl Router {
         Err(last_err.expect("times > 0"))
     }
 
+    /// Check if the specified endpoint has a packet handler registered.
+    /// # Arguments
+    /// * `ep` - The DataEndpoint to check.
+    /// # Returns
+    /// `true` if a packet handler is registered for the endpoint, `false` otherwise.
     fn endpoint_has_packet_handler(&self, ep: DataEndpoint) -> bool {
         self.cfg
             .handlers
@@ -448,6 +607,11 @@ impl Router {
             .any(|h| h.endpoint == ep && matches!(h.handler, EndpointHandlerFn::Packet(_)))
     }
 
+    /// Check if the specified endpoint has a serialized handler registered.
+    /// # Arguments
+    /// * `ep` - The DataEndpoint to check.
+    /// # Returns
+    /// `true` if a serialized handler is registered for the endpoint, `false` otherwise.
     fn endpoint_has_serialized_handler(&self, ep: DataEndpoint) -> bool {
         self.cfg
             .handlers
@@ -455,6 +619,17 @@ impl Router {
             .any(|h| h.endpoint == ep && matches!(h.handler, EndpointHandlerFn::Serialized(_)))
     }
 
+    /// Call the specified endpoint handler with retries on failure.
+    /// # Arguments
+    /// * `dest` - The DataEndpoint for which the handler is registered.
+    /// * `handler` - The EndpointHandler to call.
+    /// * `data` - The RxItem to pass to the handler (may be None for Packet handlers in send()).
+    ///
+    /// * `pkt_for_ctx` - The TelemetryPacket context (may be None if not deserialized).
+    /// * `env_for_ctx` - The TelemetryEnvelope context (may be None if
+    /// not available).
+    /// # Returns
+    /// A TelemetryResult indicating success or failure.
     fn call_handler_with_retries(
         &self,
         dest: DataEndpoint,
@@ -513,6 +688,15 @@ impl Router {
     }
 
     /// Error helper when we only have an envelope (no full packet).
+    /// Sends a TelemetryError packet to all local endpoints except the failed one (if any).
+    /// If no local endpoints remain, falls back to stdout printing.
+    /// # Arguments
+    /// * `env` - The TelemetryEnvelope that caused the error.
+    /// * `dest` - The endpoint that failed (if any).
+    /// * `e` - The TelemetryError that occurred.
+    /// # Returns
+    /// A TelemetryResult indicating success or failure of sending the error packet.
+    /// This is used when we only have the envelope (e.g. for Serialized handlers).
     fn handle_callback_error_from_env(
         &self,
         env: &serialize::TelemetryEnvelope,
@@ -555,6 +739,12 @@ impl Router {
         self.transmit_message(&error_pkt)
     }
 
+    /// Core receive function handling both Packet and Serialized RxItems.
+    /// Routes to appropriate local handlers with retries and error handling.
+    /// # Arguments
+    /// * `item` - The RxItem to process (either Packet or Serialized).
+    /// # Returns
+    /// A TelemetryResult indicating success or failure.
     pub fn receive_item(&self, item: &RxItem) -> TelemetryResult<()> {
         match item {
             RxItem::Packet(pkt) => {
@@ -634,6 +824,14 @@ impl Router {
     // send() stays efficient: we already have a packet and must serialize once for
     // remote TX and for any local Serialized handlers. If *no* remote and *no*
     // local Serialized handlers exist, you can skip serialization:
+
+    /// Transmit a telemetry packet immediately.
+    /// This function will serialize the packet if needed and send it to remote
+    /// endpoints and local handlers.
+    /// # Arguments
+    /// * `pkt` - The TelemetryPacket to transmit.
+    /// # Returns
+    /// A TelemetryResult indicating success or failure.
     pub fn transmit_message(&self, pkt: &TelemetryPacket) -> TelemetryResult<()> {
         pkt.validate()?;
 
@@ -688,17 +886,34 @@ impl Router {
     }
 
     // receive_serialized / receive can stay as thin wrappers:
+    /// Enqueue and process a serialized telemetry packet (byte slice).
+    /// This function will create an RxItem from the byte slice and process it.
+    /// # Arguments
+    /// * `bytes` - The serialized telemetry packet as a byte slice.
+    /// # Returns
+    /// A TelemetryResult indicating success or failure.
     pub fn receive_serialized(&self, bytes: &[u8]) -> TelemetryResult<()> {
         let item = RxItem::Serialized(Arc::from(bytes));
         self.receive_item(&item)
     }
 
+    /// Enqueue and process a telemetry packet.
+    /// This function will create an RxItem from the packet and process it.
+    /// # Arguments
+    /// * `pkt` - The TelemetryPacket to process.
+    /// # Returns
+    /// A TelemetryResult indicating success or failure.
     pub fn receive(&self, pkt: &TelemetryPacket) -> TelemetryResult<()> {
         let item = RxItem::Packet(pkt.clone());
         self.receive_item(&item)
     }
 
     /// Build a packet then send immediately.
+    /// # Arguments
+    /// * `ty` - The DataType of the packet.
+    /// * `data` - The slice of data to log.
+    /// # Returns
+    /// A TelemetryResult indicating success or failure.
     pub fn log<T: LeBytes>(&self, ty: DataType, data: &[T]) -> TelemetryResult<()> {
         log_raw(self.sender.clone(), ty, data, self.clock.now_ms(), |pkt| {
             self.transmit_message(&pkt)
@@ -706,12 +921,24 @@ impl Router {
     }
 
     /// Build a packet and queue it for later TX.
+    /// # Arguments
+    /// * `ty` - The DataType of the packet.
+    /// * `data` - The slice of data to log.
+    /// # Returns
+    /// A TelemetryResult indicating success or failure.
     pub fn log_queue<T: LeBytes>(&self, ty: DataType, data: &[T]) -> TelemetryResult<()> {
         log_raw(self.sender.clone(), ty, data, self.clock.now_ms(), |pkt| {
             self.transmit_message_queue(pkt)
         })
     }
 
+    /// Build a packet with a specific timestamp then send immediately.
+    /// # Arguments
+    /// * `ty` - The DataType of the packet.
+    /// * `timestamp` - The timestamp for the packet.
+    /// * `data` - The slice of data to log.
+    /// # Returns
+    /// A TelemetryResult indicating success or failure.
     pub fn log_ts<T: LeBytes>(
         &self,
         ty: DataType,
@@ -723,6 +950,13 @@ impl Router {
         })
     }
 
+    /// Build a packet with a specific timestamp and queue it for later TX.
+    /// # Arguments
+    /// * `ty` - The DataType of the packet.
+    /// * `timestamp` - The timestamp for the packet.
+    /// * `data` - The slice of data to log.
+    /// # Returns
+    /// A TelemetryResult indicating success or failure.
     pub fn log_queue_ts<T: LeBytes>(
         &self,
         ty: DataType,

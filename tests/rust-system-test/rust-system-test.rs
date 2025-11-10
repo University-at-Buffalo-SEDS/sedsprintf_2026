@@ -26,26 +26,19 @@ mod threaded_system_tests {
     /// Build a handler that counts packets received on the GroundStation endpoint
     /// (this plays the role of the "radio" handler in the C test).
     fn make_radio_handler(counter: Arc<AtomicUsize>) -> EndpointHandler {
-        EndpointHandler::new_packet_handler(
-            DataEndpoint::Radio,
-            move |_pkt: &TelemetryPacket| {
-                counter.fetch_add(1, Ordering::SeqCst);
-                Ok(())
-            }
-        )
+        EndpointHandler::new_packet_handler(DataEndpoint::Radio, move |_pkt: &TelemetryPacket| {
+            counter.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        })
     }
-
 
     /// Build a handler that counts packets received on the SdCard endpoint
     /// (this plays the role of the "SD" handler in the C test).
     fn make_sd_handler(counter: Arc<AtomicUsize>) -> EndpointHandler {
-        EndpointHandler::new_packet_handler (
-            DataEndpoint::SdCard,
-            move |_pkt: &TelemetryPacket| {
-                counter.fetch_add(1, Ordering::SeqCst);
-                Ok(())
-            }
-            )
+        EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt: &TelemetryPacket| {
+            counter.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        })
     }
 
     /// Helper to generate a simple float series like the C helper `make_series`.

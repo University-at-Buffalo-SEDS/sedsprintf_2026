@@ -144,6 +144,22 @@ impl TelemetryPacket {
     ///   - `payload.len() == element_count * data_type_size(get_data_type(ty))`.
     /// - For dynamic:
     ///   - Length and encoding are validated by [`validate_dynamic_len_and_content`].
+    /// # Arguments
+    /// - `ty`: logical message type (schema selector).
+    /// - `endpoints`: destination endpoint list (must be non-empty).
+    /// - `sender`: logical sender identifier (e.g. device or subsystem name).
+    /// - `timestamp`: timestamp in milliseconds.
+    /// - `payload`: raw payload bytes.
+    /// # Returns
+    /// - `Ok(TelemetryPacket)` if validation passes.
+    /// - `Err(TelemetryError)` if validation fails.
+    /// # Errors
+    /// - [`TelemetryError::EmptyEndpoints`] if `endpoints` is empty.
+    /// - [`TelemetryError::SizeMismatch`] if the payload size does not match
+    ///   the expected size for static element counts, or is not a multiple
+    ///   of the element width for dynamic types.
+    /// - [`TelemetryError::InvalidUtf8`] if the payload is a string
+    ///   type and is not valid UTF-8 .
     pub fn new(
         ty: DataType,
         endpoints: &[DataEndpoint],
@@ -183,6 +199,14 @@ impl TelemetryPacket {
     /// Convenience: create from a slice of `u8` (copied).
     ///
     /// Uses [`DEVICE_IDENTIFIER`] as the sender.
+    /// # Arguments
+    /// - `ty`: logical message type (schema selector).
+    /// - `bytes`: raw payload bytes.
+    /// - `endpoints`: destination endpoint list (must be non-empty).
+    /// - `timestamp`: timestamp in milliseconds.
+    /// # Returns
+    /// - `Ok(TelemetryPacket)` if validation passes.
+    /// - `Err(TelemetryError)` if validation fails.
     #[allow(dead_code)]
     pub fn from_u8_slice(
         ty: DataType,
@@ -203,6 +227,14 @@ impl TelemetryPacket {
     ///
     /// Uses [`DEVICE_IDENTIFIER`] as the sender. The values are packed as
     /// little-endian floats into the payload buffer.
+    /// # Arguments
+    /// - `ty`: logical message type (schema selector).
+    /// - `values`: slice of `f32` values to encode.
+    /// - `endpoints`: destination endpoint list (must be non-empty).
+    /// - `timestamp`: timestamp in milliseconds.
+    /// # Returns
+    /// - `Ok(TelemetryPacket)` if validation passes.
+    /// - `Err(TelemetryError)` if validation fails.
     #[allow(dead_code)]
     pub fn from_f32_slice(
         ty: DataType,
@@ -248,6 +280,9 @@ impl TelemetryPacket {
     ///   - `data_size == element_count * data_type_size(get_data_type(ty))`.
     /// - For dynamic:
     ///   - Length and encoding are validated by [`validate_dynamic_len_and_content`].
+    /// # Returns
+    /// - `Ok(())` if validation passes.
+    /// - `Err(TelemetryError)` if validation fails.
     pub fn validate(&self) -> TelemetryResult<()> {
         if self.endpoints.is_empty() {
             return Err(TelemetryError::EmptyEndpoints);
@@ -309,6 +344,8 @@ impl TelemetryPacket {
     ///
     /// Example:
     /// `Type: FOO, Data Size: 8, Sender: dev0, Endpoints: [EP_A, EP_B], Timestamp: 1234 (1s 234ms)`
+    /// # Returns
+    /// - Human-readable string with header fields.
     pub fn header_string(&self) -> String {
         let mut out = String::with_capacity(DEFAULT_STRING_CAPACITY);
 
@@ -338,6 +375,9 @@ impl TelemetryPacket {
     ///
     /// Returns `None` if the message `DataType` is not a `String` type or if
     /// the payload is not valid UTF-8 (after trimming trailing NUL).
+    /// # Returns
+    /// - `Some(&str)` if the payload is a valid UTF-8 string.
+    /// - `None` otherwise.
     pub fn data_as_utf8_ref(&self) -> Option<&str> {
         if get_data_type(self.ty) != MessageDataType::String {
             return None;
@@ -384,6 +424,8 @@ impl TelemetryPacket {
     /// - String payloads are rendered as `"..."`
     /// - Numeric/bool payloads are rendered as comma-separated values
     /// - Hex payloads are delegated to [`TelemetryPacket::to_hex_string`]
+    /// # Returns
+    /// - Human-readable string with header and decoded data.
     pub fn to_string(&self) -> String {
         let mut s = String::from("{");
         s.push_str(&self.header_string());
@@ -469,6 +511,8 @@ impl TelemetryPacket {
     /// Produces:
     ///
     /// `Type: ..., Data Size: ..., ..., Timestamp: ... (...), Data (hex): 0xNN 0xNN ...`
+    /// # Returns
+    /// - Human-readable string with header and hex-formatted data.
     pub fn to_hex_string(&self) -> String {
         // Header first.
         let mut s = self.header_string();
