@@ -72,7 +72,7 @@ mod embedded_alloc {
 
     /// Global allocator that forwards to `telemetryMalloc` / `telemetryFree`
     /// provided by the host environment.
-    pub struct TelemetryAlloc;
+    struct TelemetryAlloc;
 
     unsafe impl GlobalAlloc for TelemetryAlloc {
         unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
@@ -158,13 +158,17 @@ pub enum MessageElementCount {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct MessageMeta {
     /// How many elements are present (fixed vs dynamic).
-    pub element_count: MessageElementCount,
+    element_count: MessageElementCount,
     /// Allowed endpoints for this message type.
-    pub endpoints: &'static [DataEndpoint],
+    endpoints: &'static [DataEndpoint],
 }
 
 /// Lookup `MessageMeta` for a given [`DataType`] using the generated config.
-#[inline(always)]
+/// # Arguments
+/// - `ty`: Logical data type to query.
+/// # Returns
+/// - `MessageMeta` struct with element count and allowed endpoints.
+#[inline]
 pub fn message_meta(ty: DataType) -> MessageMeta {
     get_message_meta(ty)
 }
@@ -205,20 +209,32 @@ impl MessageElementCount {
 ///
 /// This is `element_size * element_count`. For dynamic types, the
 /// configuration ensures we only call this where it makes sense.
-#[inline(always)]
+/// # Arguments
+/// - `ty`: Logical data type to query.
+/// # Returns
+/// - Total static payload size in bytes.
+#[inline]
 pub fn get_needed_message_size(ty: DataType) -> usize {
     data_type_size(get_data_type(ty)) * get_message_meta(ty).element_count
 }
 
 /// Return the logical "info" type (Info/Error) for a given `DataType`.
-#[inline(always)]
+/// # Arguments
+/// - `ty`: Logical data type to query.
+/// # Returns
+/// - `MessageType` enum value.
+#[inline]
 pub const fn get_info_type(ty: DataType) -> MessageType {
     get_message_info_types(ty)
 }
 
 /// Return the *element* data type (e.g., `Float32`, `Int16`, `String`) for a
 /// given `DataType`.
-#[inline(always)]
+/// # Arguments
+/// - `ty`: Logical data type to query.
+/// # Returns
+/// - `MessageDataType` enum value.
+#[inline]
 pub const fn get_data_type(ty: DataType) -> MessageDataType {
     get_message_data_type(ty)
 }
@@ -251,6 +267,11 @@ pub enum MessageDataType {
 ///
 /// For `String` / `Hex`, this returns the fixed maximum static length
 /// configured by the schema (`MAX_STATIC_STRING_LENGTH`, `MAX_STATIC_HEX_LENGTH`).
+/// # Arguments
+/// - `dt`: Logical data type to query.
+/// # Returns
+/// - Size in bytes of a single element of that type.
+#[inline]
 pub const fn data_type_size(dt: MessageDataType) -> usize {
     match dt {
         MessageDataType::Float64 => size_of::<f64>(),
@@ -385,6 +406,9 @@ impl TelemetryErrorCode {
     pub const MIN: i32 = TelemetryErrorCode::Io as i32;
 
     /// Human-readable string for logging / debugging.
+    /// # Returns
+    /// - Static string representation of the error code.
+    #[inline]
     pub fn as_str(&self) -> &'static str {
         match self {
             TelemetryErrorCode::InvalidType => "{Invalid Type}",
@@ -405,6 +429,11 @@ impl TelemetryErrorCode {
     /// Try to convert a raw i32 error code into a [`TelemetryErrorCode`].
     ///
     /// Returns `None` if the code is out of range or not recognized.
+    /// # Arguments
+    /// - `x`: Raw i32 error code to convert.
+    /// # Returns
+    /// - `Some(TelemetryErrorCode)` if valid, `None` if invalid.
+    #[inline]
     pub fn try_from_i32(x: i32) -> Option<Self> {
         try_enum_from_i32(x)
     }
@@ -420,6 +449,11 @@ pub type TelemetryResult<T> = Result<T, TelemetryError>;
 /// Try to convert a `u32` into a `#[repr(u32)]` enum `E`.
 ///
 /// Returns `None` if the value is out of range (greater than `E::MAX`).
+/// # Arguments
+/// - `x`: Raw u32 value to convert.
+/// # Returns
+/// - `Some(E)` if valid, `None` if invalid.
+#[inline]
 pub fn try_enum_from_u32<E: ReprU32Enum>(x: u32) -> Option<E> {
     if x > E::MAX {
         return None;
@@ -433,6 +467,11 @@ pub fn try_enum_from_u32<E: ReprU32Enum>(x: u32) -> Option<E> {
 /// Try to convert an `i32` into a `#[repr(i32)]` enum `E`.
 ///
 /// Returns `None` if the value is outside the `[E::MIN, E::MAX]` range.
+/// # Arguments
+/// - `x`: Raw i32 value to convert.
+/// # Returns
+/// - `Some(E)` if valid, `None` if invalid.
+#[inline]
 pub fn try_enum_from_i32<E: ReprI32Enum>(x: i32) -> Option<E> {
     if x < E::MIN || x > E::MAX {
         return None;

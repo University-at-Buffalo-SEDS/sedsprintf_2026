@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod threaded_system_tests {
     use sedsprintf_rs::config::{DataEndpoint, DataType};
-    use sedsprintf_rs::router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, Router};
+    use sedsprintf_rs::router::{BoardConfig, Clock, EndpointHandler, Router};
     use sedsprintf_rs::telemetry_packet::TelemetryPacket;
     use sedsprintf_rs::TelemetryResult;
 
@@ -26,25 +26,19 @@ mod threaded_system_tests {
     /// Build a handler that counts packets received on the GroundStation endpoint
     /// (this plays the role of the "radio" handler in the C test).
     fn make_radio_handler(counter: Arc<AtomicUsize>) -> EndpointHandler {
-        EndpointHandler {
-            endpoint: DataEndpoint::GroundStation,
-            handler: EndpointHandlerFn::Packet(Box::new(move |_pkt: &TelemetryPacket| {
-                counter.fetch_add(1, Ordering::SeqCst);
-                Ok(())
-            })),
-        }
+        EndpointHandler::new_packet_handler(DataEndpoint::GroundStation, move |_pkt: &TelemetryPacket| {
+            counter.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        })
     }
 
     /// Build a handler that counts packets received on the SdCard endpoint
     /// (this plays the role of the "SD" handler in the C test).
     fn make_sd_handler(counter: Arc<AtomicUsize>) -> EndpointHandler {
-        EndpointHandler {
-            endpoint: DataEndpoint::SdCard,
-            handler: EndpointHandlerFn::Packet(Box::new(move |_pkt: &TelemetryPacket| {
-                counter.fetch_add(1, Ordering::SeqCst);
-                Ok(())
-            })),
-        }
+        EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt: &TelemetryPacket| {
+            counter.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        })
     }
 
     /// Helper to generate a simple float series like the C helper `make_series`.

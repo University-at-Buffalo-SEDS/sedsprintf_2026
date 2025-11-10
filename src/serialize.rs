@@ -216,24 +216,30 @@ fn expand_endpoint_bitmap(
 /// Serialize a [`TelemetryPacket`] into the compact v2 wire format.
 ///
 /// The returned `Arc<[u8]>` owns the encoded bytes and can be shared cheaply.
+/// # Arguments
+/// - `pkt`: Telemetry packet to serialize.
+///
+/// # Returns
+/// - `Arc<[u8]>`: Serialized packet in compact v2 wire format.
 pub fn serialize_packet(pkt: &TelemetryPacket) -> Arc<[u8]> {
-    let bm = build_endpoint_bitmap(&pkt.endpoints);
+    let bm = build_endpoint_bitmap(&pkt.endpoints());
 
     // Heuristic capacity: fixed prelude + bitmap + sender + payload.
-    let mut out = Vec::with_capacity(16 + EP_BITMAP_BYTES + pkt.sender.len() + pkt.payload.len());
+    let mut out =
+        Vec::with_capacity(16 + EP_BITMAP_BYTES + pkt.sender().len() + pkt.payload().len());
 
     // Prelude: NEP = number of UNIQUE endpoints (bits set in bitmap).
     let nep_unique = bitmap_popcount(&bm);
     out.push(nep_unique as u8);
 
-    write_uleb128(pkt.ty as u64, &mut out);
-    write_uleb128(pkt.data_size as u64, &mut out);
-    write_uleb128(pkt.timestamp, &mut out);
-    write_uleb128(pkt.sender.len() as u64, &mut out);
+    write_uleb128(pkt.data_type() as u64, &mut out);
+    write_uleb128(pkt.data_size() as u64, &mut out);
+    write_uleb128(pkt.timestamp(), &mut out);
+    write_uleb128(pkt.sender().len() as u64, &mut out);
 
     out.extend_from_slice(&bm);
-    out.extend_from_slice(pkt.sender.as_bytes());
-    out.extend_from_slice(&pkt.payload);
+    out.extend_from_slice(pkt.sender().as_bytes());
+    out.extend_from_slice(&pkt.payload());
 
     Arc::<[u8]>::from(out)
 }
@@ -243,6 +249,13 @@ pub fn serialize_packet(pkt: &TelemetryPacket) -> Arc<[u8]> {
 // ===========================================================================
 
 /// Deserialize a full [`TelemetryPacket`] from the compact v2 wire format.
+/// # Arguments
+/// - `buf`: Byte slice containing the serialized packet.
+/// # Returns
+/// - `TelemetryPacket`: Deserialized telemetry packet.
+/// # Errors
+/// - `TelemetryError::Deserialize` if the buffer is malformed.
+/// - `TelemetryError::InvalidType` if the data type is invalid.
 pub fn deserialize_packet(buf: &[u8]) -> Result<TelemetryPacket, TelemetryError> {
     if buf.is_empty() {
         return Err(TelemetryError::Deserialize("short prelude"));
@@ -299,6 +312,13 @@ pub fn deserialize_packet(buf: &[u8]) -> Result<TelemetryPacket, TelemetryError>
 /// - [`TelemetryEnvelope::timestamp_ms`]
 ///
 /// It **does not** touch or allocate the payload.
+/// # Arguments
+/// - `buf`: Byte slice containing the serialized packet.
+/// # Returns
+/// - `TelemetryEnvelope`: Decoded telemetry envelope.
+/// # Errors
+/// - `TelemetryError::Deserialize` if the buffer is malformed.
+/// - `TelemetryError::InvalidType` if the data type is invalid.
 pub fn peek_envelope(buf: &[u8]) -> TelemetryResult<TelemetryEnvelope> {
     if buf.is_empty() {
         return Err(TelemetryError::Deserialize("short prelude"));
@@ -348,18 +368,27 @@ pub fn peek_envelope(buf: &[u8]) -> TelemetryResult<TelemetryEnvelope> {
 /// *excluding* the endpoint bitmap, sender string, and payload.
 ///
 /// This is mainly useful for preallocation or introspection.
+/// # Arguments
+/// - `pkt`: Telemetry packet to measure.
+/// # Returns
+/// - `usize`: Size of the header in bytes.
 pub fn header_size_bytes(pkt: &TelemetryPacket) -> usize {
     let prelude = 1; // NEP (u8)
     prelude
-        + uleb128_size(pkt.ty as u32 as u64)
-        + uleb128_size(pkt.data_size as u64)
-        + uleb128_size(pkt.timestamp)
-        + uleb128_size(pkt.sender.len() as u64)
+        + uleb128_size(pkt.data_type() as u32 as u64)
+        + uleb128_size(pkt.data_size() as u64)
+        + uleb128_size(pkt.timestamp())
+        + uleb128_size(pkt.sender().len() as u64)
 }
 
 /// Compute the total wire size (header + bitmap + sender + payload) in bytes.
+/// This is mainly useful for preallocation or introspection.
+/// # Arguments
+/// - `pkt`: Telemetry packet to measure.
+/// # Returns
+/// - `usize`: Total size of the serialized packet in bytes.
 pub fn packet_wire_size(pkt: &TelemetryPacket) -> usize {
-    header_size_bytes(pkt) + EP_BITMAP_BYTES + pkt.sender.len() + pkt.payload.len()
+    header_size_bytes(pkt) + EP_BITMAP_BYTES + pkt.sender().len() + pkt.payload().len()
 }
 
 // ===========================================================================
@@ -369,6 +398,10 @@ pub fn packet_wire_size(pkt: &TelemetryPacket) -> usize {
 impl DataType {
     /// Convert a raw `u32` discriminant to `DataType`, returning `None` if out
     /// of range or invalid.
+    /// # Arguments
+    /// - `x`: Raw `u32` discriminant.
+    /// # Returns
+    /// - `Option<DataType>`: Corresponding `DataType` variant or `None
     pub fn try_from_u32(x: u32) -> Option<Self> {
         try_enum_from_u32(x)
     }
@@ -377,6 +410,10 @@ impl DataType {
 impl DataEndpoint {
     /// Convert a raw `u32` discriminant to `DataEndpoint`, returning `None` if
     /// out of range or invalid.
+    /// # Arguments
+    /// - `x`: Raw `u32` discriminant.
+    /// # Returns
+    /// - `Option<DataEndpoint>`: Corresponding `DataEndpoint` variant or `None
     pub fn try_from_u32(x: u32) -> Option<Self> {
         try_enum_from_u32(x)
     }
