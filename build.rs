@@ -3,6 +3,7 @@ use regex::Regex;
 use std::path::PathBuf;
 use std::{env, fs};
 
+
 fn main() {
     generate_c_header();
     generate_pyi_stub();
