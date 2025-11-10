@@ -169,7 +169,7 @@ fn make_error_payload(msg: &str) -> Arc<[u8]> {
 /// * `T` must implement LeBytes.
 /// * `F` must be a function that takes a TelemetryPacket and returns a TelemetryResult.
 fn log_raw<T, F>(
-    sender: Arc<str>,
+    sender: &'static str,
     ty: DataType,
     data: &[T],
     timestamp: u64,
@@ -242,7 +242,7 @@ struct RouterInner {
 /// Supports queuing, processing, and dispatching to local endpoint handlers.
 /// Thread-safe via internal locking.
 pub struct Router {
-    sender: Arc<str>,
+    sender: &'static str,
     // make TX usable across tasks
     transmit: Option<Box<dyn Fn(&[u8]) -> TelemetryResult<()> + Send + Sync>>,
     cfg: BoardConfig,
@@ -291,7 +291,7 @@ impl Router {
         Tx: Fn(&[u8]) -> TelemetryResult<()> + Send + Sync + 'static,
     {
         Self {
-            sender: DEVICE_IDENTIFIER.into(),
+            sender: DEVICE_IDENTIFIER,
             transmit: transmit.map(|t| Box::new(t) as _),
             cfg,
             state: RouterMutex::new(RouterInner {
@@ -352,7 +352,7 @@ impl Router {
         let error_pkt = TelemetryPacket::new(
             DataType::TelemetryError,
             &locals,
-            self.sender.clone(),
+            self.sender,
             self.clock.now_ms(),
             payload,
         )?;
@@ -915,7 +915,7 @@ impl Router {
     /// # Returns
     /// A TelemetryResult indicating success or failure.
     pub fn log<T: LeBytes>(&self, ty: DataType, data: &[T]) -> TelemetryResult<()> {
-        log_raw(self.sender.clone(), ty, data, self.clock.now_ms(), |pkt| {
+        log_raw(self.sender, ty, data, self.clock.now_ms(), |pkt| {
             self.transmit_message(&pkt)
         })
     }
@@ -927,7 +927,7 @@ impl Router {
     /// # Returns
     /// A TelemetryResult indicating success or failure.
     pub fn log_queue<T: LeBytes>(&self, ty: DataType, data: &[T]) -> TelemetryResult<()> {
-        log_raw(self.sender.clone(), ty, data, self.clock.now_ms(), |pkt| {
+        log_raw(self.sender, ty, data, self.clock.now_ms(), |pkt| {
             self.transmit_message_queue(pkt)
         })
     }
@@ -945,7 +945,7 @@ impl Router {
         timestamp: u64,
         data: &[T],
     ) -> TelemetryResult<()> {
-        log_raw(self.sender.clone(), ty, data, timestamp, |pkt| {
+        log_raw(self.sender, ty, data, timestamp, |pkt| {
             self.transmit_message(&pkt)
         })
     }
@@ -963,7 +963,7 @@ impl Router {
         timestamp: u64,
         data: &[T],
     ) -> TelemetryResult<()> {
-        log_raw(self.sender.clone(), ty, data, timestamp, |pkt| {
+        log_raw(self.sender, ty, data, timestamp, |pkt| {
             self.transmit_message_queue(pkt)
         })
     }
