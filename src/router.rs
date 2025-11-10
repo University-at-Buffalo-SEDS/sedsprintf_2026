@@ -218,7 +218,7 @@ fn fallback_stdout(msg: &str) {
     }
     #[cfg(not(feature = "std"))]
     {
-        extern "C" {
+        unsafe extern "C" {
             fn seds_println(msg: *const u8, len: usize);
         }
         unsafe {
