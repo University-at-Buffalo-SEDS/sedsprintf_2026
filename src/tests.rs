@@ -2,7 +2,7 @@ use crate::config::{get_message_meta, MAX_STATIC_HEX_LENGTH, MAX_STATIC_STRING_L
 use crate::get_needed_message_size;
 use crate::router::EndpointHandler;
 use crate::telemetry_packet::{DataEndpoint, DataType, TelemetryPacket};
-use crate::{get_data_type, message_meta, router, MessageDataType, TelemetryError};
+use crate::{get_data_type, message_meta, MessageDataType, TelemetryError};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -46,13 +46,10 @@ fn test_payload_len_for(ty: DataType) -> usize {
 ///
 /// Used by various queue/timeout and concurrency tests.
 fn get_handler(rx_count_c: Arc<AtomicUsize>) -> EndpointHandler {
-    EndpointHandler {
-        endpoint: DataEndpoint::SdCard,
-        handler: router::EndpointHandlerFn::Packet(Box::new(move |_pkt: &TelemetryPacket| {
-            rx_count_c.fetch_add(1, Ordering::SeqCst);
-            Ok(())
-        })),
-    }
+    EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt: &TelemetryPacket| {
+        rx_count_c.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    })
 }
 
 /// Build a handler for `SD_CARD` that:
@@ -60,28 +57,25 @@ fn get_handler(rx_count_c: Arc<AtomicUsize>) -> EndpointHandler {
 /// - decodes the payload as little-endian `f32`,
 /// - stores `(DataType, Vec<f32>)` into the shared `Mutex`.
 fn get_sd_card_handler(sd_seen_c: Arc<Mutex<Option<(DataType, Vec<f32>)>>>) -> EndpointHandler {
-    EndpointHandler {
-        endpoint: DataEndpoint::SdCard,
-        handler: router::EndpointHandlerFn::Packet(Box::new(move |pkt: &TelemetryPacket| {
-            // sanity: element sizing must be 4 bytes (f32) for GPS_DATA
-            let elems = get_message_meta(pkt.data_type())
-                .element_count
-                .into()
-                .max(1);
-            let per_elem = get_needed_message_size(pkt.data_type()) / elems;
-            assert_eq!(pkt.data_type(), DataType::GpsData);
-            assert_eq!(per_elem, 4, "GPS_DATA expected f32 elements");
+    EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |pkt: &TelemetryPacket| {
+        // sanity: element sizing must be 4 bytes (f32) for GPS_DATA
+        let elems = get_message_meta(pkt.data_type())
+            .element_count
+            .into()
+            .max(1);
+        let per_elem = get_needed_message_size(pkt.data_type()) / elems;
+        assert_eq!(pkt.data_type(), DataType::GpsData);
+        assert_eq!(per_elem, 4, "GPS_DATA expected f32 elements");
 
-            // decode f32 little-endian
-            let mut vals = Vec::with_capacity(pkt.payload().len() / 4);
-            for chunk in pkt.payload().chunks_exact(4) {
-                vals.push(f32::from_le_bytes(chunk.try_into().unwrap()));
-            }
+        // decode f32 little-endian
+        let mut vals = Vec::with_capacity(pkt.payload().len() / 4);
+        for chunk in pkt.payload().chunks_exact(4) {
+            vals.push(f32::from_le_bytes(chunk.try_into().unwrap()));
+        }
 
-            *sd_seen_c.lock().unwrap() = Some((pkt.data_type(), vals));
-            Ok(())
-        })),
-    }
+        *sd_seen_c.lock().unwrap() = Some((pkt.data_type(), vals));
+        Ok(())
+    })
 }
 
 /// Helper that asserts `result` is a [`TelemetryError::HandlerError`].
@@ -504,24 +498,19 @@ mod handler_failure_tests {
         let recv_count_c = recv_count.clone();
         let last_payload_c = last_payload.clone();
 
-        let failing = EndpointHandler {
-            endpoint: failing_ep,
-            // No explicit return type -> infers crate::Result<()>
-            handler: router::EndpointHandlerFn::Packet(Box::new(|_pkt: &TelemetryPacket| {
-                Err(TelemetryError::BadArg)
-            })),
-        };
+        let failing = EndpointHandler::new_packet_handler(failing_ep, |_pkt: &TelemetryPacket| {
+            Err(TelemetryError::BadArg)
+        });
 
-        let capturing = EndpointHandler {
-            endpoint: other_ep,
-            handler: router::EndpointHandlerFn::Packet(Box::new(move |pkt: &TelemetryPacket| {
+        let capturing =
+            EndpointHandler::new_packet_handler(other_ep, move |pkt: &TelemetryPacket| {
                 if pkt.data_type() == DataType::TelemetryError {
                     *last_payload_c.lock().unwrap() = pkt.to_string();
                 }
                 recv_count_c.fetch_add(1, Ordering::SeqCst);
                 Ok(())
-            })),
-        };
+            });
+
         let box_clock = StepClock::new_default_box();
 
         let router = Router::new::<fn(&[u8]) -> crate::TelemetryResult<()>>(
@@ -577,16 +566,14 @@ mod handler_failure_tests {
         let saw_error_c = saw_error.clone();
         let last_payload_c = last_payload.clone();
 
-        let capturing = EndpointHandler {
-            endpoint: local_ep,
-            handler: router::EndpointHandlerFn::Packet(Box::new(move |pkt: &TelemetryPacket| {
+        let capturing =
+            EndpointHandler::new_packet_handler(local_ep, move |pkt: &TelemetryPacket| {
                 if pkt.data_type() == DataType::TelemetryError {
                     *last_payload_c.lock().unwrap() = pkt.to_string();
                     saw_error_c.fetch_add(1, Ordering::SeqCst);
                 }
                 Ok(())
-            })),
-        };
+            });
 
         let tx_fail =
             |_bytes: &[u8]| -> crate::TelemetryResult<()> { Err(TelemetryError::Io("boom")) };
@@ -632,14 +619,14 @@ mod timeout_tests {
     //! including u64 wraparound handling.
 
     use crate::config::DataEndpoint;
+    use crate::router::EndpointHandler;
     use crate::tests::get_handler;
     use crate::{
-        router, router::BoardConfig, router::Clock, router::Router, telemetry_packet::DataType,
+        router::BoardConfig, router::Clock, router::Router, telemetry_packet::DataType,
         telemetry_packet::TelemetryPacket, TelemetryResult,
     };
     use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     use std::sync::Arc;
-
     // ---------------- Mock clock ----------------
 
     /// A deterministic clock that steps forward by `step` ms on each `now_ms()`
@@ -706,13 +693,13 @@ mod timeout_tests {
 
         let rx_count = Arc::new(AtomicUsize::new(0));
         let rx_count_c = rx_count.clone();
-        let handler = router::EndpointHandler {
-            endpoint: DataEndpoint::SdCard,
-            handler: router::EndpointHandlerFn::Packet(Box::new(move |_pkt: &TelemetryPacket| {
+        let handler = EndpointHandler::new_packet_handler(
+            DataEndpoint::SdCard,
+            move |_pkt: &TelemetryPacket| {
                 rx_count_c.fetch_add(1, Ordering::SeqCst);
                 Ok(())
-            })),
-        };
+            },
+        );
 
         let box_clock = StepClock::new_default_box();
 
@@ -905,7 +892,7 @@ mod tests_extra {
     use crate::config::DataEndpoint;
     use crate::tests::test_payload_len_for;
     use crate::{
-        config::DataType, router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, Router}, serialize,
+        config::DataType, router::{BoardConfig, Clock, EndpointHandler, Router}, serialize,
         telemetry_packet::TelemetryPacket,
         TelemetryError,
         TelemetryErrorCode,
@@ -1273,13 +1260,13 @@ mod tests_extra {
         // Local handler that counts receives.
         let rx_count = Arc::new(AtomicUsize::new(0));
         let rx_count_c = rx_count.clone();
-        let handler = EndpointHandler {
-            endpoint: DataEndpoint::SdCard,
-            handler: EndpointHandlerFn::Packet(Box::new(move |_pkt: &TelemetryPacket| {
+        let handler = EndpointHandler::new_packet_handler(
+            DataEndpoint::SdCard,
+            move |_pkt: &TelemetryPacket| {
                 rx_count_c.fetch_add(1, Ordering::SeqCst);
                 Ok(())
-            })),
-        };
+            },
+        );
 
         let r = Router::new(Some(tx), BoardConfig::new(vec![handler]), zero_clock());
 
@@ -1332,13 +1319,13 @@ mod tests_extra {
         let counter_c = counter.clone();
 
         // A handler that always fails but bumps a counter on each attempt.
-        let failing = EndpointHandler {
-            endpoint: DataEndpoint::SdCard,
-            handler: EndpointHandlerFn::Packet(Box::new(move |_pkt: &TelemetryPacket| {
+        let failing = EndpointHandler::new_packet_handler(
+            DataEndpoint::SdCard,
+            move |_pkt: &TelemetryPacket| {
                 counter_c.fetch_add(1, Ordering::SeqCst);
                 Err(TelemetryError::BadArg)
-            })),
-        };
+            },
+        );
 
         // Router with no TX (we only care about local handler invocation count).
         let r = Router::new::<fn(&[u8]) -> TelemetryResult<()>>(
@@ -1438,15 +1425,15 @@ mod tests_extra {
         let last_payload = Arc::new(Mutex::new(String::new()));
         let last_payload_c = last_payload.clone();
 
-        let capturing = EndpointHandler {
-            endpoint: DataEndpoint::SdCard,
-            handler: EndpointHandlerFn::Packet(Box::new(move |pkt: &TelemetryPacket| {
+        let capturing = EndpointHandler::new_packet_handler(
+            DataEndpoint::SdCard,
+            move |pkt: &TelemetryPacket| {
                 if pkt.data_type() == DataType::TelemetryError {
                     *last_payload_c.lock().unwrap() = pkt.to_string();
                 }
                 Ok(())
-            })),
-        };
+            },
+        );
 
         let r = Router::new(
             Some(failing_tx),
@@ -1493,7 +1480,7 @@ mod tests_more {
     use crate::config::get_message_meta;
     use crate::{
         config::{DataEndpoint, DataType}, get_data_type, get_needed_message_size, message_meta,
-        router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, Router}, serialize, telemetry_packet::TelemetryPacket,
+        router::{BoardConfig, Clock, EndpointHandler, Router}, serialize, telemetry_packet::TelemetryPacket,
         MessageDataType,
         MessageElementCount, TelemetryError, TelemetryErrorCode,
         TelemetryResult,
@@ -1624,14 +1611,12 @@ mod tests_more {
 
         let called = StdArc::new(AtomicUsize::new(0));
         let c = called.clone();
-        let handler = EndpointHandler {
-            endpoint: DataEndpoint::SdCard,
-            handler: EndpointHandlerFn::Serialized(Box::new(move |bytes: &[u8]| {
+        let handler =
+            EndpointHandler::new_serialized_handler(DataEndpoint::SdCard, move |bytes: &[u8]| {
                 assert!(bytes.len() >= serialize::header_size_bytes(&pkt));
                 c.fetch_add(1, Ordering::SeqCst);
                 Ok(())
-            })),
-        };
+            });
 
         let r = Router::new::<fn(&[u8]) -> TelemetryResult<()>>(
             None,
@@ -1659,20 +1644,16 @@ mod tests_more {
         let ph = packet_called.clone();
         let sh = serialized_called.clone();
 
-        let packet_h = EndpointHandler {
-            endpoint: DataEndpoint::SdCard,
-            handler: EndpointHandlerFn::Packet(Box::new(move |_pkt| {
-                ph.fetch_add(1, Ordering::SeqCst);
-                Ok(())
-            })),
-        };
-        let serialized_h = EndpointHandler {
-            endpoint: DataEndpoint::Radio,
-            handler: EndpointHandlerFn::Serialized(Box::new(move |_b| {
+        let packet_h = EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt| {
+            ph.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        });
+
+        let serialized_h =
+            EndpointHandler::new_serialized_handler(DataEndpoint::Radio, move |_b| {
                 sh.fetch_add(1, Ordering::SeqCst);
                 Ok(())
-            })),
-        };
+            });
 
         let r = Router::new::<fn(&[u8]) -> TelemetryResult<()>>(
             None,
@@ -1698,13 +1679,14 @@ mod tests_more {
 
         let hits = StdArc::new(AtomicUsize::new(0));
         let h = hits.clone();
-        let handler = EndpointHandler {
-            endpoint: DataEndpoint::SdCard,
-            handler: EndpointHandlerFn::Packet(Box::new(move |_pkt| {
+        let handler = EndpointHandler::new_packet_handler(
+            DataEndpoint::SdCard,
+            move |pkt: &TelemetryPacket| {
+                pkt.validate().unwrap();
                 h.fetch_add(1, Ordering::SeqCst);
                 Ok(())
-            })),
-        };
+            },
+        );
 
         let r = Router::new(Some(tx), BoardConfig::new(vec![handler]), zero_clock());
         let pkt = TelemetryPacket::from_f32_slice(
@@ -1726,13 +1708,10 @@ mod tests_more {
     fn receive_direct_packet_invokes_handlers() {
         let called = StdArc::new(AtomicUsize::new(0));
         let c = called.clone();
-        let handler = EndpointHandler {
-            endpoint: DataEndpoint::SdCard,
-            handler: EndpointHandlerFn::Packet(Box::new(move |_pkt| {
-                c.fetch_add(1, Ordering::SeqCst);
-                Ok(())
-            })),
-        };
+        let handler = EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt| {
+            c.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        });
 
         let r = Router::new::<fn(&[u8]) -> TelemetryResult<()>>(
             None,
@@ -1763,15 +1742,12 @@ mod tests_more {
 
         let captured = StdArc::new(Mutex::new(String::new()));
         let c = captured.clone();
-        let handler = EndpointHandler {
-            endpoint: DataEndpoint::SdCard,
-            handler: EndpointHandlerFn::Packet(Box::new(move |pkt| {
-                if pkt.data_type() == DataType::TelemetryError {
-                    *c.lock().unwrap() = pkt.to_string();
-                }
-                Ok(())
-            })),
-        };
+        let handler = EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |pkt| {
+            if pkt.data_type() == DataType::TelemetryError {
+                *c.lock().unwrap() = pkt.to_string();
+            }
+            Ok(())
+        });
 
         let r = Router::new(
             Some(failing_tx),
@@ -1908,13 +1884,10 @@ mod tests_more {
 
         let rx_count = Arc::new(AtomicUsize::new(0));
         let rxc = rx_count.clone();
-        let handler = EndpointHandler {
-            endpoint: DataEndpoint::SdCard,
-            handler: EndpointHandlerFn::Packet(Box::new(move |_pkt| {
-                rxc.fetch_add(1, Ordering::SeqCst);
-                Ok(())
-            })),
-        };
+        let handler = EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt| {
+            rxc.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        });
 
         let router = Router::new(Some(tx), BoardConfig::new(vec![handler]), Box::new(|| 0u64));
 
@@ -1955,7 +1928,7 @@ mod concurrency_tests {
 
     use crate::{
         config::{DataEndpoint, DataType},
-        router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, Router},
+        router::{BoardConfig, Clock, EndpointHandler, Router},
         serialize,
         telemetry_packet::TelemetryPacket,
         TelemetryResult,
@@ -1997,13 +1970,13 @@ mod concurrency_tests {
         // Local handler that counts how many packets it sees.
         let hits = Arc::new(AtomicUsize::new(0));
         let hits_c = hits.clone();
-        let handler = EndpointHandler {
-            endpoint: DataEndpoint::SdCard,
-            handler: EndpointHandlerFn::Packet(Box::new(move |_pkt: &TelemetryPacket| {
+        let handler = EndpointHandler::new_packet_handler(
+            DataEndpoint::SdCard,
+            move |_pkt: &TelemetryPacket| {
                 hits_c.fetch_add(1, Ordering::SeqCst);
                 Ok(())
-            })),
-        };
+            },
+        );
 
         // Router with no TX; we only care about RX + local delivery.
         let router = Router::new::<fn(&[u8]) -> TelemetryResult<()>>(
@@ -2073,13 +2046,13 @@ mod concurrency_tests {
         // Handler that counts how many times it is invoked.
         let hits = Arc::new(AtomicUsize::new(0));
         let hits_c = hits.clone();
-        let handler = EndpointHandler {
-            endpoint: DataEndpoint::SdCard,
-            handler: EndpointHandlerFn::Packet(Box::new(move |_pkt: &TelemetryPacket| {
+        let handler = EndpointHandler::new_packet_handler(
+            DataEndpoint::SdCard,
+            move |_pkt: &TelemetryPacket| {
                 hits_c.fetch_add(1, Ordering::SeqCst);
                 Ok(())
-            })),
-        };
+            },
+        );
 
         // Router with no TX; only exercising receive path + fan-out.
         let router = Router::new::<fn(&[u8]) -> TelemetryResult<()>>(
@@ -2140,13 +2113,13 @@ mod concurrency_tests {
         // Local handler that counts how many packets it sees.
         let rx_count = Arc::new(AtomicUsize::new(0));
         let rxc = rx_count.clone();
-        let handler = EndpointHandler {
-            endpoint: DataEndpoint::SdCard,
-            handler: EndpointHandlerFn::Packet(Box::new(move |_pkt: &TelemetryPacket| {
+        let handler = EndpointHandler::new_packet_handler(
+            DataEndpoint::SdCard,
+            move |_pkt: &TelemetryPacket| {
                 rxc.fetch_add(1, Ordering::SeqCst);
                 Ok(())
-            })),
-        };
+            },
+        );
 
         // Shared router: TX + one local endpoint.
         let router = Router::new(Some(tx), BoardConfig::new(vec![handler]), zero_clock());
@@ -2208,13 +2181,13 @@ mod concurrency_tests {
         // Handler that counts packets (both TX-local and RX-delivered).
         let rx_count = Arc::new(AtomicUsize::new(0));
         let rxc = rx_count.clone();
-        let handler = EndpointHandler {
-            endpoint: DataEndpoint::SdCard,
-            handler: EndpointHandlerFn::Packet(Box::new(move |_pkt: &TelemetryPacket| {
+        let handler = EndpointHandler::new_packet_handler(
+            DataEndpoint::SdCard,
+            move |_pkt: &TelemetryPacket| {
                 rxc.fetch_add(1, Ordering::SeqCst);
                 Ok(())
-            })),
-        };
+            },
+        );
 
         let router = Router::new(Some(tx), BoardConfig::new(vec![handler]), zero_clock());
         let r = Arc::new(router);

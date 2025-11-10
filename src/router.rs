@@ -17,13 +17,44 @@ pub enum RxItem {
 // -------------------- endpoint + board config --------------------
 // Make handlers usable across tasks
 pub enum EndpointHandlerFn {
-    Packet(Box<dyn Fn(&TelemetryPacket) -> TelemetryResult<()> + Send + Sync>),
-    Serialized(Box<dyn Fn(&[u8]) -> TelemetryResult<()> + Send + Sync>),
+    Packet(Arc<dyn Fn(&TelemetryPacket) -> TelemetryResult<()> + Send + Sync>),
+    Serialized(Arc<dyn Fn(&[u8]) -> TelemetryResult<()> + Send + Sync>),
 }
 
 pub struct EndpointHandler {
-    pub endpoint: DataEndpoint,
-    pub handler: EndpointHandlerFn,
+    endpoint: DataEndpoint,
+    handler: EndpointHandlerFn,
+}
+
+impl EndpointHandler {
+    pub fn new_packet_handler<F>(endpoint: DataEndpoint, f: F) -> Self
+    where
+        F: Fn(&TelemetryPacket) -> TelemetryResult<()> + Send + Sync + 'static,
+    {
+        Self {
+            endpoint,
+            handler: EndpointHandlerFn::Packet(Arc::new(f)),
+        }
+    }
+
+    pub fn new_serialized_handler<F>(endpoint: DataEndpoint, f: F) -> Self
+    where
+        F: Fn(&[u8]) -> TelemetryResult<()> + Send + Sync + 'static,
+    {
+        Self {
+            endpoint,
+            handler: EndpointHandlerFn::Serialized(Arc::new(f)),
+        }
+    }
+
+    /// Return the endpoint that the handler is registered for.
+    pub fn get_endpoint(&self) -> DataEndpoint {
+        self.endpoint
+    }
+    /// Return a clone of the handler function.
+    pub fn get_handler(&self) -> &EndpointHandlerFn {
+        &self.handler
+    }
 }
 
 pub trait Clock {
@@ -39,7 +70,7 @@ impl<T: Fn() -> u64> Clock for T {
 
 #[derive(Default)]
 pub struct BoardConfig {
-    pub handlers: Arc<[EndpointHandler]>,
+    handlers: Arc<[EndpointHandler]>,
 }
 
 impl BoardConfig {

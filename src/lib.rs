@@ -72,7 +72,7 @@ mod embedded_alloc {
 
     /// Global allocator that forwards to `telemetryMalloc` / `telemetryFree`
     /// provided by the host environment.
-    pub struct TelemetryAlloc;
+    struct TelemetryAlloc;
 
     unsafe impl GlobalAlloc for TelemetryAlloc {
         unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
