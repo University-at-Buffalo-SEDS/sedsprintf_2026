@@ -98,7 +98,7 @@ by creating shims that expose pvPortMalloc and vPortFree.
   provided by your RTOS.
 
 ```C
-// telemetry_alloc.c
+// telemetry_hooks.c
 #include <stddef.h>
 #include <stdlib.h>
 
@@ -107,6 +107,7 @@ by creating shims that expose pvPortMalloc and vPortFree.
  *
  *   void *telemetryMalloc(size_t);
  *   void telemetryFree(void *);
+ *   void seds_println(const char *, const size_t);
  *
  */
 
@@ -118,5 +119,12 @@ void *telemetryMalloc(size_t xSize)
 void telemetryFree(void *pv)
 {
     free(pv);
+}
+
+void seds_println(const char *str, const size_t len)
+{
+    // Implement your logging mechanism here, for example:
+    fwrite(str, 1, len, stdout);
+    fwrite("\n", 1, 1, stdout);
 }
 ```

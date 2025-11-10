@@ -29,7 +29,7 @@ use pyo3::types::{PyBytes, PyDict, PyList, PyModule, PyTuple};
 use std::sync::{Arc as SArc, Mutex};
 
 use crate::{
-    config::DataEndpoint, get_needed_message_size, message_meta, router::{BoardConfig, Clock, EndpointHandler, EndpointHandlerFn, LeBytes, Router},
+    config::DataEndpoint, get_needed_message_size, message_meta, router::{BoardConfig, Clock, EndpointHandler, LeBytes, Router},
     serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet},
     telemetry_packet::{DataType, TelemetryPacket},
     try_enum_from_u32, MessageElementCount,
@@ -118,37 +118,37 @@ impl PyPacket {
     /// DataType as an integer (see `DataType` IntEnum).
     #[getter]
     fn ty(&self) -> u32 {
-        self.inner.ty as u32
+        self.inner.data_type() as u32
     }
 
     /// Declared data size for the packet payload, in bytes.
     #[getter]
     fn data_size(&self) -> usize {
-        self.inner.data_size
+        self.inner.data_size()
     }
 
     /// Sender identifier as a UTF-8 string.
     #[getter]
     fn sender(&self) -> String {
-        self.inner.sender.to_string()
+        self.inner.sender().to_string()
     }
 
     /// Endpoints as integer IDs (see `DataEndpoint` IntEnum).
     #[getter]
     fn endpoints(&self) -> Vec<u32> {
-        self.inner.endpoints.iter().map(|e| *e as u32).collect()
+        self.inner.endpoints().iter().map(|e| *e as u32).collect()
     }
 
     /// Packet timestamp in milliseconds (source-defined semantics).
     #[getter]
     fn timestamp_ms(&self) -> u64 {
-        self.inner.timestamp
+        self.inner.timestamp()
     }
 
     /// Raw payload bytes.
     #[getter]
     fn payload<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
-        PyBytes::new(py, &self.inner.payload)
+        PyBytes::new(py, &self.inner.payload())
     }
 
     /// Human-readable header string (no payload).
@@ -286,23 +286,20 @@ impl PyRouter {
                     let cb_for_closure = cb.clone_ref(py);
                     keep_pkt.push(cb);
 
-                    let eh = EndpointHandler {
-                        endpoint,
-                        handler: EndpointHandlerFn::Packet(Box::new(move |pkt| {
-                            Python::attach(|py| {
-                                let py_pkt = PyPacket { inner: pkt.clone() };
-                                let any = Py::new(py, py_pkt)
-                                    .map_err(|_| TelemetryError::Io("packet wrapper"))?;
-                                match cb_for_closure.call1(py, (&any,)) {
-                                    Ok(_) => Ok(()),
-                                    Err(err) => {
-                                        err.restore(py);
-                                        Err(TelemetryError::Io("packet handler error"))
-                                    }
+                    let eh = EndpointHandler::new_packet_handler(endpoint, move |pkt| {
+                        Python::attach(|py| {
+                            let py_pkt = PyPacket { inner: pkt.clone() };
+                            let any = Py::new(py, py_pkt)
+                                .map_err(|_| TelemetryError::Io("packet wrapper"))?;
+                            match cb_for_closure.call1(py, (&any,)) {
+                                Ok(_) => Ok(()),
+                                Err(err) => {
+                                    err.restore(py);
+                                    Err(TelemetryError::Io("packet handler error"))
                                 }
-                            })
-                        })),
-                    };
+                            }
+                        })
+                    });
                     handlers_vec.push(eh);
                 }
 
@@ -312,21 +309,18 @@ impl PyRouter {
                     let cb_for_closure = cb.clone_ref(py);
                     keep_ser.push(cb);
 
-                    let eh = EndpointHandler {
-                        endpoint,
-                        handler: EndpointHandlerFn::Serialized(Box::new(move |bytes| {
-                            Python::attach(|py| {
-                                let arg = PyBytes::new(py, bytes);
-                                match cb_for_closure.call1(py, (&arg,)) {
-                                    Ok(_) => Ok(()),
-                                    Err(err) => {
-                                        err.restore(py);
-                                        Err(TelemetryError::Io("serialized handler error"))
-                                    }
+                    let eh = EndpointHandler::new_serialized_handler(endpoint, move |bytes| {
+                        Python::attach(|py| {
+                            let arg = PyBytes::new(py, bytes);
+                            match cb_for_closure.call1(py, (&arg,)) {
+                                Ok(_) => Ok(()),
+                                Err(err) => {
+                                    err.restore(py);
+                                    Err(TelemetryError::Io("serialized handler error"))
                                 }
-                            })
-                        })),
-                    };
+                            }
+                        })
+                    });
                     handlers_vec.push(eh);
                 }
             }

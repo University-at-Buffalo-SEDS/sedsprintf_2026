@@ -10,8 +10,8 @@
 
 use crate::{
     config::DataEndpoint, do_vec_log_typed, get_needed_message_size, message_meta,
-    router,
-    router::{BoardConfig, EndpointHandler, Router}, router::{Clock, LeBytes}, serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet}, telemetry_packet::{DataType, TelemetryPacket},
+    router::{BoardConfig, EndpointHandler, Router},
+    router::{Clock, LeBytes}, serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet}, telemetry_packet::{DataType, TelemetryPacket},
     MessageElementCount,
     TelemetryError,
     TelemetryErrorCode,
@@ -121,15 +121,15 @@ pub struct SedsRouter {
 /// Must match the C header layout for `SedsPacketView`.
 #[repr(C)]
 pub struct SedsPacketView {
-    pub ty: u32,
-    pub data_size: usize,
-    pub sender: *const c_char, // pointer
-    pub sender_len: usize,     // length
-    pub endpoints: *const u32,
-    pub num_endpoints: usize,
-    pub timestamp: u64,
-    pub payload: *const u8,
-    pub payload_len: usize,
+    ty: u32,
+    data_size: usize,
+    sender: *const c_char, // pointer
+    sender_len: usize,     // length
+    endpoints: *const u32,
+    num_endpoints: usize,
+    timestamp: u64,
+    payload: *const u8,
+    payload_len: usize,
 }
 
 /// Transmit callback signature used from C.
@@ -145,10 +145,10 @@ type CSerializedHandler =
 /// C-facing endpoint descriptor (must match C header).
 #[repr(C)]
 pub struct SedsLocalEndpointDesc {
-    pub endpoint: u32,                          // DataEndpoint as u32
-    pub packet_handler: CEndpointHandler,       // optional
-    pub serialized_handler: CSerializedHandler, // optional
-    pub user: *mut c_void,
+    endpoint: u32,                          // DataEndpoint as u32
+    packet_handler: CEndpointHandler,       // optional
+    serialized_handler: CSerializedHandler, // optional
+    user: *mut c_void,
 }
 
 #[derive(Copy, Clone)]
@@ -418,72 +418,76 @@ pub extern "C" fn seds_router_new(
 
             // If a PACKET handler is provided, register it
             if let Some(cb_fn) = desc.packet_handler {
-                let eh = EndpointHandler {
-                    endpoint,
-                    handler: router::EndpointHandlerFn::Packet(Box::new(
-                        move |pkt: &TelemetryPacket| {
-                            // Fast path: up to STACK_EPS endpoints, no heap allocation
-                            let mut stack_eps: [u32; STACK_EPS] = [0; STACK_EPS];
+                let eh =
+                    EndpointHandler::new_packet_handler(endpoint, move |pkt: &TelemetryPacket| {
+                        // Fast path: up to STACK_EPS endpoints, no heap allocation
+                        let mut stack_eps: [u32; STACK_EPS] = [0; STACK_EPS];
 
-                            let (endpoints_ptr, num_endpoints, _owned_vec);
-                            if pkt.endpoints.len() <= STACK_EPS {
-                                for (i, e) in pkt.endpoints.iter().enumerate() {
-                                    stack_eps[i] = *e as u32;
-                                }
-                                endpoints_ptr = stack_eps.as_ptr();
-                                num_endpoints = pkt.endpoints.len();
-                                _owned_vec = None::<Vec<u32>>; // lifetimes: keep binding
-                            } else {
-                                // Rare path: heap
-                                let mut eps_u32 = Vec::with_capacity(pkt.endpoints.len());
-                                for e in pkt.endpoints.iter() {
-                                    eps_u32.push(*e as u32);
-                                }
-                                endpoints_ptr = eps_u32.as_ptr();
-                                num_endpoints = eps_u32.len();
-                                _owned_vec = Some(eps_u32); // ensure vec lives until after callback
+                        // Decide whether we use the stack array or a heap Vec
+                        let (endpoints_ptr, num_endpoints, _owned_vec): (
+                            *const u32,
+                            usize,
+                            Option<Vec<u32>>,
+                        ) = if pkt.endpoints().len() <= STACK_EPS {
+                            for (i, e) in pkt.endpoints().iter().enumerate() {
+                                stack_eps[i] = *e as u32;
                             }
-
-                            let sender_bytes = pkt.sender.as_bytes();
-                            let view = SedsPacketView {
-                                ty: pkt.ty as u32,
-                                data_size: pkt.data_size,
-                                sender: sender_bytes.as_ptr() as *const c_char,
-                                sender_len: sender_bytes.len(),
-                                endpoints: endpoints_ptr,
-                                num_endpoints,
-                                timestamp: pkt.timestamp,
-                                payload: pkt.payload.as_ptr(),
-                                payload_len: pkt.payload.len(),
-                            };
-
-                            let code = cb_fn(&view as *const _, user_addr as *mut c_void);
-                            if code == status_from_result_code(SedsResult::SedsOk) {
-                                Ok(())
-                            } else {
-                                Err(TelemetryError::Io("handler error"))
+                            (
+                                stack_eps.as_ptr(),
+                                pkt.endpoints().len(),
+                                None, // no heap allocation used
+                            )
+                        } else {
+                            // Rare path: heap
+                            let mut eps_u32 = Vec::with_capacity(pkt.endpoints().len());
+                            for e in pkt.endpoints().iter() {
+                                eps_u32.push(*e as u32);
                             }
-                        },
-                    )),
-                };
+                            let ptr = eps_u32.as_ptr();
+                            let len = eps_u32.len();
+                            (
+                                ptr,
+                                len,
+                                Some(eps_u32), // keep Vec alive for the duration of the call
+                            )
+                        };
+
+                        let sender_bytes = pkt.sender().as_bytes();
+                        let view = SedsPacketView {
+                            ty: pkt.data_type() as u32,
+                            data_size: pkt.data_size(),
+                            sender: sender_bytes.as_ptr() as *const c_char,
+                            sender_len: sender_bytes.len(),
+                            endpoints: endpoints_ptr,
+                            num_endpoints,
+                            timestamp: pkt.timestamp(),
+                            payload: pkt.payload().as_ptr(),
+                            payload_len: pkt.payload().len(),
+                        };
+
+                        let code = cb_fn(&view as *const _, user_addr as *mut c_void);
+                        if code == status_from_result_code(SedsResult::SedsOk) {
+                            Ok(())
+                        } else {
+                            Err(TelemetryError::Io("handler error"))
+                        }
+                    });
+
                 v.push(eh);
             }
 
             // If a SERIALIZED handler is provided, register it
             if let Some(cb_fn) = desc.serialized_handler {
-                let eh = EndpointHandler {
-                    endpoint,
-                    handler: router::EndpointHandlerFn::Serialized(Box::new(
-                        move |bytes: &[u8]| {
-                            let code = cb_fn(bytes.as_ptr(), bytes.len(), user_addr as *mut c_void);
-                            if code == status_from_result_code(SedsResult::SedsOk) {
-                                Ok(())
-                            } else {
-                                Err(TelemetryError::Io("handler error"))
-                            }
-                        },
-                    )),
-                };
+                let eh =
+                    EndpointHandler::new_serialized_handler(endpoint, move |bytes: &[u8]| {
+                        let code = cb_fn(bytes.as_ptr(), bytes.len(), user_addr as *mut c_void);
+                        if code == status_from_result_code(SedsResult::SedsOk) {
+                            Ok(())
+                        } else {
+                            Err(TelemetryError::Io("handler error"))
+                        }
+                    });
+
                 v.push(eh);
             }
         }
@@ -1421,7 +1425,7 @@ pub extern "C" fn seds_pkt_deserialize_owned(bytes: *const u8, len: usize) -> *m
         return ptr::null_mut();
     }
 
-    let endpoints_u32: Vec<u32> = tpkt.endpoints.iter().map(|e| *e as u32).collect();
+    let endpoints_u32: Vec<u32> = tpkt.endpoints().iter().map(|e| *e as u32).collect();
     let owned = SedsOwnedPacket {
         inner: tpkt,
         endpoints_u32,
@@ -1456,18 +1460,18 @@ pub extern "C" fn seds_owned_pkt_view(
     let inner = &pkt.inner;
 
     // sender bytes (Arc<str> -> &[u8])
-    let sender_bytes = inner.sender.as_bytes();
+    let sender_bytes = inner.sender().as_bytes();
 
     let view = SedsPacketView {
-        ty: inner.ty as u32,
-        data_size: inner.data_size,
+        ty: inner.data_type() as u32,
+        data_size: inner.data_size(),
         sender: sender_bytes.as_ptr() as *const c_char,
         sender_len: sender_bytes.len(),
         endpoints: pkt.endpoints_u32.as_ptr(),
         num_endpoints: pkt.endpoints_u32.len(),
-        timestamp: inner.timestamp,
-        payload: inner.payload.as_ptr(),
-        payload_len: inner.payload.len(),
+        timestamp: inner.timestamp(),
+        payload: inner.payload().as_ptr(),
+        payload_len: inner.payload().len(),
     };
 
     unsafe {
