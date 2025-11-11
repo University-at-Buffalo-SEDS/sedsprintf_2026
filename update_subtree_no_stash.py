@@ -10,11 +10,25 @@ def run(cmd: list[str]) -> str:
 
 
 def main() -> None:
-    # Get the current branch name
-    branch = run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
-    print(f"Current branch: {branch}")
+    # Find the subtree remote's currently active branch
+    branches = run(["git", "branch", "-r"]).splitlines()
+    subtree_branches = [b.strip() for b in branches if "sedsprintf-upstream/" in b]
 
-    # Pull that branch from the upstream
+    if not subtree_branches:
+        raise SystemExit("No branches found for remote 'sedsprintf-upstream'")
+
+    # Try to detect the currently checked-out one
+    # e.g. if output looks like: 'sedsprintf-upstream/HEAD -> sedsprintf-upstream/DMA'
+    head_line = next((b for b in subtree_branches if "HEAD ->" in b), None)
+    if head_line:
+        branch = head_line.split("-> sedsprintf-upstream/")[-1].strip()
+    else:
+        # fallback: pick the first non-HEAD entry
+        branch = subtree_branches[0].split("sedsprintf-upstream/")[-1].strip()
+
+    print(f"Detected subtree branch: {branch}")
+
+    # Perform the subtree pull
     run([
         "git",
         "subtree",
