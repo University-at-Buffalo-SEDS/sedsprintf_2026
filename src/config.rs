@@ -61,6 +61,7 @@ pub enum DataEndpoint {
     /// On-board storage (e.g. SD card / flash).
     SdCard,
     GroundStation,
+    FlightController,
 }
 
 impl DataEndpoint {
@@ -73,6 +74,7 @@ impl DataEndpoint {
         match self {
             DataEndpoint::SdCard => "SD_CARD",
             DataEndpoint::GroundStation => "GROUND_STATION",
+            DataEndpoint::FlightController => "FLIGHT_CONTROLLER",
         }
     }
 }
@@ -205,8 +207,8 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
         DataType::GpsData => {
             MessageMeta {
                 // GPS Data
-                element_count: MessageElementCount::Static(3), // GPS Data messages carry 3 float32 elements (latitude, longitude, altitude)
-                endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
+                element_count: MessageElementCount::Static(2), // GPS Data messages carry 3 float32 elements (latitude, longitude)
+                endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard, DataEndpoint::FlightController],
             }
         }
         DataType::KalmanFilterData => {
@@ -219,14 +221,14 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
         DataType::BatteryVoltage => {
             MessageMeta {
                 // Battery Status
-                element_count: MessageElementCount::Static(1), // Battery Status messages carry 1 float32 element (voltage)
+                element_count: MessageElementCount::Static(1), // Battery Voltage messages carry 1 float32 element (voltage)
                 endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
             }
         }
         DataType::BatteryCurrent => {
             MessageMeta {
                 // Battery Status
-                element_count: MessageElementCount::Static(1), // Battery Status messages carry 1 float32 elements (current)
+                element_count: MessageElementCount::Static(1), // Battery Current messages carry 1 float32 elements (current)
                 endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
             }
         }
