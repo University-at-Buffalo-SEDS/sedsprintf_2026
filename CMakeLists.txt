@@ -10,20 +10,20 @@ set(SEDSPRINTF_RS_DIR "${SEDSPRINTF_RS_DIR_DEFAULT}" CACHE PATH "Path to sedspri
 get_filename_component(RUST_DIR "${SEDSPRINTF_RS_DIR}" REALPATH)
 
 # Detect embedded build
-if (NOT DEFINED SEDSPRINTF_EMBEDDED_BUILD)
-    # Default is OFF
-    set(SEDSPRINTF_EMBEDDED_BUILD OFF CACHE BOOL "Build sedsprintf_rs for embedded" FORCE)
+# Option: allow user/parent to force embedded on/off
+option(SEDSPRINTF_EMBEDDED_BUILD "Build sedsprintf_rs for embedded" OFF)
 
+# Auto-detect embedded if user hasn't forced it
+if (NOT SEDSPRINTF_EMBEDDED_BUILD)
     if (CMAKE_C_COMPILER MATCHES "arm-none-eabi"
             OR CMAKE_TOOLCHAIN_FILE MATCHES "stm32"
+            OR CMAKE_TOOLCHAIN_FILE MATCHES "gcc-arm-none-eabi"
             OR DEFINED ENV{STM32CUBEIDE_DIR}
     )
         set(SEDSPRINTF_EMBEDDED_BUILD ON CACHE BOOL "Build sedsprintf_rs for embedded" FORCE)
     endif ()
-else ()
-    # Ensure it's a CACHE BOOL so it shows nicely in GUIs / cache
-    set(SEDSPRINTF_EMBEDDED_BUILD "${SEDSPRINTF_EMBEDDED_BUILD}" CACHE BOOL "Build sedsprintf_rs for embedded" FORCE)
 endif ()
+
 
 # ============================================================
 # Rust target triple selection
