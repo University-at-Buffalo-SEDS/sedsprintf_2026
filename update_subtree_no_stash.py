@@ -2,21 +2,28 @@
 import subprocess
 
 
-def run(cmd: list[str]) -> None:
+def run(cmd: list[str]) -> str:
+    """Run a command and return its stdout (stripped)."""
     print("Running:", " ".join(cmd))
-    subprocess.run(cmd, check=True)
+    result = subprocess.run(cmd, check=True, text=True, capture_output=True)
+    return result.stdout.strip()
 
 
 def main() -> None:
+    # Get the current branch name
+    branch = run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+    print(f"Current branch: {branch}")
+
+    # Pull that branch from the upstream
     run([
         "git",
         "subtree",
         "pull",
         "--prefix=sedsprintf_rs",
         "sedsprintf-upstream",
-        "main",
+        branch,
         "-m",
-        "Merge sedsprintf_rs upstream main",
+        f"Merge sedsprintf_rs upstream {branch}",
     ])
 
 
