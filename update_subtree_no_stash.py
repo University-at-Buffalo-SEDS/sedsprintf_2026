@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import subprocess
-from typing import Optional, List
+from typing import List, Optional
 
 
 def run(cmd: List[str], *, capture: bool = False) -> Optional[str]:
@@ -13,27 +13,25 @@ def run(cmd: List[str], *, capture: bool = False) -> Optional[str]:
         subprocess.run(cmd, check=True)  # inherits stdout/stderr → keeps colors
         return None
 
+
 def main() -> None:
     # Find the subtree remote's currently active branch
-    branches = run(["git", "branch", "-r"]).splitlines()
+    branches = run(["git", "branch", "-r"], capture=True).splitlines()
     subtree_branches = [b.strip() for b in branches if "sedsprintf-upstream/" in b]
 
     if not subtree_branches:
         raise SystemExit("No branches found for remote 'sedsprintf-upstream'")
 
-    # Try to detect the currently checked-out one
-    # e.g. if output looks like: 'sedsprintf-upstream/HEAD -> sedsprintf-upstream/DMA'
     head_line = next((b for b in subtree_branches if "HEAD ->" in b), None)
     if head_line:
         branch = head_line.split("-> sedsprintf-upstream/")[-1].strip()
     else:
-        # fallback: pick the first non-HEAD entry
         branch = subtree_branches[0].split("sedsprintf-upstream/")[-1].strip()
 
     print(f"Detected subtree branch: {branch}")
 
-    # Perform the subtree pull
-    print(run([
+    # Let git subtree pull talk directly to the terminal → colors preserved
+    run([
         "git",
         "subtree",
         "pull",
@@ -42,7 +40,7 @@ def main() -> None:
         branch,
         "-m",
         f"Merge sedsprintf_rs upstream {branch}",
-    ]))
+    ])
 
 
 if __name__ == "__main__":
