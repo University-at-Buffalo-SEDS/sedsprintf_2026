@@ -29,7 +29,7 @@ def main() -> None:
     print(f"Detected subtree branch: {branch}")
 
     # Perform the subtree pull
-    run([
+    print(run([
         "git",
         "subtree",
         "pull",
@@ -38,7 +38,7 @@ def main() -> None:
         branch,
         "-m",
         f"Merge sedsprintf_rs upstream {branch}",
-    ])
+    ]))
 
 
 if __name__ == "__main__":
