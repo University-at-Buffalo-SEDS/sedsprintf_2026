@@ -120,7 +120,7 @@ mod tests {
         let endpoints = &[DataEndpoint::SdCard, DataEndpoint::GroundStation];
         let pkt = TelemetryPacket::from_f32_slice(
             DataType::GpsData,
-            &[5.2141414, 3.1342144, 1.1231232],
+            &[5.2141414, 3.1342144],
             endpoints,
             0,
         )
@@ -144,12 +144,12 @@ mod tests {
     fn header_string_matches_expectation() {
         let endpoints = &[DataEndpoint::SdCard, DataEndpoint::GroundStation];
         let pkt =
-            TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], endpoints, 0)
+            TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0], endpoints, 0)
                 .unwrap();
         let s = pkt.header_string();
         assert_eq!(
             s,
-            "Type: GPS_DATA, Data Size: 12, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, GROUND_STATION], Timestamp: 0 (0s 000ms)"
+            "Type: GPS_DATA, Data Size: 8, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, GROUND_STATION], Timestamp: 0 (0s 000ms)"
         );
     }
 
@@ -158,16 +158,15 @@ mod tests {
     fn packet_to_string_formats_floats() {
         let endpoints = &[DataEndpoint::SdCard, DataEndpoint::GroundStation];
         let pkt =
-            TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.5, 3.25], endpoints, 0)
+            TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.5], endpoints, 0)
                 .unwrap();
 
         let text = pkt.to_string();
         assert!(text.starts_with(
-            "{Type: GPS_DATA, Data Size: 12, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, GROUND_STATION], Timestamp: 0 (0s 000ms), Data: "
+            "{Type: GPS_DATA, Data Size: 8, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, GROUND_STATION], Timestamp: 0 (0s 000ms), Data: "
         ));
         assert!(text.contains("1"));
         assert!(text.contains("2.5"));
-        assert!(text.contains("3.25"));
     }
 
     /// End-to-end test: `Router::log` → TX callback (serialize/deserialize) →
@@ -200,7 +199,7 @@ mod tests {
         );
 
         // send GPS_DATA (3 * f32) using Router::log (uses default endpoints from schema)
-        let data = [1.0_f32, 2.0, 3.0];
+        let data = [1.0_f32, 2.0];
         router.log(DataType::GpsData, &data).unwrap();
 
         // --- assertions ---
@@ -212,7 +211,7 @@ mod tests {
             .clone()
             .expect("no tx packet recorded");
         assert_eq!(tx_pkt.data_type(), DataType::GpsData);
-        assert_eq!(tx_pkt.payload().len(), 3 * 4);
+        assert_eq!(tx_pkt.payload().len(), 2 * 4);
         // compare bytes exactly to what log() would have produced
         let mut expected = Vec::new();
         for v in data {
@@ -280,7 +279,7 @@ mod tests {
         );
 
         // --- 1) Sender enqueues a packet for TX ---
-        let data = [1.0_f32, 2.0, 3.0];
+        let data = [1.0_f32, 2.0];
         tx_router.log_queue(DataType::GpsData, &data).unwrap();
 
         // --- 2) Flush TX queue -> pushes wire frames into TestBus ---
@@ -314,13 +313,13 @@ mod tests {
         let router = Router::new(Some(tx_fn), Default::default(), box_clock);
 
         // Enqueue for transmit
-        let data = [10.0_f32, 10.25, 10.5];
+        let data = [10.0_f32, 10.25];
         router.log_queue(DataType::GpsData, &data).unwrap();
 
         let data = [10.0_f32];
         router.log_queue(DataType::BatteryVoltage, &data).unwrap();
 
-        let data = [10.0_f32, 10.25, 10.5];
+        let data = [10.0_f32, 10.25];
         router.log_queue(DataType::GpsData, &data).unwrap();
         // Flush -> frame appears on the "bus"
         router.process_tx_queue().unwrap();
@@ -347,7 +346,7 @@ mod tests {
 fn fake_telemetry_packet_bytes() -> TelemetryPacket {
     use crate::config::{DataEndpoint, DataType};
 
-    let payload = [0x13 as f32, 0x21 as f32, 0x34 as f32]; // f32 values
+    let payload = [0x13 as f32, 0x21 as f32]; // f32 values
     let endpoints = [DataEndpoint::SdCard, DataEndpoint::GroundStation];
 
     TelemetryPacket::from_f32_slice(DataType::GpsData, &payload, &endpoints, 1123581321).unwrap()
@@ -397,7 +396,7 @@ unsafe fn copy_telemetry_packet_raw(
 fn helpers_packet_hex_to_string() {
     let pkt = fake_telemetry_packet_bytes();
     let got = pkt.to_hex_string();
-    let expect = "Type: GPS_DATA, Data Size: 12, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, GROUND_STATION], Timestamp: 1123581321 (312h 06m 21s 321ms), Data (hex): 0x00 0x00 0x98 0x41 0x00 0x00 0x04 0x42 0x00 0x00 0x50 0x42";
+    let expect = "Type: GPS_DATA, Data Size: 8, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, GROUND_STATION], Timestamp: 1123581321 (312h 06m 21s 321ms), Data (hex): 0x00 0x00 0x98 0x41 0x00 0x00 0x04 0x42";
     assert_eq!(got, expect);
 }
 
@@ -707,12 +706,12 @@ mod timeout_tests {
 
         // Enqueue TX (3)
         for _ in 0..3 {
-            r.log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0])
+            r.log_queue(DataType::GpsData, &[1.0_f32, 2.0])
                 .unwrap();
         }
         // Enqueue RX (2) with only-local endpoint
         for _ in 0..2 {
-            r.rx_packet_to_queue(mk_rx_only_local(&[9.0, 8.0, 7.0], 123))
+            r.rx_packet_to_queue(mk_rx_only_local(&[9.0, 8.0], 123))
                 .unwrap();
         }
 
@@ -749,13 +748,13 @@ mod timeout_tests {
 
         // Seed work in both queues
         for _ in 0..5 {
-            r.log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0])
+            r.log_queue(DataType::GpsData, &[1.0_f32, 2.0])
                 .unwrap();
             // RX with only-local endpoint to avoid implicit re-TX during receive
             r.rx_packet_to_queue(
                 TelemetryPacket::from_f32_slice(
                     DataType::GpsData,
-                    &[4.0, 5.0, 6.0],
+                    &[4.0, 5.0],
                     &[DataEndpoint::SdCard],
                     1,
                 )
@@ -803,13 +802,13 @@ mod timeout_tests {
 
         // Seed work in both queues
         for _ in 0..5 {
-            r.log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0])
+            r.log_queue(DataType::GpsData, &[1.0_f32, 2.0])
                 .unwrap();
             // RX with only-local endpoint to avoid implicit re-TX during receive
             r.rx_packet_to_queue(
                 TelemetryPacket::from_f32_slice(
                     DataType::GpsData,
-                    &[4.0, 5.0, 6.0],
+                    &[4.0, 5.0],
                     &[DataEndpoint::SdCard],
                     1,
                 )
@@ -856,9 +855,9 @@ mod timeout_tests {
         let r = Router::new(Some(tx), BoardConfig::new(vec![handler]), clock);
 
         // One TX and one RX (RX is only-local to avoid creating extra TX on receive)
-        r.log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0])
+        r.log_queue(DataType::GpsData, &[1.0_f32, 2.0])
             .unwrap();
-        r.rx_packet_to_queue(mk_rx_only_local(&[4.0, 5.0, 6.0], 7))
+        r.rx_packet_to_queue(mk_rx_only_local(&[4.0, 5.0], 7))
             .unwrap();
 
         // Small budget; with wrapping_sub this should allow one iteration then stop
@@ -957,7 +956,7 @@ mod tests_extra {
     fn header_size_is_prefix_of_wire_image() {
         let pkt = TelemetryPacket::from_f32_slice(
             DataType::GpsData,
-            &[1.0, 2.0, 3.0],
+            &[1.0, 2.0],
             &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
             123,
         )
@@ -1091,7 +1090,7 @@ mod tests_extra {
         let back = serialize::deserialize_packet(&wire).unwrap();
         assert_eq!(
             &*back.endpoints(),
-            [DataEndpoint::SdCard, DataEndpoint::GroundStation],
+            [DataEndpoint::SdCard, DataEndpoint::GroundStation, DataEndpoint::FlightController],
             "endpoints must roundtrip 1:1"
         );
         assert_eq!(back.data_type(), pkt.data_type());
@@ -1159,7 +1158,7 @@ mod tests_extra {
         // Build a simple, valid packet with at least 1 endpoint.
         let pkt = TelemetryPacket::from_f32_slice(
             DataType::GpsData,
-            &[1.0, 2.0, 3.0],
+            &[1.0, 2.0],
             &[DataEndpoint::SdCard],
             123,
         )
@@ -1204,7 +1203,7 @@ mod tests_extra {
 
         let pkt = TelemetryPacket::from_f32_slice(
             DataType::GpsData,
-            &[1.0, 2.0, 3.0],
+            &[1.0, 2.0],
             &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
             999,
         )
@@ -1273,14 +1272,14 @@ mod tests_extra {
         // Enqueue one TX and one RX
         let pkt_tx = TelemetryPacket::from_f32_slice(
             DataType::GpsData,
-            &[1.0_f32, 2.0, 3.0],
+            &[1.0_f32, 2.0],
             &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
             0,
         )
         .unwrap();
         let pkt_rx = TelemetryPacket::from_f32_slice(
             DataType::GpsData,
-            &[4.0_f32, 5.0, 6.0],
+            &[4.0_f32, 5.0],
             &[DataEndpoint::SdCard], // only local to avoid extra TX during receive
             0,
         )
@@ -1337,7 +1336,7 @@ mod tests_extra {
         // Build a valid packet addressed to the failing endpoint.
         let pkt = TelemetryPacket::from_f32_slice(
             DataType::GpsData,
-            &[1.0_f32, 2.0, 3.0],
+            &[1.0_f32, 2.0],
             &[DataEndpoint::SdCard],
             0,
         )
@@ -1364,7 +1363,7 @@ mod tests_extra {
     #[test]
     fn from_u8_slice_builds_valid_packet() {
         let need = test_payload_len_for(DataType::GpsData);
-        assert_eq!(need, 12); // schema sanity
+        assert_eq!(need, 8); // schema sanity
 
         let bytes = vec![0x11u8; need];
         let pkt = TelemetryPacket::from_u8_slice(
@@ -1390,7 +1389,7 @@ mod tests_extra {
         let endpoints = &[DataEndpoint::SdCard, DataEndpoint::GroundStation];
         let pkt = TelemetryPacket::from_f32_slice(
             DataType::GpsData,
-            &[5.25_f32, 3.5, 1.0],
+            &[5.25_f32, 3.5],
             endpoints,
             42,
         )
@@ -1444,7 +1443,7 @@ mod tests_extra {
         // Include both a local and a non-local endpoint to force remote TX.
         let pkt = TelemetryPacket::from_f32_slice(
             DataType::GpsData,
-            &[1.0_f32, 2.0, 3.0],
+            &[1.0_f32, 2.0],
             &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
             7,
         )
@@ -1585,7 +1584,7 @@ mod tests_more {
     fn packet_wire_size_matches_serialized_len() {
         let endpoints = &[DataEndpoint::SdCard, DataEndpoint::GroundStation];
         let pkt =
-            TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], endpoints, 9)
+            TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0], endpoints, 9)
                 .unwrap();
         let need = serialize::packet_wire_size(&pkt);
         let out = serialize::serialize_packet(&pkt);
@@ -1602,7 +1601,7 @@ mod tests_more {
     fn serialized_only_handlers_do_not_deserialize() {
         let pkt = TelemetryPacket::from_f32_slice(
             DataType::GpsData,
-            &[1.0, 2.0, 3.0],
+            &[1.0, 2.0],
             &[DataEndpoint::SdCard],
             123,
         )
@@ -1634,7 +1633,7 @@ mod tests_more {
     fn packet_handlers_trigger_single_deserialize_and_fan_out() {
         let endpoints = &[DataEndpoint::SdCard, DataEndpoint::GroundStation];
         let pkt =
-            TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], endpoints, 5)
+            TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0], endpoints, 5)
                 .unwrap();
         let wire = serialize::serialize_packet(&pkt);
 
@@ -1691,7 +1690,7 @@ mod tests_more {
         let r = Router::new(Some(tx), BoardConfig::new(vec![handler]), zero_clock());
         let pkt = TelemetryPacket::from_f32_slice(
             DataType::GpsData,
-            &[1.0, 2.0, 3.0],
+            &[1.0, 2.0],
             &[DataEndpoint::SdCard],
             0,
         )
@@ -1720,7 +1719,7 @@ mod tests_more {
         );
         let pkt = TelemetryPacket::from_f32_slice(
             DataType::GpsData,
-            &[0.5, 0.5, 0.5],
+            &[0.5, 0.5],
             &[DataEndpoint::SdCard],
             0,
         )
@@ -1756,7 +1755,7 @@ mod tests_more {
         );
         let pkt = TelemetryPacket::from_f32_slice(
             DataType::GpsData,
-            &[1.0, 2.0, 3.0],
+            &[1.0, 2.0],
             &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
             1,
         )
@@ -1855,9 +1854,9 @@ mod tests_more {
         let eps_b = &[DataEndpoint::SdCard, DataEndpoint::GroundStation];
 
         let pkt_a =
-            TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], eps_a, 0).unwrap();
+            TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0], eps_a, 0).unwrap();
         let pkt_b =
-            TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], eps_b, 0).unwrap();
+            TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0], eps_b, 0).unwrap();
 
         let wa = serialize::serialize_packet(&pkt_a);
         let wb = serialize::serialize_packet(&pkt_b);
@@ -1895,11 +1894,11 @@ mod tests_more {
         const N: usize = 200;
         for _ in 0..N {
             router
-                .log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0])
+                .log_queue(DataType::GpsData, &[1.0_f32, 2.0])
                 .unwrap();
             let pkt = TelemetryPacket::from_f32_slice(
                 DataType::GpsData,
-                &[9.0, 8.0, 7.0],
+                &[9.0, 8.0],
                 &[DataEndpoint::SdCard],
                 0,
             )
@@ -1994,7 +1993,7 @@ mod concurrency_tests {
                 for _ in 0..ITERS_PER_THREAD {
                     let pkt = TelemetryPacket::from_f32_slice(
                         DataType::GpsData,
-                        &[1.0_f32, 2.0, 3.0],
+                        &[1.0_f32, 2.0],
                         &[DataEndpoint::SdCard], // only-local endpoint
                         0,
                     )
@@ -2035,7 +2034,7 @@ mod concurrency_tests {
         // Build a single wire frame that we'll reuse across threads.
         let pkt = TelemetryPacket::from_f32_slice(
             DataType::GpsData,
-            &[1.0_f32, 2.0, 3.0],
+            &[1.0_f32, 2.0],
             &[DataEndpoint::SdCard], // only-local endpoint → one handler per receive
             123,
         )
@@ -2130,7 +2129,7 @@ mod concurrency_tests {
         let logger = thread::spawn(move || {
             for _ in 0..ITERS {
                 r_logger
-                    .log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0])
+                    .log_queue(DataType::GpsData, &[1.0_f32, 2.0])
                     .expect("log_queue failed");
             }
         });
@@ -2195,7 +2194,7 @@ mod concurrency_tests {
         // ---------- Logger thread ----------
         let r_logger = r.clone();
         let t_logger = thread::spawn(move || {
-            let data: [f32; 3] = [1.0, 2.0, 3.0];
+            let data: [f32; 2] = [1.0, 2.0];
             for _ in 0..LOG_ITERS {
                 r_logger
                     .log_queue(DataType::GpsData, &data)
@@ -2209,7 +2208,7 @@ mod concurrency_tests {
             for _ in 0..RX_ITERS {
                 let pkt = TelemetryPacket::from_f32_slice(
                     DataType::GpsData,
-                    &[4.0, 5.0, 6.0],
+                    &[4.0, 5.0],
                     &[DataEndpoint::SdCard],
                     0,
                 )

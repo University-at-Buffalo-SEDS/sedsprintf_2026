@@ -140,8 +140,8 @@ mod single_threaded_test {
             // --- Sender A (radio board) ---
             {
                 let node = &mut nodes[0];
-                make_series(&mut gps_buf[..3], 10.0);
-                let pkt = make_packet(DataType::GpsData, &gps_buf[..3], i as u64);
+                make_series(&mut gps_buf[..2], 10.0);
+                let pkt = make_packet(DataType::GpsData, &gps_buf[..2], i as u64);
                 node.router.transmit_message(&pkt).unwrap();
             }
 
@@ -150,13 +150,13 @@ mod single_threaded_test {
                 let node = &mut nodes[1];
 
                 // "gyro"
-                make_series(&mut gyro_buf[..3], 0.5);
-                let pkt1 = make_packet(DataType::GpsData, &gyro_buf[..3], (i + 10_000) as u64);
+                make_series(&mut gyro_buf[..2], 0.5);
+                let pkt1 = make_packet(DataType::GpsData, &gyro_buf[..2], (i + 10_000) as u64);
                 node.router.transmit_message(&pkt1).unwrap();
 
                 // "barometer"
-                make_series(&mut baro_buf[..3], 101.3);
-                let pkt2 = make_packet(DataType::GpsData, &baro_buf[..3], (i + 20_000) as u64);
+                make_series(&mut baro_buf[..2], 101.3);
+                let pkt2 = make_packet(DataType::GpsData, &baro_buf[..2], (i + 20_000) as u64);
                 node.router.transmit_message(&pkt2).unwrap();
             }
 

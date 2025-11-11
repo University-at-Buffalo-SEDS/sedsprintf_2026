@@ -196,8 +196,8 @@ mod threaded_system_tests {
         let sender_a = thread::spawn(move || {
             let mut buf = [0.0_f32; 8];
             for i in 0..5 {
-                make_series(&mut buf[..3], 10.0);
-                let pkt = make_packet(DataType::GpsData, &buf[..3], i);
+                make_series(&mut buf[..2], 10.0);
+                let pkt = make_packet(DataType::GpsData, &buf[..2], i);
                 radio_router.transmit_message(&pkt).unwrap();
                 thread::sleep(Duration::from_millis(5));
             }
@@ -208,16 +208,16 @@ mod threaded_system_tests {
             let mut buf = [0.0_f32; 8];
             for i in 0..5 {
                 // IMU-like data
-                make_series(&mut buf[..3], 0.5);
-                let pkt1 = make_packet(DataType::GpsData, &buf[..3], i);
+                make_series(&mut buf[..2], 0.5);
+                let pkt1 = make_packet(DataType::GpsData, &buf[..2], i);
                 // If you have a dedicated IMU type, swap DataType::GpsData for it.
 
                 flight_router.transmit_message(&pkt1).unwrap();
                 thread::sleep(Duration::from_millis(5));
 
                 // BARO-like data
-                make_series(&mut buf[..3], 101.3);
-                let pkt2 = make_packet(DataType::GpsData, &buf[..3], i + 100);
+                make_series(&mut buf[..2], 101.3);
+                let pkt2 = make_packet(DataType::GpsData, &buf[..2], i + 100);
                 // If you have a dedicated barometer type, swap DataType::GpsData for it.
 
                 flight_router.transmit_message(&pkt2).unwrap();
