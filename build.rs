@@ -41,14 +41,8 @@ fn ensure_rust_target_installed() {
 
     let installed = String::from_utf8_lossy(&list_output.stdout);
     if installed.lines().any(|line| line.trim() == target) {
-        print!("[INFO] Rust target `{}` already installed.", target);
         return;
     }
-
-    println!(
-        "[INFO] Rust target `{}` not installed; running `rustup target add {}`",
-        target, target
-    );
 
     let status = Command::new("rustup")
         .args(["target", "add", &target])
@@ -61,8 +55,6 @@ fn ensure_rust_target_installed() {
             target, status
         );
     }
-
-    println!("[INFO] Successfully installed rust target `{}`.", target);
 }
 
 // ========================= C HEADER =========================
@@ -76,7 +68,6 @@ fn generate_c_header() {
     fs::create_dir_all(&out_dir).expect("create cbindgen_out");
     let enums_tmp = out_dir.join("enums_raw.h");
 
-    println!("[INFO] Running cbindgen → {}", enums_tmp.display());
     cbindgen::Builder::new()
         .with_config(cbindgen::Config::from_root_or_default(&crate_dir))
         .with_crate(&crate_dir)
@@ -133,8 +124,6 @@ fn generate_c_header() {
     fs::create_dir_all(final_out.parent().unwrap()).expect("create C-Headers/ failed");
     fs::write(&final_out, final_text)
         .unwrap_or_else(|e| panic!("write final header {}: {e}", final_out.display()));
-
-    println!("[INFO] Generated header → {}", final_out.display());
 }
 
 // ========================= PYI STUB =========================
@@ -203,8 +192,6 @@ fn generate_pyi_stub() {
         .join("sedsprintf_rs.pyi");
     fs::create_dir_all(out_pyi.parent().unwrap()).expect("create python_bindings/");
     fs::write(&out_pyi, final_text).unwrap_or_else(|e| panic!("write {}: {e}", out_pyi.display()));
-
-    println!("[INFO] Generated .pyi → {}", out_pyi.display());
 }
 
 // ========================= Helpers (shared) =========================
@@ -407,9 +394,9 @@ fn dump_excerpt(raw: &str, want: &str) {
         let start = i.saturating_sub(200);
         let end = (i + 200).min(raw.len());
         let excerpt = &raw[start..end];
-        println!("cargo:warning=Excerpt around `{}`:\n{}", want, excerpt);
+        eprintln!("cargo:warning=Excerpt around `{}`:\n{}", want, excerpt);
     } else {
-        println!(
+        eprintln!(
             "cargo:warning=`{}` not found anywhere in cbindgen output",
             want
         );
