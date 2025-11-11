@@ -46,7 +46,7 @@ set(RUST_TRIPLE "${SEDSPRINTF_RS_TARGET}")
 
 # Figure out Rust output paths depending on whether we use a cross target
 set(RUST_PROFILE "$<IF:$<CONFIG:Debug>,debug,release>")
-# if embedded it is release-embedded otherwisw release
+# If embedded it is release-embedded otherwise release
 set(RELEASE_PROFILE_DIR "release")
 if (SEDSPRINTF_EMBEDDED_BUILD)
     set(RELEASE_PROFILE_DIR "release-embedded")
@@ -65,7 +65,7 @@ endif ()
 set(RS_INCLUDE "${RUST_DIR}/C-Headers")
 set(RS_HEADER "${RS_INCLUDE}/sedsprintf.h")
 
-# --- build-time args (with generator expression) ---
+# --- Build-time args (with generator expression) ---
 set(RS_ARGS_STR "")
 if (SEDSPRINTF_EMBEDDED_BUILD)
     set(RS_ARGS_STR "${RS_ARGS_STR} embedded")
@@ -77,7 +77,7 @@ endif ()
 set(RS_ARG_REL " $<$<CONFIG:Release>:release>")
 set(RS_ARGS_STR "${RS_ARGS_STR} ${RS_ARG_REL}")
 
-# --- configure-time bootstrap args (NO generator expressions) ---
+# --- Configure-time bootstrap args (NO generator expressions) ---
 set(RS_ARGS_BOOTSTRAP "")
 if (SEDSPRINTF_EMBEDDED_BUILD)
     list(APPEND RS_ARGS_BOOTSTRAP "embedded")
@@ -86,7 +86,7 @@ if (NOT RUST_TRIPLE STREQUAL "")
     list(APPEND RS_ARGS_BOOTSTRAP "target=${RUST_TRIPLE}")
 endif ()
 if (CMAKE_BUILD_TYPE STREQUAL "Release")
-    # for single-config generators like Makefile/Ninja
+    # For single-config generators like Makefile/Ninja
     list(APPEND RS_ARGS_BOOTSTRAP "release")
 endif ()
 

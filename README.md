@@ -100,6 +100,7 @@ by creating shims that expose pvPortMalloc and vPortFree.
   use ones provided by your RTOS. In the same sense, feel free to implement your own logging mechanism for when the
   telemetry falls back to local logging for errors.
 
+
 ```C
 // telemetry_hooks.c
 #include <stddef.h>
