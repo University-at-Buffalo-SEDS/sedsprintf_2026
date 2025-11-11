@@ -8,6 +8,9 @@ use crate::{
 };
 use alloc::{boxed::Box, collections::VecDeque, format, sync::Arc, vec, vec::Vec};
 
+#[cfg(all(not(feature = "std"), target_os = "none"))]
+use crate::seds_error_msg;
+
 
 pub enum RxItem {
     Packet(TelemetryPacket),
@@ -214,15 +217,13 @@ where
 fn fallback_stdout(msg: &str) {
     #[cfg(feature = "std")]
     {
-        println!("{}", msg);
+        eprintln!("{}", msg);
     }
     #[cfg(not(feature = "std"))]
     {
-        unsafe extern "C" {
-            fn seds_println(msg: *const u8, len: usize);
-        }
+        let message = format!("{}\n", msg);
         unsafe {
-            seds_println(msg.as_ptr(), msg.len());
+            seds_error_msg(message.as_ptr(), message.len());
         }
     }
 }

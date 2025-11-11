@@ -61,6 +61,11 @@ mod python_api;
 // + panic handler. Host builds rely on the system allocator / default panic.
 
 #[cfg(all(not(feature = "std"), target_os = "none"))]
+unsafe extern "C" {
+    fn seds_error_msg(msg: *const u8, len: usize);
+}
+
+#[cfg(all(not(feature = "std"), target_os = "none"))]
 mod embedded_alloc {
     use core::alloc::{GlobalAlloc, Layout};
 
