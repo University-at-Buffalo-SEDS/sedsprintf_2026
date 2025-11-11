@@ -9,14 +9,20 @@ set(SEDSPRINTF_RS_DIR_DEFAULT "${CMAKE_CURRENT_LIST_DIR}/")
 set(SEDSPRINTF_RS_DIR "${SEDSPRINTF_RS_DIR_DEFAULT}" CACHE PATH "Path to sedsprintf_rs crate root")
 get_filename_component(RUST_DIR "${SEDSPRINTF_RS_DIR}" REALPATH)
 
-# Detect STM32-style build
-option(SEDSPRINTF_EMBEDDED_BUILD "Build sedsprintf_rs for embedded" OFF)
-set(SEDSPRINTF_EMBEDDED_BUILD OFF)
-if (CMAKE_C_COMPILER MATCHES "arm-none-eabi"
-        OR CMAKE_TOOLCHAIN_FILE MATCHES "stm32"
-        OR DEFINED ENV{STM32CUBEIDE_DIR}
-)
-    set(SEDSPRINTF_EMBEDDED_BUILD ON)
+# Detect embedded build
+if (NOT DEFINED SEDSPRINTF_EMBEDDED_BUILD)
+    # Default is OFF
+    set(SEDSPRINTF_EMBEDDED_BUILD OFF CACHE BOOL "Build sedsprintf_rs for embedded" FORCE)
+
+    if (CMAKE_C_COMPILER MATCHES "arm-none-eabi"
+            OR CMAKE_TOOLCHAIN_FILE MATCHES "stm32"
+            OR DEFINED ENV{STM32CUBEIDE_DIR}
+    )
+        set(SEDSPRINTF_EMBEDDED_BUILD ON CACHE BOOL "Build sedsprintf_rs for embedded" FORCE)
+    endif ()
+else ()
+    # Ensure it's a CACHE BOOL so it shows nicely in GUIs / cache
+    set(SEDSPRINTF_EMBEDDED_BUILD "${SEDSPRINTF_EMBEDDED_BUILD}" CACHE BOOL "Build sedsprintf_rs for embedded" FORCE)
 endif ()
 
 # ============================================================
@@ -57,7 +63,7 @@ set(RS_HEADER "${RS_INCLUDE}/sedsprintf.h")
 # --- build-time args (with generator expression) ---
 set(RS_ARGS_STR "")
 if (SEDSPRINTF_EMBEDDED_BUILD)
-    set(RS_ARGS_STR "${RS_ARGS_STR} stm-build")
+    set(RS_ARGS_STR "${RS_ARGS_STR} embedded")
 endif ()
 # Add target=... when a non-empty triple is used (for logging / info only)
 if (NOT RUST_TRIPLE STREQUAL "")
@@ -69,7 +75,7 @@ set(RS_ARGS_STR "${RS_ARGS_STR} ${RS_ARG_REL}")
 # --- configure-time bootstrap args (NO generator expressions) ---
 set(RS_ARGS_BOOTSTRAP "")
 if (SEDSPRINTF_EMBEDDED_BUILD)
-    list(APPEND RS_ARGS_BOOTSTRAP "stm-build")
+    list(APPEND RS_ARGS_BOOTSTRAP "embedded")
 endif ()
 if (NOT RUST_TRIPLE STREQUAL "")
     list(APPEND RS_ARGS_BOOTSTRAP "target=${RUST_TRIPLE}")
