@@ -50,8 +50,19 @@ cbindgen = "0.29"
 regex = "1.12.2"
 
 [profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "unwind"
+strip = "symbols"
+debug = 0
+incremental = false
+overflow-checks = false
+
+[profile.release-embedded]
+inherits = "release"
 opt-level = "z"
-lto = true
+lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = "symbols"

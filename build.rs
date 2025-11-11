@@ -1,12 +1,68 @@
 // build.rs
 use regex::Regex;
 use std::path::PathBuf;
+use std::process::Command;
 use std::{env, fs};
 
 
 fn main() {
+    ensure_rust_target_installed();
     generate_c_header();
     generate_pyi_stub();
+}
+
+/// Ensure the current Cargo target triple has its std/core installed via rustup.
+///
+/// Reads the `TARGET` env var (set by Cargo), checks `rustup target list --installed`,
+/// and if the target is missing, runs `rustup target add <target>`.
+fn ensure_rust_target_installed() {
+    let target = match env::var("TARGET") {
+        Ok(t) => t,
+        Err(_) => {
+            // No target info, nothing to do.
+            return;
+        }
+    };
+
+    // Best-effort: if rustup isn't available, bail with a clear message.
+    let list_output = Command::new("rustup")
+        .args(["target", "list", "--installed"])
+        .output()
+        .expect(
+            "Failed to run `rustup target list --installed` – is rustup installed and on PATH?",
+        );
+
+    if !list_output.status.success() {
+        panic!(
+            "Failed to list installed rustup targets:\n{}",
+            String::from_utf8_lossy(&list_output.stderr)
+        );
+    }
+
+    let installed = String::from_utf8_lossy(&list_output.stdout);
+    if installed.lines().any(|line| line.trim() == target) {
+        print!("[INFO] Rust target `{}` already installed.", target);
+        return;
+    }
+
+    println!(
+        "[INFO] Rust target `{}` not installed; running `rustup target add {}`",
+        target, target
+    );
+
+    let status = Command::new("rustup")
+        .args(["target", "add", &target])
+        .status()
+        .expect("Failed to run `rustup target add` – is rustup installed and on PATH?");
+
+    if !status.success() {
+        panic!(
+            "`rustup target add {}` failed with status: {}",
+            target, status
+        );
+    }
+
+    println!("[INFO] Successfully installed rust target `{}`.", target);
 }
 
 // ========================= C HEADER =========================
@@ -142,7 +198,6 @@ fn generate_pyi_stub() {
     let final_text = tpl.replace(marker, &joined);
 
     // Write to an importable location inside the crate workspace
-    // (adjust if you prefer a different output path)
     let out_pyi = PathBuf::from(&crate_dir)
         .join("python-files")
         .join("sedsprintf_rs.pyi");
@@ -308,10 +363,9 @@ fn parse_enum_members(block: &str) -> Vec<(String, String)> {
                 };
                 val_only.trim().to_string() // e.g., "= 3"
             } else {
-                String::new() // no explicit value (let Python auto-assign) – but we prefer explicit
+                String::new() // no explicit value
             };
 
-            // If no value text found, we still add with empty value (rare with cbindgen)
             out.push((ident.to_string(), value));
         }
     }
@@ -329,10 +383,8 @@ fn render_python_intenum(name: &str, doc: &str, members: &[(String, String)]) ->
 
     for (ident, valtxt) in members {
         let rhs = if valtxt.is_empty() {
-            // fallback to a safe default; but cbindgen usually emits explicit values
             String::from("...  # (value assigned at runtime)")
         } else {
-            // Strip leading '='
             valtxt.trim_start_matches('=').trim().to_string()
         };
         let comment = per_member_doc

@@ -55,18 +55,13 @@ by creating shims that expose pvPortMalloc and vPortFree.
 - Cmake
 - A C++ compiler
 - A C compiler
-- The thumbv7m-none-eabi target for Rust (if you want to build for ARM Cortex-M)
-
-  Get it with:
-  ```bash
-  rustup target add thumbv7em-none-eabihf
-  ```
 
 ## Usage
 
 - When using this library as a submodule or subtree in a C or C++ project, make sure to add the following to your
-  cmakelists.txt
+  cmakelists.txt and adjust the target as needed:
   ```cmake
+  set(SEDSPRINTF_RS_TARGET "thumbv7m-none-eabi" CACHE STRING "" FORCE) # Set target for embedded systems
   add_subdirectory(${CMAKE_SOURCE_DIR}/sedsprintf_rs)
   target_link_libraries(${CMAKE_PROJECT_NAME} sedsprintf_rs)
   ```
