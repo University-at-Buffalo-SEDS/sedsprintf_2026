@@ -78,8 +78,16 @@ by creating shims that expose pvPortMalloc and vPortFree.
   ```bash
   git remote add sedsprintf-upstream https://github.com/Rylan-Meilutis/sedsprintf_rs.git
   git fetch sedsprintf-upstream
-  git subtree add --prefix=sedsprintf_rs sedsprintf-upstream main
+  
+  git config subtree.sedsprintf_rs.remote sedsprintf-upstream
+  git config subtree.sedsprintf_rs.branch dev   # or main or the branch of your choosing
 
+  git subtree add --prefix=sedsprintf_rs sedsprintf-upstream main
+  ```
+  To switch branches, run the following
+  ```bash
+  git config subtree.sedsprintf_rs.branch <the-new-branch> 
+  ```
 - To update the subtree, use the following command (Note all local changes must be committed before you can update):
   ```bash
   git subtree pull --prefix=sedsprintf_rs sedsprintf-upstream main -m "Merge sedsprintf_rs upstream main"
