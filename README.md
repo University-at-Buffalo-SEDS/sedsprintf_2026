@@ -89,8 +89,9 @@ by creating shims that expose pvPortMalloc and vPortFree.
 
 - If using in an embedded environment, make sure to provide the necessary allocation functions if using a custom
   allocator.
-  Below is an example implementation using malloc and free, feel free to implement ot use your own allocator or ones
-  provided by your RTOS.
+  Below is an example implementation using malloc, free, and fwrite, feel free to implement to use your own allocator or
+  use ones provided by your RTOS. In the same sense, feel free to implement your own logging mechanism for when the 
+  telemetry falls back to local logging for errors.
 
 ```C
 // telemetry_hooks.c
