@@ -27,8 +27,7 @@ codebases.
 This library also supports python bindings via pyo3. to use you need maturin installed to build the python package.
 The size of the header in a serialized packet is around 20 bytes (the size will change based on the total number of
 endpoints in your system and the length of the sender string), so a packet containing three floats is 32 bytes total.
-This small size makes it ideal for
-use in low bandwidth environments.
+This small size makes it ideal for use in low bandwidth environments.
 
 ## Building
 
@@ -90,7 +89,7 @@ by creating shims that expose pvPortMalloc and vPortFree.
 - If using in an embedded environment, make sure to provide the necessary allocation functions if using a custom
   allocator.
   Below is an example implementation using malloc, free, and fwrite, feel free to implement to use your own allocator or
-  use ones provided by your RTOS. In the same sense, feel free to implement your own logging mechanism for when the 
+  use ones provided by your RTOS. In the same sense, feel free to implement your own logging mechanism for when the
   telemetry falls back to local logging for errors.
 
 ```C
