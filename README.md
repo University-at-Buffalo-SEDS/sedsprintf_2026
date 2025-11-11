@@ -102,7 +102,7 @@ by creating shims that expose pvPortMalloc and vPortFree.
  *
  *   void *telemetryMalloc(size_t);
  *   void telemetryFree(void *);
- *   void seds_println(const char *, const size_t);
+ *   void seds_error_msg(const char *, const size_t);
  *
  */
 
@@ -116,10 +116,10 @@ void telemetryFree(void *pv)
     free(pv);
 }
 
-void seds_println(const char *str, const size_t len)
+void seds_error_msg(const char *str, const size_t len)
 {
     // Implement your logging mechanism here, for example:
-    fwrite(str, 1, len, stdout);
-    fwrite("\n", 1, 1, stdout);
+    fwrite(str, 1, len, stderr);
+    fwrite("\n", 1, 1, stderr);
 }
 ```
