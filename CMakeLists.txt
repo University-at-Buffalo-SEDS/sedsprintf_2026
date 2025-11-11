@@ -46,6 +46,11 @@ set(RUST_TRIPLE "${SEDSPRINTF_RS_TARGET}")
 
 # Figure out Rust output paths depending on whether we use a cross target
 set(RUST_PROFILE "$<IF:$<CONFIG:Debug>,debug,release>")
+# if embedded it is release-embedded otherwisw release
+set(RELEASE_PROFILE_DIR "release")
+if (SEDSPRINTF_EMBEDDED_BUILD)
+    set(RELEASE_PROFILE_DIR "release-embedded")
+endif ()
 
 if (RUST_TRIPLE STREQUAL "")
     # Host build: Cargo outputs target/debug / target/release
@@ -54,7 +59,7 @@ if (RUST_TRIPLE STREQUAL "")
 else ()
     # Cross build: Cargo outputs target/<triple>/debug / target/<triple>/release
     set(RS_LIB_DBG "${RUST_DIR}/target/${RUST_TRIPLE}/debug/libsedsprintf_rs.a")
-    set(RS_LIB_REL "${RUST_DIR}/target/${RUST_TRIPLE}/release/libsedsprintf_rs.a")
+    set(RS_LIB_REL "${RUST_DIR}/target/${RUST_TRIPLE}/${RELEASE_PROFILE_DIR}/libsedsprintf_rs.a")
 endif ()
 
 set(RS_INCLUDE "${RUST_DIR}/C-Headers")
