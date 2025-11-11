@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 import subprocess
+from typing import Optional, List
 
 
-def run(cmd: list[str]) -> str:
-    """Run a command and return its stdout (stripped)."""
+def run(cmd: List[str], *, capture: bool = False) -> Optional[str]:
+    """Run a command. If capture=True, return its stdout (stripped)."""
     print("Running:", " ".join(cmd))
-    result = subprocess.run(cmd, check=True, text=True, capture_output=True)
-    return result.stdout.strip()
-
+    if capture:
+        result = subprocess.run(cmd, check=True, text=True, capture_output=True)
+        return result.stdout.strip()
+    else:
+        subprocess.run(cmd, check=True)  # inherits stdout/stderr → keeps colors
+        return None
 
 def main() -> None:
     # Find the subtree remote's currently active branch
