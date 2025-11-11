@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 project(sedsprintf_rs_cmake NONE)
+
 # --- Find Python interpreter ---
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 set(PYTHON_EXECUTABLE "${Python3_EXECUTABLE}")
@@ -8,41 +9,71 @@ set(SEDSPRINTF_RS_DIR_DEFAULT "${CMAKE_CURRENT_LIST_DIR}/")
 set(SEDSPRINTF_RS_DIR "${SEDSPRINTF_RS_DIR_DEFAULT}" CACHE PATH "Path to sedsprintf_rs crate root")
 get_filename_component(RUST_DIR "${SEDSPRINTF_RS_DIR}" REALPATH)
 
-option(SEDSPRINTF_STM_BUILD "Build sedsprintf_rs for STM32 (thumbv7em)" OFF)
-set(SEDSPRINTF_STM_BUILD OFF)
+# Detect STM32-style build
+option(SEDSPRINTF_EMBEDDED_BUILD "Build sedsprintf_rs for embedded" OFF)
+set(SEDSPRINTF_EMBEDDED_BUILD OFF)
 if (CMAKE_C_COMPILER MATCHES "arm-none-eabi"
         OR CMAKE_TOOLCHAIN_FILE MATCHES "stm32"
         OR DEFINED ENV{STM32CUBEIDE_DIR}
 )
-    set(SEDSPRINTF_STM_BUILD ON)
+    set(SEDSPRINTF_EMBEDDED_BUILD ON)
 endif ()
 
-set(HOST_RUST_TRIPLE "")
-set(RS_ARGS_STR "")
-if (SEDSPRINTF_STM_BUILD)
-    set(SEDSPRINTF_RS_TRIPLE "thumbv7em-none-eabihf/" CACHE STRING "Rust target triple" FORCE)
-    set(RS_ARGS_STR "${RS_ARGS_STR} stm-build")
-else ()
-    set(SEDSPRINTF_RS_TRIPLE "${HOST_RUST_TRIPLE}" CACHE STRING "Rust target triple" FORCE)
+# ============================================================
+# Rust target triple selection
+# - Default uses current "mode" (host vs STM)
+# - Can be overridden upstream with:
+#     set(SEDSPRINTF_RS_TARGET "thumbv7m-none-eabi" CACHE STRING "" FORCE)
+#   *before* add_subdirectory(...)
+# ============================================================
+if (NOT DEFINED SEDSPRINTF_RS_TARGET)
+    if (SEDSPRINTF_EMBEDDED_BUILD)
+        # Default embedded triple
+        set(SEDSPRINTF_RS_TARGET "thumbv7em-none-eabihf" CACHE STRING "Rust target triple for sedsprintf_rs (empty = host default)" )
+    else ()
+        # Host build: empty means Cargo's default host triple
+        set(SEDSPRINTF_RS_TARGET "" CACHE STRING "Rust target triple for sedsprintf_rs (empty = host default)" )
+    endif ()
 endif ()
-set(RUST_TRIPLE "${SEDSPRINTF_RS_TRIPLE}")
 
+set(RUST_TRIPLE "${SEDSPRINTF_RS_TARGET}")
+
+# Figure out Rust output paths depending on whether we use a cross target
 set(RUST_PROFILE "$<IF:$<CONFIG:Debug>,debug,release>")
-set(RS_LIB_DBG "${RUST_DIR}/target/${RUST_TRIPLE}debug/libsedsprintf_rs.a")
-set(RS_LIB_REL "${RUST_DIR}/target/${RUST_TRIPLE}release/libsedsprintf_rs.a")
+
+if (RUST_TRIPLE STREQUAL "")
+    # Host build: Cargo outputs target/debug / target/release
+    set(RS_LIB_DBG "${RUST_DIR}/target/debug/libsedsprintf_rs.a")
+    set(RS_LIB_REL "${RUST_DIR}/target/release/libsedsprintf_rs.a")
+else ()
+    # Cross build: Cargo outputs target/<triple>/debug / target/<triple>/release
+    set(RS_LIB_DBG "${RUST_DIR}/target/${RUST_TRIPLE}/debug/libsedsprintf_rs.a")
+    set(RS_LIB_REL "${RUST_DIR}/target/${RUST_TRIPLE}/release/libsedsprintf_rs.a")
+endif ()
+
 set(RS_INCLUDE "${RUST_DIR}/C-Headers")
 set(RS_HEADER "${RS_INCLUDE}/sedsprintf.h")
 
 # --- build-time args (with generator expression) ---
+set(RS_ARGS_STR "")
+if (SEDSPRINTF_EMBEDDED_BUILD)
+    set(RS_ARGS_STR "${RS_ARGS_STR} stm-build")
+endif ()
+# Add target=... when a non-empty triple is used (for logging / info only)
+if (NOT RUST_TRIPLE STREQUAL "")
+    set(RS_ARGS_STR "${RS_ARGS_STR} target=${RUST_TRIPLE}")
+endif ()
 set(RS_ARG_REL " $<$<CONFIG:Release>:release>")
 set(RS_ARGS_STR "${RS_ARGS_STR} ${RS_ARG_REL}")
 
 # --- configure-time bootstrap args (NO generator expressions) ---
 set(RS_ARGS_BOOTSTRAP "")
-if (SEDSPRINTF_STM_BUILD)
+if (SEDSPRINTF_EMBEDDED_BUILD)
     list(APPEND RS_ARGS_BOOTSTRAP "stm-build")
 endif ()
-
+if (NOT RUST_TRIPLE STREQUAL "")
+    list(APPEND RS_ARGS_BOOTSTRAP "target=${RUST_TRIPLE}")
+endif ()
 if (CMAKE_BUILD_TYPE STREQUAL "Release")
     # for single-config generators like Makefile/Ninja
     list(APPEND RS_ARGS_BOOTSTRAP "release")
@@ -84,16 +115,16 @@ add_custom_command(
 )
 
 add_custom_target(sedsprintf_rs_build
-        DEPENDS
+    DEPENDS
         "${RS_LIB_DBG}" "${RS_LIB_REL}" "${RS_HEADER}"
 )
 
 # Imported library the C/C++ links against
 add_library(sedsprintf_rs STATIC IMPORTED GLOBAL)
 set_target_properties(sedsprintf_rs PROPERTIES
-        IMPORTED_LOCATION_DEBUG "${RS_LIB_DBG}"
-        IMPORTED_LOCATION_RELEASE "${RS_LIB_REL}"
-        INTERFACE_INCLUDE_DIRECTORIES "${RS_INCLUDE}"
+    IMPORTED_LOCATION_DEBUG "${RS_LIB_DBG}"
+    IMPORTED_LOCATION_RELEASE "${RS_LIB_REL}"
+    INTERFACE_INCLUDE_DIRECTORIES "${RS_INCLUDE}"
 )
 add_dependencies(sedsprintf_rs sedsprintf_rs_build)
 
@@ -102,7 +133,7 @@ include(CheckCCompilerFlag)
 check_linker_flag(C "-Wl,-z,noexecstack" HAVE_LD_NOEXECSTACK)
 check_c_compiler_flag("-Wa,--noexecstack" HAVE_AS_NOEXECSTACK)
 
-if (SEDSPRINTF_STM_BUILD)
+if (SEDSPRINTF_EMBEDDED_BUILD)
     target_compile_options(sedsprintf_rs INTERFACE -Wa,--noexecstack)
     target_link_options(sedsprintf_rs INTERFACE -Wl,-z,noexecstack)
 endif ()
