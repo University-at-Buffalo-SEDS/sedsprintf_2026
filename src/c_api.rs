@@ -60,18 +60,18 @@ pub struct SedsOwnedHeader {
 // ============================================================================
 //  Status / error helpers (shared for all FFI functions)
 // ============================================================================
-
+#[inline]
 fn status_from_result_code(e: SedsResult) -> i32 {
     match e {
         SedsResult::SedsOk => 0,
         SedsResult::SedsErr => 1,
     }
 }
-
+#[inline]
 fn status_from_err(e: TelemetryError) -> i32 {
     e.to_error_code() as i32
 }
-
+#[inline]
 fn ok_or_status(r: TelemetryResult<()>) -> i32 {
     match r {
         Ok(()) => status_from_result_code(SedsResult::SedsOk),
@@ -90,6 +90,7 @@ fn fixed_payload_size_if_static(ty: DataType) -> Option<usize> {
 }
 
 /// Convert an optional pointer to an `Option<u64>` timestamp.
+#[inline]
 fn opt_ts(ts_ptr: *const u64) -> Option<u64> {
     if ts_ptr.is_null() {
         None
@@ -99,11 +100,13 @@ fn opt_ts(ts_ptr: *const u64) -> Option<u64> {
 }
 
 /// Convert a C-side `u32` type tag into a Rust `DataType`.
+#[inline]
 fn dtype_from_u32(x: u32) -> TelemetryResult<DataType> {
     DataType::try_from_u32(x).ok_or(TelemetryError::InvalidType)
 }
 
 /// Convert a C-side `u32` endpoint into a Rust `DataEndpoint`.
+#[inline]
 fn endpoint_from_u32(x: u32) -> TelemetryResult<DataEndpoint> {
     DataEndpoint::try_from_u32(x).ok_or(TelemetryError::Deserialize("bad endpoint"))
 }
@@ -133,6 +136,7 @@ pub struct SedsPacketView {
 }
 
 /// Transmit callback signature used from C.
+
 type CTransmit = Option<extern "C" fn(bytes: *const u8, len: usize, user: *mut c_void) -> i32>;
 
 /// Endpoint handler callback (packet view).
@@ -165,6 +169,7 @@ unsafe impl Sync for TxCtx {}
 
 /// Convert a C `SedsPacketView` into an owned Rust `TelemetryPacket`.
 /// Returns `Err(())` if type/endpoints/sender are invalid or inconsistent.
+#[inline]
 fn view_to_packet(view: &SedsPacketView) -> Result<TelemetryPacket, ()> {
     // Map type
     let ty = DataType::try_from_u32(view.ty).ok_or(())?;
@@ -206,6 +211,7 @@ fn view_to_packet(view: &SedsPacketView) -> Result<TelemetryPacket, ()> {
 /// - If the buffer is too small, writes as much as fits (NUL-terminated)
 ///   and returns the required size.
 /// - On success, returns `SEDS_OK` (0).
+ #[inline]
 unsafe fn write_str_to_buf(s: &str, buf: *mut c_char, buf_len: usize) -> i32 {
     if buf.is_null() && buf_len != 0 {
         return status_from_err(TelemetryError::BadArg);
@@ -229,6 +235,14 @@ unsafe fn write_str_to_buf(s: &str, buf: *mut c_char, buf_len: usize) -> i32 {
     }
 
     status_from_result_code(SedsResult::SedsOk)
+}
+
+/// Validate that a width is NOT one of the disallowed sizes.
+/// Used to reject 1, 2, 4, 8, 16 byte widths for typed logging.
+/// Used in FFI logging helpers.
+#[inline]
+fn width_is_valid(width: usize) -> bool {
+    matches!(width, 1 | 2 | 4 | 8 | 16)
 }
 
 /// FFI-facing clock adapter that calls back into C when present.
@@ -735,7 +749,7 @@ pub extern "C" fn seds_router_log_typed_ex(
     if r.is_null() || (count > 0 && data.is_null()) {
         return status_from_err(TelemetryError::BadArg);
     }
-    if !matches!(elem_size, 1 | 2 | 4 | 8) {
+    if !width_is_valid(elem_size) {
         return status_from_err(TelemetryError::BadArg);
     }
     let ty = match dtype_from_u32(ty_u32) {
@@ -774,11 +788,16 @@ pub extern "C" fn seds_router_log_typed_ex(
             (SEDS_EK_UNSIGNED, 8) => {
                 finish_with::<u64>(r, ty, ts, queue, &padded, required_elems, 8)
             }
+            (SEDS_EK_UNSIGNED, 16) => {
+                finish_with::<u128>(r, ty, ts, queue, &padded, required_elems, 16)
+            }
 
             (SEDS_EK_SIGNED, 1) => finish_with::<i8>(r, ty, ts, queue, &padded, required_elems, 1),
             (SEDS_EK_SIGNED, 2) => finish_with::<i16>(r, ty, ts, queue, &padded, required_elems, 2),
             (SEDS_EK_SIGNED, 4) => finish_with::<i32>(r, ty, ts, queue, &padded, required_elems, 4),
             (SEDS_EK_SIGNED, 8) => finish_with::<i64>(r, ty, ts, queue, &padded, required_elems, 8),
+            (SEDS_EK_SIGNED, 16) => finish_with::<i128>(r, ty, ts, queue, &padded, required_elems, 16),
+
 
             (SEDS_EK_FLOAT, 4) => finish_with::<f32>(r, ty, ts, queue, &padded, required_elems, 4),
             (SEDS_EK_FLOAT, 8) => finish_with::<f64>(r, ty, ts, queue, &padded, required_elems, 8),
@@ -792,11 +811,14 @@ pub extern "C" fn seds_router_log_typed_ex(
         (SEDS_EK_UNSIGNED, 2) => do_vec_log_typed!(r, ty, ts, queue, data, count, u16),
         (SEDS_EK_UNSIGNED, 4) => do_vec_log_typed!(r, ty, ts, queue, data, count, u32),
         (SEDS_EK_UNSIGNED, 8) => do_vec_log_typed!(r, ty, ts, queue, data, count, u64),
+        (SEDS_EK_UNSIGNED, 16) => do_vec_log_typed!(r, ty, ts, queue, data, count, u128),
 
         (SEDS_EK_SIGNED, 1) => do_vec_log_typed!(r, ty, ts, queue, data, count, i8),
         (SEDS_EK_SIGNED, 2) => do_vec_log_typed!(r, ty, ts, queue, data, count, i16),
         (SEDS_EK_SIGNED, 4) => do_vec_log_typed!(r, ty, ts, queue, data, count, i32),
         (SEDS_EK_SIGNED, 8) => do_vec_log_typed!(r, ty, ts, queue, data, count, i64),
+        (SEDS_EK_SIGNED, 16) => do_vec_log_typed!(r, ty, ts, queue, data, count, i128),
+
 
         (SEDS_EK_FLOAT, 4) => do_vec_log_typed!(r, ty, ts, queue, data, count, f32),
         (SEDS_EK_FLOAT, 8) => do_vec_log_typed!(r, ty, ts, queue, data, count, f64),
@@ -1094,7 +1116,7 @@ pub extern "C" fn seds_pkt_data_ptr(
     elem_size: usize,      // 1,2,4,8
     out_count: *mut usize, // optional
 ) -> *const c_void {
-    if pkt.is_null() || !matches!(elem_size, 1 | 2 | 4 | 8) {
+    if pkt.is_null() || !width_is_valid(elem_size) {
         return ptr::null();
     }
     let view = unsafe { &*pkt };
@@ -1161,7 +1183,7 @@ pub extern "C" fn seds_pkt_copy_data(
     dst: *mut c_void,
     dst_elems: usize, // number of elements available in dst
 ) -> i32 {
-    if pkt.is_null() || !matches!(elem_size, 1 | 2 | 4 | 8) {
+    if pkt.is_null() || !width_is_valid(elem_size) {
         return status_from_err(TelemetryError::BadArg);
     }
 
@@ -1281,7 +1303,7 @@ pub extern "C" fn seds_pkt_get_typed(
     elem_kind: u32,   // 0=unsigned,1=signed,2=float
 ) -> i32 {
     // Basic argument validation
-    if pkt.is_null() || !matches!(elem_size, 1 | 2 | 4 | 8) {
+    if pkt.is_null() || !width_is_valid(elem_size) {
         return status_from_err(TelemetryError::BadArg);
     }
 
@@ -1320,11 +1342,15 @@ pub extern "C" fn seds_pkt_get_typed(
         (SEDS_EK_UNSIGNED, 8) => {
             extract_typed_into::<u64>(view, elem_size, needed, out as *mut u64)
         }
+        (SEDS_EK_UNSIGNED, 16) => {
+            extract_typed_into::<u128>(view, elem_size, needed, out as *mut u128)
+        }
 
         (SEDS_EK_SIGNED, 1) => extract_typed_into::<i8>(view, elem_size, needed, out as *mut i8),
         (SEDS_EK_SIGNED, 2) => extract_typed_into::<i16>(view, elem_size, needed, out as *mut i16),
         (SEDS_EK_SIGNED, 4) => extract_typed_into::<i32>(view, elem_size, needed, out as *mut i32),
         (SEDS_EK_SIGNED, 8) => extract_typed_into::<i64>(view, elem_size, needed, out as *mut i64),
+        (SEDS_EK_SIGNED, 16) => extract_typed_into::<i128>(view, elem_size, needed, out as *mut i128),
 
         (SEDS_EK_FLOAT, 4) => extract_typed_into::<f32>(view, elem_size, needed, out as *mut f32),
         (SEDS_EK_FLOAT, 8) => extract_typed_into::<f64>(view, elem_size, needed, out as *mut f64),

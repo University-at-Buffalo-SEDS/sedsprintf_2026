@@ -265,7 +265,7 @@ pub enum MessageDataType {
     Int128,
     Bool,
     String,
-    Hex,
+    Binary,
 }
 
 /// Size in bytes of a single element for the given [`MessageDataType`].
@@ -293,7 +293,7 @@ pub const fn data_type_size(dt: MessageDataType) -> usize {
         MessageDataType::Int128 => size_of::<i128>(),
         MessageDataType::Bool => size_of::<bool>(),
         MessageDataType::String => MAX_STATIC_STRING_LENGTH,
-        MessageDataType::Hex => MAX_STATIC_HEX_LENGTH,
+        MessageDataType::Binary => MAX_STATIC_HEX_LENGTH,
     }
 }
 

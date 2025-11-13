@@ -18,7 +18,7 @@ fn test_payload_len_for(ty: DataType) -> usize {
             // Pick reasonable defaults per data kind
             match get_data_type(ty) {
                 MessageDataType::String => MAX_STATIC_STRING_LENGTH, // router error-path expects this
-                MessageDataType::Hex => MAX_STATIC_HEX_LENGTH,       // any bytes; size-bounded
+                MessageDataType::Binary => MAX_STATIC_HEX_LENGTH,    // any bytes; size-bounded
                 // numeric/bool: must be multiple of element width → use “schema element count”
                 other => {
                     let w = match other {
@@ -31,7 +31,7 @@ fn test_payload_len_for(ty: DataType) -> usize {
                         | MessageDataType::Int64
                         | MessageDataType::Float64 => 8,
                         MessageDataType::UInt128 | MessageDataType::Int128 => 16,
-                        MessageDataType::String | MessageDataType::Hex => 1,
+                        MessageDataType::String | MessageDataType::Binary => 1,
                     };
                     let elems = get_message_meta(ty).element_count.into().max(1);
                     w * elems
@@ -1520,7 +1520,7 @@ mod tests_more {
                         8
                     }
                     MessageDataType::UInt128 | MessageDataType::Int128 => 16,
-                    MessageDataType::String | MessageDataType::Hex => 1,
+                    MessageDataType::String | MessageDataType::Binary => 1,
                 };
                 let elems = get_message_meta(ty).element_count.into().max(1);
                 core::cmp::max(1, w * elems)
@@ -1799,7 +1799,7 @@ mod tests_more {
                 assert!(len > 0, "test payload length must be > 0 for {ty:?}");
 
                 match get_data_type(ty) {
-                    MessageDataType::String | MessageDataType::Hex => {
+                    MessageDataType::String | MessageDataType::Binary => {
                         // any positive length is fine for string/hex, just sanity check
                         assert!(len >= 1, "string/hex must have at least 1 byte for {ty:?}");
                     }
@@ -1816,7 +1816,7 @@ mod tests_more {
                             | MessageDataType::Int64
                             | MessageDataType::Float64 => 8,
                             MessageDataType::UInt128 | MessageDataType::Int128 => 16,
-                            MessageDataType::String | MessageDataType::Hex => 1,
+                            MessageDataType::String | MessageDataType::Binary => 1,
                         };
                         assert_eq!(
                             len % width,
