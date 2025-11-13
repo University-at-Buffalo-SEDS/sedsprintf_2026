@@ -54,12 +54,12 @@ endif ()
 
 if (RUST_TRIPLE STREQUAL "")
     # Host build: Cargo outputs target/debug / target/release
-    set(RS_LIB_DBG "${RUST_DIR}/target/debug/libsedsprintf_rs.a")
-    set(RS_LIB_REL "${RUST_DIR}/target/release/libsedsprintf_rs.a")
+    set(RS_LIB_DBG "${RUST_DIR}/target/debug/libsedsprintf_rs_2026.a")
+    set(RS_LIB_REL "${RUST_DIR}/target/release/libsedsprintf_rslibsedsprintf_rs_2026.a")
 else ()
     # Cross build: Cargo outputs target/<triple>/debug / target/<triple>/release
-    set(RS_LIB_DBG "${RUST_DIR}/target/${RUST_TRIPLE}/debug/libsedsprintf_rs.a")
-    set(RS_LIB_REL "${RUST_DIR}/target/${RUST_TRIPLE}/${RELEASE_PROFILE_DIR}/libsedsprintf_rs.a")
+    set(RS_LIB_DBG "${RUST_DIR}/target/${RUST_TRIPLE}/debug/libsedsprintf_rs_2026.a")
+    set(RS_LIB_REL "${RUST_DIR}/target/${RUST_TRIPLE}/${RELEASE_PROFILE_DIR}/libsedsprintf_rs_2026.a")
 endif ()
 
 set(RS_INCLUDE "${RUST_DIR}/C-Headers")
