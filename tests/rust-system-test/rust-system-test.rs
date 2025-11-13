@@ -1,9 +1,9 @@
 #[cfg(test)]
 mod threaded_system_tests {
-    use sedsprintf_rs::config::{DataEndpoint, DataType};
-    use sedsprintf_rs::router::{BoardConfig, Clock, EndpointHandler, Router};
-    use sedsprintf_rs::telemetry_packet::TelemetryPacket;
-    use sedsprintf_rs::TelemetryResult;
+    use sedsprintf_rs_2026::config::{DataEndpoint, DataType};
+    use sedsprintf_rs_2026::router::{BoardConfig, Clock, EndpointHandler, Router};
+    use sedsprintf_rs_2026::telemetry_packet::TelemetryPacket;
+    use sedsprintf_rs_2026::TelemetryResult;
 
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::mpsc;
