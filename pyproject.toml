@@ -3,7 +3,7 @@ requires = ["maturin>=1.4,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "sedsprintf_rs"
+name = "sedsprintf_rs_2026"
 version = "1.0.6"
 description = "Rust telemetry and serialization library"
 authors = [{ name = "Rylan Meilutis", email = "rylan.meilutis@gmail.com" }]

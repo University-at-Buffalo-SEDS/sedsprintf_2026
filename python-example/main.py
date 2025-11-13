@@ -6,7 +6,7 @@ import numpy as np
 import multiprocessing as mp
 from queue import Empty
 
-import sedsprintf_rs as seds
+import sedsprintf_rs_2026 as seds
 
 DT = seds.DataType
 EP = seds.DataEndpoint
