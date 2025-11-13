@@ -87,7 +87,7 @@ const fn element_width(dt: MessageDataType) -> usize {
         MessageDataType::UInt64 | MessageDataType::Int64 | MessageDataType::Float64 => 8,
         MessageDataType::UInt128 | MessageDataType::Int128 => 16,
         // For String/Hex we treat width as 1 (byte granularity) when checking dynamic multiples.
-        MessageDataType::String | MessageDataType::Hex => 1,
+        MessageDataType::String | MessageDataType::Binary => 1,
     }
 }
 
@@ -113,7 +113,7 @@ fn validate_dynamic_len_and_content(ty: DataType, bytes: &[u8]) -> TelemetryResu
             }
             Ok(())
         }
-        MessageDataType::Hex => {
+        MessageDataType::Binary => {
             // No UTF-8 requirement for hex blobs.
             Ok(())
         }
@@ -499,7 +499,7 @@ impl TelemetryPacket {
             MessageDataType::String => {
                 // Already handled above via `data_as_utf8_ref`.
             }
-            MessageDataType::Hex => return self.to_hex_string(),
+            MessageDataType::Binary => return self.to_hex_string(),
         }
 
         s.push_str(")}");
