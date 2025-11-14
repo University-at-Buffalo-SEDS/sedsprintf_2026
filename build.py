@@ -111,7 +111,7 @@ def install_wheel_file(build_mode: list[str]) -> None:
 
     # Install the built wheel
     wheels_dir = Path("target") / "wheels"
-    wheels = sorted(wheels_dir.glob("sedsprintf_rs-*.whl"))
+    wheels = sorted(wheels_dir.glob("sedsprintf_rs_2026-*.whl"))
     if not wheels:
         raise SystemExit(f"No wheels found in {wheels_dir}")
     wheel = wheels[-1]
