@@ -16,7 +16,7 @@ pub(crate) use crate::{
 };
 use alloc::{string::String, sync::Arc, vec::Vec};
 use core::any::TypeId;
-use core::fmt::Write;
+use core::fmt::{Formatter, Write};
 
 // ============================================================================
 // Constants
@@ -603,7 +603,7 @@ fn append_human_time(out: &mut String, total_ms: u64) {
 // ============================================================================
 
 impl core::fmt::Display for TelemetryPacket {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         f.write_str(&TelemetryPacket::to_string(self))
     }
 }
