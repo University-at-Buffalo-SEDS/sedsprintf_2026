@@ -163,7 +163,7 @@ impl TelemetryPacket {
     pub fn new(
         ty: DataType,
         endpoints: &[DataEndpoint],
-        sender: impl Into<Arc<str>>,
+        sender: &str,
         timestamp: u64,
         payload: Arc<[u8]>,
     ) -> TelemetryResult<Self> {
@@ -217,7 +217,7 @@ impl TelemetryPacket {
         Self::new(
             ty,
             endpoints,
-            Arc::<str>::from(DEVICE_IDENTIFIER),
+            DEVICE_IDENTIFIER,
             timestamp,
             Arc::<[u8]>::from(bytes),
         )
@@ -266,7 +266,7 @@ impl TelemetryPacket {
         Self::new(
             ty,
             endpoints,
-            Arc::<str>::from(DEVICE_IDENTIFIER),
+            DEVICE_IDENTIFIER,
             timestamp,
             Arc::<[u8]>::from(bytes),
         )

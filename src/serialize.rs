@@ -17,7 +17,6 @@ use crate::{
 };
 use alloc::{sync::Arc, vec::Vec};
 
-
 /// Lightweight header-only view of a serialized [`TelemetryPacket`].
 ///
 /// Produced by [`peek_envelope`] without allocating or copying the payload.
@@ -290,13 +289,7 @@ pub fn deserialize_packet(buf: &[u8]) -> Result<TelemetryPacket, TelemetryError>
     }
     let ty = DataType::try_from_u32(ty_u32).ok_or(TelemetryError::InvalidType)?;
 
-    TelemetryPacket::new(
-        ty,
-        &eps,
-        Arc::<str>::from(sender_str),
-        ts_v,
-        Arc::<[u8]>::from(payload_slice),
-    )
+    TelemetryPacket::new(ty, &eps, sender_str, ts_v, Arc::<[u8]>::from(payload_slice))
 }
 
 // ===========================================================================
