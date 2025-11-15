@@ -183,12 +183,12 @@ fn view_to_packet(view: &SedsPacketView) -> Result<TelemetryPacket, ()> {
     }
 
     // Sender as Arc<str>
-    let sender_owned: Arc<str> = if view.sender.is_null() || view.sender_len == 0 {
-        Arc::<str>::from("")
+    let sender_owned: &str = if view.sender.is_null() || view.sender_len == 0 {
+        ""
     } else {
         let sb = unsafe { slice::from_raw_parts(view.sender as *const u8, view.sender_len) };
         let s = from_utf8(sb).map_err(|_| ())?;
-        Arc::<str>::from(s)
+        s
     };
 
     // Payload bytes
@@ -211,7 +211,7 @@ fn view_to_packet(view: &SedsPacketView) -> Result<TelemetryPacket, ()> {
 /// - If the buffer is too small, writes as much as fits (NUL-terminated)
 ///   and returns the required size.
 /// - On success, returns `SEDS_OK` (0).
- #[inline]
+#[inline]
 unsafe fn write_str_to_buf(s: &str, buf: *mut c_char, buf_len: usize) -> i32 {
     if buf.is_null() && buf_len != 0 {
         return status_from_err(TelemetryError::BadArg);
@@ -796,8 +796,9 @@ pub extern "C" fn seds_router_log_typed_ex(
             (SEDS_EK_SIGNED, 2) => finish_with::<i16>(r, ty, ts, queue, &padded, required_elems, 2),
             (SEDS_EK_SIGNED, 4) => finish_with::<i32>(r, ty, ts, queue, &padded, required_elems, 4),
             (SEDS_EK_SIGNED, 8) => finish_with::<i64>(r, ty, ts, queue, &padded, required_elems, 8),
-            (SEDS_EK_SIGNED, 16) => finish_with::<i128>(r, ty, ts, queue, &padded, required_elems, 16),
-
+            (SEDS_EK_SIGNED, 16) => {
+                finish_with::<i128>(r, ty, ts, queue, &padded, required_elems, 16)
+            }
 
             (SEDS_EK_FLOAT, 4) => finish_with::<f32>(r, ty, ts, queue, &padded, required_elems, 4),
             (SEDS_EK_FLOAT, 8) => finish_with::<f64>(r, ty, ts, queue, &padded, required_elems, 8),
@@ -818,7 +819,6 @@ pub extern "C" fn seds_router_log_typed_ex(
         (SEDS_EK_SIGNED, 4) => do_vec_log_typed!(r, ty, ts, queue, data, count, i32),
         (SEDS_EK_SIGNED, 8) => do_vec_log_typed!(r, ty, ts, queue, data, count, i64),
         (SEDS_EK_SIGNED, 16) => do_vec_log_typed!(r, ty, ts, queue, data, count, i128),
-
 
         (SEDS_EK_FLOAT, 4) => do_vec_log_typed!(r, ty, ts, queue, data, count, f32),
         (SEDS_EK_FLOAT, 8) => do_vec_log_typed!(r, ty, ts, queue, data, count, f64),
@@ -1350,7 +1350,9 @@ pub extern "C" fn seds_pkt_get_typed(
         (SEDS_EK_SIGNED, 2) => extract_typed_into::<i16>(view, elem_size, needed, out as *mut i16),
         (SEDS_EK_SIGNED, 4) => extract_typed_into::<i32>(view, elem_size, needed, out as *mut i32),
         (SEDS_EK_SIGNED, 8) => extract_typed_into::<i64>(view, elem_size, needed, out as *mut i64),
-        (SEDS_EK_SIGNED, 16) => extract_typed_into::<i128>(view, elem_size, needed, out as *mut i128),
+        (SEDS_EK_SIGNED, 16) => {
+            extract_typed_into::<i128>(view, elem_size, needed, out as *mut i128)
+        }
 
         (SEDS_EK_FLOAT, 4) => extract_typed_into::<f32>(view, elem_size, needed, out as *mut f32),
         (SEDS_EK_FLOAT, 8) => extract_typed_into::<f64>(view, elem_size, needed, out as *mut f64),

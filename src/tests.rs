@@ -6,7 +6,6 @@ use crate::{get_data_type, message_meta, MessageDataType, TelemetryError};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-
 /// Compute a valid test payload length for a given [`DataType`], respecting the
 /// schema’s static/dynamic element counts and element widths.
 ///
@@ -110,7 +109,6 @@ mod tests {
     };
     use std::sync::{Arc, Mutex};
     use std::vec::Vec;
-
 
     /// Serialize/deserialize a GPS packet and ensure all fields and payload
     /// bytes round-trip exactly.
@@ -457,7 +455,6 @@ mod handler_failure_tests {
     use alloc::{sync::Arc, vec, vec::Vec};
     use core::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
-
 
     /// Helper: convert an index into a valid [`DataEndpoint`] for tests.
     fn ep(idx: u32) -> DataEndpoint {
@@ -887,7 +884,6 @@ mod tests_extra {
 
     #![cfg(test)]
 
-
     use crate::config::DataEndpoint;
     use crate::tests::test_payload_len_for;
     use crate::{
@@ -900,7 +896,6 @@ mod tests_extra {
     use alloc::{string::String, sync::Arc};
     use core::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
-
 
     /// A tiny helper clock; we rely on the blanket `impl<Fn() -> u64> Clock`.
     fn zero_clock() -> Box<dyn Clock + Send + Sync> {
@@ -1017,7 +1012,7 @@ mod tests_extra {
             TelemetryPacket::new(
                 DataType::TelemetryError,
                 &[DataEndpoint::SdCard],
-                s,
+                &*s,
                 ts,
                 Arc::<[u8]>::from(payload),
             )
@@ -1113,7 +1108,7 @@ mod tests_extra {
         let pkt = TelemetryPacket::new(
             DataType::TelemetryError, // String-typed
             &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
-            sender,
+            &*sender,
             ts,
             std::sync::Arc::<[u8]>::from(payload),
         )
@@ -1475,7 +1470,6 @@ mod tests_more {
 
     #![cfg(test)]
 
-
     use crate::config::get_message_meta;
     use crate::{
         config::{DataEndpoint, DataType}, get_data_type, get_needed_message_size, message_meta,
@@ -1489,7 +1483,6 @@ mod tests_more {
     use alloc::{sync::Arc, vec::Vec};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc as StdArc, Mutex};
-
 
     /// Clock that always returns 0 (via closure), used where wall-clock is
     /// irrelevant and we only need a stable `Clock` impl.
@@ -1935,7 +1928,6 @@ mod concurrency_tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::thread;
-
 
     /// Simple clock that always returns 0 (blanket impl<Fn() -> u64> for Clock).
     fn zero_clock() -> Box<dyn Clock + Send + Sync> {

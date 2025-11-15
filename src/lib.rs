@@ -30,7 +30,6 @@ extern crate core;
 #[cfg(feature = "std")]
 extern crate std;
 
-
 use core::mem::size_of;
 use core::ops::Mul;
 use strum::EnumCount;
@@ -69,7 +68,6 @@ unsafe extern "C" {
 mod embedded_alloc {
     use core::alloc::{GlobalAlloc, Layout};
 
-
     unsafe extern "C" {
         fn telemetryMalloc(size: usize) -> *mut core::ffi::c_void;
         fn telemetryFree(ptr: *mut core::ffi::c_void);
@@ -94,10 +92,8 @@ mod embedded_alloc {
     #[global_allocator]
     static A: TelemetryAlloc = TelemetryAlloc;
 
-
     // Panic handler for embedded
     use core::panic::PanicInfo;
-
 
     #[panic_handler]
     fn panic(_info: &PanicInfo) -> ! {

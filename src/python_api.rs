@@ -920,14 +920,8 @@ pub fn make_packet(
     let payload_arc = AArc::<[u8]>::from(buf);
 
     // Go through TelemetryPacket::new for validation + consistency
-    let pkt = TelemetryPacket::new(
-        ty,
-        &eps,
-        AArc::<str>::from(sender),
-        timestamp_ms,
-        payload_arc,
-    )
-    .map_err(py_err_from)?;
+    let pkt =
+        TelemetryPacket::new(ty, &eps, sender, timestamp_ms, payload_arc).map_err(py_err_from)?;
 
     Ok(Py::new(py, PyPacket { inner: pkt })?.into_any())
 }
