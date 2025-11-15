@@ -30,6 +30,7 @@ extern crate core;
 #[cfg(feature = "std")]
 extern crate std;
 
+use core::fmt::Formatter;
 use core::mem::size_of;
 use core::ops::Mul;
 use strum::EnumCount;
@@ -371,6 +372,14 @@ impl TelemetryError {
     }
 }
 
+/// Allow conversion of `TelemetryError` to human-readable string.
+impl core::fmt::Display for TelemetryError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        f.write_str(&TelemetryError::to_string(self))
+    }
+}
+
+
 /// Numeric error codes used on the C/Python FFI boundary.
 ///
 /// Negative values are used to avoid collisions with success codes
@@ -482,3 +491,7 @@ pub fn try_enum_from_i32<E: ReprI32Enum>(x: i32) -> Option<E> {
     let e = unsafe { (&x as *const i32 as *const E).read() };
     Some(e)
 }
+
+
+
+
