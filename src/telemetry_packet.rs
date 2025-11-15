@@ -174,7 +174,8 @@ impl TelemetryPacket {
         let meta = message_meta(ty);
         match meta.element_count {
             MessageElementCount::Static(need) => {
-                if payload.len() != (need * data_type_size(get_data_type(ty))) {
+                let need = need * data_type_size(get_data_type(ty));
+                if payload.len() != need {
                     return Err(TelemetryError::SizeMismatch {
                         expected: need,
                         got: payload.len(),
@@ -247,7 +248,8 @@ impl TelemetryPacket {
         // Optional pre-check (can be dropped if we’re happy to let `new()` complain).
         let meta = message_meta(ty);
         if let MessageElementCount::Static(exact) = meta.element_count {
-            if need != exact * data_type_size(MessageDataType::Float32) {
+            let exact = exact * data_type_size(MessageDataType::Float32);
+            if need != exact {
                 return Err(TelemetryError::SizeMismatch {
                     expected: exact,
                     got: need,
@@ -297,7 +299,8 @@ impl TelemetryPacket {
         let meta = message_meta(self.ty);
         match meta.element_count {
             MessageElementCount::Static(need) => {
-                if self.data_size != (need * data_type_size(get_data_type(self.ty))) {
+                let need = need * data_type_size(get_data_type(self.ty));
+                if self.data_size != need {
                     return Err(TelemetryError::SizeMismatch {
                         expected: need,
                         got: self.data_size,
