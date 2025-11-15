@@ -10,7 +10,6 @@ use crate::config::MAX_STACK_PAYLOAD_SIZE;
 use alloc::sync::Arc;
 use core::{fmt, ops::Deref};
 
-
 /// Compact payload container with inline storage for small byte buffers.
 ///
 /// - If `len <= MAX_STACK_PAYLOAD_SIZE`, the data is stored directly in the

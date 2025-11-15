@@ -11,7 +11,6 @@ use alloc::{boxed::Box, collections::VecDeque, format, sync::Arc, vec, vec::Vec}
 #[cfg(all(not(feature = "std"), target_os = "none"))]
 use crate::seds_error_msg;
 
-
 pub enum RxItem {
     Packet(TelemetryPacket),
     Serialized(Arc<[u8]>),
@@ -733,7 +732,7 @@ impl Router {
         let error_pkt = TelemetryPacket::new(
             DataType::TelemetryError,
             &locals,
-            env.sender.clone(),
+            &*env.sender.clone(),
             env.timestamp_ms,
             payload,
         )?;
