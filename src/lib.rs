@@ -29,18 +29,20 @@ extern crate alloc;
 extern crate core;
 #[cfg(feature = "std")]
 extern crate std;
-
-use alloc::sync::Arc;
-use core::fmt::Formatter;
-use core::mem::size_of;
-use core::ops::Mul;
-use strum::EnumCount;
+#[cfg(feature = "std")]
+use std::io::Error;
 
 use crate::config::{
     get_message_data_type, get_message_info_types, get_message_meta, DataEndpoint, DataType,
     MAX_STATIC_HEX_LENGTH, MAX_STATIC_STRING_LENGTH,
 };
 use crate::macros::{ReprI32Enum, ReprU32Enum};
+use alloc::string::ToString;
+use alloc::sync::Arc;
+use core::fmt::Formatter;
+use core::mem::size_of;
+use core::ops::Mul;
+use strum::EnumCount;
 
 // ============================================================================
 //  Test / Python FFI modules (std-only)
@@ -384,15 +386,16 @@ impl core::fmt::Display for TelemetryError {
     }
 }
 
-/// Implement `std::error::Error` for `TelemetryError` when `std` is enabled.
+/// Allow the conversion from std error to telemetry error
 #[cfg(feature = "std")]
-impl std::error::Error for TelemetryError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        None
+impl From<Error> for TelemetryError {
+    fn from(error: Error) -> Self {
+        let str = error.to_string();
+        let astr: Arc<str> = Arc::from(str.as_str());
+        TelemetryError::GenericError(Some(astr))
     }
 }
 
-/// Allow the conversion from std error to telemetry error
 #[cfg(feature = "std")]
 impl From<Box<dyn std::error::Error>> for TelemetryError {
     fn from(err: Box<dyn std::error::Error>) -> Self {
