@@ -386,6 +386,14 @@ impl core::fmt::Display for TelemetryError {
     }
 }
 
+/// Implement `std::error::Error` for `TelemetryError` when `std` is enabled.
+#[cfg(feature = "std")]
+impl std::error::Error for TelemetryError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        None
+    }
+}
+
 /// Allow the conversion from std error to telemetry error
 #[cfg(feature = "std")]
 impl From<Error> for TelemetryError {
