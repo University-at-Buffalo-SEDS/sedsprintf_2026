@@ -60,6 +60,14 @@ debug = 0
 incremental = false
 overflow-checks = false
 
+[profile.release.package."*"]
+opt-level = 3
+codegen-units = 1
+strip = "symbols"
+debug = 0
+incremental = false
+overflow-checks = false
+
 # Release profile for embedded builds, size optimized
 [profile.release-embedded]
 inherits = "release"
@@ -69,5 +77,13 @@ codegen-units = 1
 panic = "abort"
 strip = "symbols"
 debug = 0
+incremental = false
+overflow-checks = false
+
+[profile.release-embedded.package."*"]
+opt-level = "z"
+debug = 0
+strip = "symbols"
+codegen-units = 1
 incremental = false
 overflow-checks = false
