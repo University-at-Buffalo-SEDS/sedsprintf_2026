@@ -136,7 +136,6 @@ impl DataType {
             DataType::FuelFlow => "FUEL_FLOW",
             DataType::FuelTankPressure => "FUEL_TANK_PRESSURE",
             DataType::MessageData => "MESSAGE_DATA",
-
         }
     }
 }
@@ -223,7 +222,11 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
             MessageMeta {
                 // GPS Data
                 element_count: MessageElementCount::Static(2), // GPS Data messages carry 3 float32 elements (latitude, longitude)
-                endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard, DataEndpoint::FlightController],
+                endpoints: &[
+                    DataEndpoint::GroundStation,
+                    DataEndpoint::SdCard,
+                    DataEndpoint::FlightController,
+                ],
             }
         }
         DataType::KalmanFilterData => {
@@ -272,7 +275,12 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
             MessageMeta {
                 // Abort Command
                 element_count: MessageElementCount::Static(1), // Abort messages carry 1 boolean element
-                endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation, DataEndpoint::FlightController, DataEndpoint::FuelBoard],
+                endpoints: &[
+                    DataEndpoint::SdCard,
+                    DataEndpoint::GroundStation,
+                    DataEndpoint::FlightController,
+                    DataEndpoint::FuelBoard,
+                ],
             }
         }
         DataType::FuelFlow => {
