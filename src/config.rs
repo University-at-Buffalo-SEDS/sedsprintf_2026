@@ -62,6 +62,7 @@ pub enum DataEndpoint {
     SdCard,
     GroundStation,
     FlightController,
+    FuelBoard,
 }
 
 impl DataEndpoint {
@@ -75,6 +76,7 @@ impl DataEndpoint {
             DataEndpoint::SdCard => "SD_CARD",
             DataEndpoint::GroundStation => "GROUND_STATION",
             DataEndpoint::FlightController => "FLIGHT_CONTROLLER",
+            DataEndpoint::FuelBoard => "FUEL_BOARD",
         }
     }
 }
@@ -107,6 +109,9 @@ pub enum DataType {
     BatteryVoltage,
     BatteryCurrent,
     BarometerData,
+    Abort,
+    FuelFlow,
+    FuelTankPressure,
     /// Generic string message payload.
     MessageData,
 }
@@ -127,7 +132,11 @@ impl DataType {
             DataType::BatteryVoltage => "BATTERY_VOLTAGE",
             DataType::BatteryCurrent => "BATTERY_CURRENT",
             DataType::BarometerData => "BAROMETER_DATA",
+            DataType::Abort => "ABORT",
+            DataType::FuelFlow => "FUEL_FLOW",
+            DataType::FuelTankPressure => "FUEL_TANK_PRESSURE",
             DataType::MessageData => "MESSAGE_DATA",
+
         }
     }
 }
@@ -156,6 +165,9 @@ pub const fn get_message_data_type(data_type: DataType) -> MessageDataType {
         DataType::GyroData => MessageDataType::Float32,
         DataType::AccelData => MessageDataType::Float32,
         DataType::BarometerData => MessageDataType::Float32,
+        DataType::Abort => MessageDataType::Bool,
+        DataType::FuelFlow => MessageDataType::Float32,
+        DataType::FuelTankPressure => MessageDataType::Float32,
         DataType::MessageData => MessageDataType::String,
     }
 }
@@ -175,6 +187,9 @@ pub const fn get_message_info_types(message_type: DataType) -> MessageType {
         DataType::GyroData => MessageType::Info,
         DataType::AccelData => MessageType::Info,
         DataType::BarometerData => MessageType::Info,
+        DataType::Abort => MessageType::Error,
+        DataType::FuelFlow => MessageType::Info,
+        DataType::FuelTankPressure => MessageType::Info,
         DataType::MessageData => MessageType::Info,
     }
 }
@@ -250,6 +265,27 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
             MessageMeta {
                 // Barometer Data
                 element_count: MessageElementCount::Static(3), // // Accel data messages carry 3 float32 elements (Accel x, y,z)
+                endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
+            }
+        }
+        DataType::Abort => {
+            MessageMeta {
+                // Abort Command
+                element_count: MessageElementCount::Static(1), // Abort messages carry 1 boolean element
+                endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation, DataEndpoint::FlightController, DataEndpoint::FuelBoard],
+            }
+        }
+        DataType::FuelFlow => {
+            MessageMeta {
+                // Fuel Flow Data
+                element_count: MessageElementCount::Static(1), // Fuel Flow messages carry 1 float32 element
+                endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
+            }
+        }
+        DataType::FuelTankPressure => {
+            MessageMeta {
+                // Fuel Tank Pressure Data
+                element_count: MessageElementCount::Static(1), // Fuel Tank Pressure messages carry 1 float32 element
                 endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
             }
         }
