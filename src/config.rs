@@ -63,6 +63,7 @@ pub enum DataEndpoint {
     GroundStation,
     FlightController,
     FuelBoard,
+    Abort,
 }
 
 impl DataEndpoint {
@@ -77,6 +78,7 @@ impl DataEndpoint {
             DataEndpoint::GroundStation => "GROUND_STATION",
             DataEndpoint::FlightController => "FLIGHT_CONTROLLER",
             DataEndpoint::FuelBoard => "FUEL_BOARD",
+            DataEndpoint::Abort => "ABORT",
         }
     }
 }
@@ -276,10 +278,7 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
                 // Abort Command
                 element_count: MessageElementCount::Static(1), // Abort messages carry 1 boolean element
                 endpoints: &[
-                    DataEndpoint::SdCard,
-                    DataEndpoint::GroundStation,
-                    DataEndpoint::FlightController,
-                    DataEndpoint::FuelBoard,
+                    DataEndpoint::Abort,
                 ],
             }
         }
