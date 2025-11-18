@@ -982,9 +982,9 @@ mod tests_extra {
 
         // Dynamic payload to avoid schema constraints and let us vary sizes later.
         let msg = "hello world";
-        let pkt = TelemetryPacket::from_u8_slice(
+        let pkt = TelemetryPacket::from_str_slice(
             DataType::TelemetryError,
-            msg.as_bytes(),
+            msg,
             &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
             0,
         )
@@ -1356,12 +1356,12 @@ mod tests_extra {
     /// Ensure `TelemetryPacket::from_u8_slice` builds a valid GPS packet with
     /// expected length and timestamp.
     #[test]
-    fn from_u8_slice_builds_valid_packet() {
-        let need = test_payload_len_for(DataType::GpsData);
-        assert_eq!(need, 8); // schema sanity
+    fn from_f32_slice_builds_valid_packet() {
+        let need = test_payload_len_for(DataType::GpsData) / 4; // f32 count
+        assert_eq!(need, 3); // schema sanity
 
-        let bytes = vec![0x11u8; need];
-        let pkt = TelemetryPacket::from_u8_slice(
+        let bytes = vec![5.3f32; need];
+        let pkt = TelemetryPacket::from_f32_slice(
             DataType::GpsData,
             &bytes,
             &[DataEndpoint::SdCard],
@@ -1369,8 +1369,8 @@ mod tests_extra {
         )
         .unwrap();
 
-        assert_eq!(pkt.payload().len(), need);
-        assert_eq!(pkt.data_size(), need);
+        assert_eq!(pkt.payload().len(), 12);
+        assert_eq!(pkt.data_size(), 12);
         assert_eq!(pkt.timestamp(), 12345);
     }
 
@@ -2235,5 +2235,77 @@ mod concurrency_tests {
             LOG_ITERS + RX_ITERS,
             "expected {LOG_ITERS}+{RX_ITERS} handler invocations"
         );
+
     }
+}
+mod data_conversion_types{
+
+        // ---------------------------------------------------------------------------
+    // TelemetryPacket typed data accessors
+    // ---------------------------------------------------------------------------
+
+    use crate::config::{DataEndpoint, DataType};
+    use crate::telemetry_packet::TelemetryPacket;
+    use crate::{get_data_type, MessageDataType, TelemetryError, MAX_VALUE_DATA_TYPE};
+
+    /// data_as_f32 should round-trip values written via from_f32_slice.
+    #[test]
+    fn data_as_f32_roundtrips_gps() {
+        let eps = &[DataEndpoint::SdCard, DataEndpoint::Radio];
+        let src = [1.5_f32, -2.25, 3.0];
+
+        let pkt =
+            TelemetryPacket::from_f32_slice(DataType::GpsData, &src, eps, 42).unwrap();
+        let vals = pkt.data_as_f32().unwrap();
+
+        assert_eq!(vals, src);
+    }
+
+    /// Calling a mismatched accessor (e.g. data_as_u16 on a Float32 packet)
+    /// must return TelemetryError::TypeMismatch.
+    #[test]
+    fn mismatched_typed_accessor_returns_type_mismatch() {
+        let eps = &[DataEndpoint::SdCard];
+        let src = [1.0_f32, 2.0, 3.0];
+
+        let pkt =
+            TelemetryPacket::from_f32_slice(DataType::GpsData, &src, eps, 0).unwrap();
+
+        let res = pkt.data_as_u16();
+        match res {
+            Err(TelemetryError::TypeMismatch { .. }) => {}
+            other => panic!("expected TypeMismatch, got {other:?}"),
+        }
+    }
+
+    /// If there is a Bool-typed DataType in the schema, ensure data_as_bool
+    /// decodes non-zero bytes to true and zero to false.
+    #[test]
+    fn data_as_bool_decodes_nonzero() {
+        // Find any Bool-typed DataType in the schema.
+        let mut bool_ty_opt = None;
+        for i in 0..=MAX_VALUE_DATA_TYPE {
+            if let Some(ty) = DataType::try_from_u32(i) {
+                if get_data_type(ty) == MessageDataType::Bool {
+                    bool_ty_opt = Some(ty);
+                    break;
+                }
+            }
+        }
+
+        // If the schema doesn't define any Bool-typed messages, skip this test.
+        let bool_ty = match bool_ty_opt {
+            Some(t) => t,
+            None => return,
+        };
+
+        let eps = &[DataEndpoint::SdCard];
+        let vals = [true, false, true, true, false];
+
+        let pkt =
+            TelemetryPacket::from_bool_slice(bool_ty, &vals, eps, 0).unwrap();
+        let decoded = pkt.data_as_bool().unwrap();
+        assert_eq!(decoded, vals);
+    }
+
 }
