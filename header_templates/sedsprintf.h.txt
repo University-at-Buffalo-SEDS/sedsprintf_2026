@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h> /* for strlen in string macros */
+#include <stdbool.h> /* for bool type */
 
 #ifdef __cplusplus
 extern "C" {
@@ -178,6 +179,57 @@ const void * seds_pkt_data_ptr(const SedsPacketView * pkt, size_t elem_size, siz
 int32_t seds_pkt_copy_bytes(const SedsPacketView * pkt, void * dst, size_t dst_len);
 
 int32_t seds_pkt_copy_data(const SedsPacketView * pkt, size_t elem_size, void * dst, size_t dst_elems);
+
+
+/**
+ * Typed payload getters using TelemetryPacket::data_as_* helpers.
+ *
+ * Semantics (matching seds_pkt_copy_data / Rust side):
+ *  - If out is NULL or out_elems == 0 or out_elems < needed:
+ *       returns the required element count (>= 0), performs NO copy.
+ *  - On success:
+ *       returns the number of elements written (>= 0).
+ *  - On error:
+ *       returns a negative SedsResult error code.
+ */
+
+int32_t seds_pkt_get_f32 (const SedsPacketView * pkt, float    * out, size_t out_elems);
+int32_t seds_pkt_get_f64 (const SedsPacketView * pkt, double   * out, size_t out_elems);
+
+int32_t seds_pkt_get_u8  (const SedsPacketView * pkt, uint8_t  * out, size_t out_elems);
+int32_t seds_pkt_get_u16 (const SedsPacketView * pkt, uint16_t * out, size_t out_elems);
+int32_t seds_pkt_get_u32 (const SedsPacketView * pkt, uint32_t * out, size_t out_elems);
+int32_t seds_pkt_get_u64 (const SedsPacketView * pkt, uint64_t * out, size_t out_elems);
+
+int32_t seds_pkt_get_i8  (const SedsPacketView * pkt, int8_t   * out, size_t out_elems);
+int32_t seds_pkt_get_i16 (const SedsPacketView * pkt, int16_t  * out, size_t out_elems);
+int32_t seds_pkt_get_i32 (const SedsPacketView * pkt, int32_t  * out, size_t out_elems);
+int32_t seds_pkt_get_i64 (const SedsPacketView * pkt, int64_t  * out, size_t out_elems);
+
+int32_t seds_pkt_get_bool(const SedsPacketView * pkt, bool     * out, size_t out_elems);
+
+/**
+ * String getter for MessageDataType::String payloads.
+ *
+ * Semantics:
+ *  - If buf is NULL or buf_len == 0:
+ *       returns required length INCLUDING terminating NUL (>= 1), no copy.
+ *  - If buf_len is too small:
+ *       writes as much as fits (buf_len-1 chars), NUL-terminates,
+ *       returns required length (>= 1).
+ *  - On success:
+ *       returns 0.
+ *  - On error:
+ *       returns negative SedsResult error code.
+ */
+int32_t seds_pkt_get_string(const SedsPacketView * pkt, char * buf, size_t buf_len);
+
+/* @breif Get the length of a string payload (Including NUL terminator).
+ * @return length (>=0) on success; SedsResult on error.
+ */
+int32_t seds_pkt_get_string_len(const SedsPacketView * pkt);
+
+
 
 SedsResult seds_pkt_get_typed(const SedsPacketView * pkt,
                               void * out,

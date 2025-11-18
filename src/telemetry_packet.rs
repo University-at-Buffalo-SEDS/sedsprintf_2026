@@ -6,15 +6,15 @@
 //! - supports pretty printing (header + decoded values) for debugging/logging,
 //! - uses [`SmallPayload`] internally to keep small messages on the stack.
 
-use crate::config::MAX_PRECISION_IN_STRINGS;
+use crate::config::{DEVICE_IDENTIFIER, MAX_PRECISION_IN_STRINGS};
 use crate::small_payload::SmallPayload;
 pub(crate) use crate::{
-    config::{DataEndpoint, DataType, DEVICE_IDENTIFIER}, data_type_size, get_data_type, get_info_type, message_meta,
+    config::{DataEndpoint, DataType}, data_type_size, get_data_type, get_info_type, message_meta,
     router::LeBytes,
     MessageDataType, MessageElementCount, MessageType, TelemetryError,
     TelemetryResult,
 };
-use alloc::{string::String, sync::Arc, vec::Vec};
+use alloc::{string::String, string::ToString, sync::Arc, vec::Vec};
 use core::any::TypeId;
 use core::fmt::{Formatter, Write};
 
@@ -130,6 +130,107 @@ fn validate_dynamic_len_and_content(ty: DataType, bytes: &[u8]) -> TelemetryResu
         }
     }
 }
+// ============================================================================
+// Decode bytes trait
+// ============================================================================
+trait LeDecode: Sized {
+    const WIDTH: usize;
+    fn from_le(slice: &[u8]) -> Self;
+}
+
+impl LeDecode for f32 {
+    const WIDTH: usize = 4;
+    fn from_le(slice: &[u8]) -> Self {
+        let arr: [u8; 4] = slice.try_into().expect("slice len != 4");
+        f32::from_le_bytes(arr)
+    }
+}
+
+impl LeDecode for f64 {
+    const WIDTH: usize = 8;
+    fn from_le(slice: &[u8]) -> Self {
+        let arr: [u8; 8] = slice.try_into().expect("slice len != 8");
+        f64::from_le_bytes(arr)
+    }
+}
+
+impl LeDecode for u8 {
+    const WIDTH: usize = 1;
+    fn from_le(slice: &[u8]) -> Self {
+        slice[0]
+    }
+}
+
+impl LeDecode for u16 {
+    const WIDTH: usize = 2;
+    fn from_le(slice: &[u8]) -> Self {
+        let arr: [u8; 2] = slice.try_into().expect("slice len != 2");
+        u16::from_le_bytes(arr)
+    }
+}
+
+impl LeDecode for u32 {
+    const WIDTH: usize = 4;
+    fn from_le(slice: &[u8]) -> Self {
+        let arr: [u8; 4] = slice.try_into().expect("slice len != 4");
+        u32::from_le_bytes(arr)
+    }
+}
+
+impl LeDecode for u64 {
+    const WIDTH: usize = 8;
+    fn from_le(slice: &[u8]) -> Self {
+        let arr: [u8; 8] = slice.try_into().expect("slice len != 8");
+        u64::from_le_bytes(arr)
+    }
+}
+
+impl LeDecode for u128 {
+    const WIDTH: usize = 16;
+    fn from_le(slice: &[u8]) -> Self {
+        let arr: [u8; 16] = slice.try_into().expect("slice len != 16");
+        u128::from_le_bytes(arr)
+    }
+}
+
+impl LeDecode for i8 {
+    const WIDTH: usize = 1;
+    fn from_le(slice: &[u8]) -> Self {
+        slice[0] as i8
+    }
+}
+
+impl LeDecode for i16 {
+    const WIDTH: usize = 2;
+    fn from_le(slice: &[u8]) -> Self {
+        let arr: [u8; 2] = slice.try_into().expect("slice len != 2");
+        i16::from_le_bytes(arr)
+    }
+}
+
+impl LeDecode for i32 {
+    const WIDTH: usize = 4;
+    fn from_le(slice: &[u8]) -> Self {
+        let arr: [u8; 4] = slice.try_into().expect("slice len != 4");
+        i32::from_le_bytes(arr)
+    }
+}
+
+impl LeDecode for i64 {
+    const WIDTH: usize = 8;
+    fn from_le(slice: &[u8]) -> Self {
+        let arr: [u8; 8] = slice.try_into().expect("slice len != 8");
+        i64::from_le_bytes(arr)
+    }
+}
+
+impl LeDecode for i128 {
+    const WIDTH: usize = 16;
+    fn from_le(slice: &[u8]) -> Self {
+        let arr: [u8; 16] = slice.try_into().expect("slice len != 16");
+        i128::from_le_bytes(arr)
+    }
+}
 
 // ============================================================================
 // TelemetryPacket impl
@@ -197,81 +298,33 @@ impl TelemetryPacket {
         })
     }
 
-    /// Convenience: create from a slice of `u8` (copied).
-    ///
-    /// Uses [`DEVICE_IDENTIFIER`] as the sender.
-    /// # Arguments
-    /// - `ty`: logical message type (schema selector).
-    /// - `bytes`: raw payload bytes.
-    /// - `endpoints`: destination endpoint list (must be non-empty).
-    /// - `timestamp`: timestamp in milliseconds.
-    /// # Returns
-    /// - `Ok(TelemetryPacket)` if validation passes.
-    /// - `Err(TelemetryError)` if validation fails.
-    #[allow(dead_code)]
-    pub fn from_u8_slice(
-        ty: DataType,
-        bytes: &[u8],
-        endpoints: &[DataEndpoint],
-        timestamp: u64,
-    ) -> TelemetryResult<Self> {
-        Self::new(
-            ty,
-            endpoints,
-            DEVICE_IDENTIFIER,
-            timestamp,
-            Arc::<[u8]>::from(bytes),
-        )
-    }
+    /// Generic helper: decode the payload as a Vec<T> in little-endian,
+    /// after checking the runtime data kind and size.
+    fn _as_le_bytes<T>(&self, expected_kind: MessageDataType) -> TelemetryResult<Vec<T>>
+    where
+        T: LeDecode,
+    {
+        self.ensure_kind(expected_kind)?;
 
-    /// Convenience: create from a slice of `f32` (copied, little-endian).
-    ///
-    /// Uses [`DEVICE_IDENTIFIER`] as the sender. The values are packed as
-    /// little-endian floats into the payload buffer.
-    /// # Arguments
-    /// - `ty`: logical message type (schema selector).
-    /// - `values`: slice of `f32` values to encode.
-    /// - `endpoints`: destination endpoint list (must be non-empty).
-    /// - `timestamp`: timestamp in milliseconds.
-    /// # Returns
-    /// - `Ok(TelemetryPacket)` if validation passes.
-    /// - `Err(TelemetryError)` if validation fails.
-    #[allow(dead_code)]
-    pub fn from_f32_slice(
-        ty: DataType,
-        values: &[f32],
-        endpoints: &[DataEndpoint],
-        timestamp: u64,
-    ) -> TelemetryResult<Self> {
-        let need = values.len() * 4;
+        let bytes: &[u8] = &*self.payload();
+        let width = T::WIDTH;
 
-        // Optional pre-check (can be dropped if we’re happy to let `new()` complain).
-        let meta = message_meta(ty);
-        if let MessageElementCount::Static(exact) = meta.element_count {
-            let exact = exact * data_type_size(MessageDataType::Float32);
-            if need != exact {
-                return Err(TelemetryError::SizeMismatch {
-                    expected: exact,
-                    got: need,
-                });
-            }
+        if bytes.len() % width != 0 {
+            // Packet should already be validated; if not, surface a size error.
+            return Err(TelemetryError::SizeMismatch {
+                expected: (bytes.len() / width) * width,
+                got: bytes.len(),
+            });
         }
 
-        let mut bytes = Vec::with_capacity(need);
-        unsafe { bytes.set_len(need) };
-        for (i, v) in values.iter().copied().enumerate() {
-            let b = v.to_le_bytes();
-            let off = i * 4;
-            bytes[off..off + 4].copy_from_slice(&b);
+        let count = bytes.len() / width;
+        let mut out = Vec::with_capacity(count);
+
+        for chunk in bytes.chunks_exact(width) {
+            out.push(T::from_le(chunk));
         }
 
-        Self::new(
-            ty,
-            endpoints,
-            DEVICE_IDENTIFIER,
-            timestamp,
-            Arc::<[u8]>::from(bytes),
-        )
+        Ok(out)
     }
 
     /// Validate basic invariants:
@@ -529,6 +582,372 @@ impl TelemetryPacket {
             }
         }
         s
+    }
+
+    // =========================================================================
+    // Typed data accessors
+    // =========================================================================
+
+    /// Ensure this packet's element type matches `expected`.
+    #[inline]
+    fn ensure_kind(&self, expected: MessageDataType) -> TelemetryResult<()> {
+        let dt = get_data_type(self.ty);
+        if dt != expected {
+            return Err(TelemetryError::TypeMismatch {
+                expected: data_type_size(expected),
+                got: data_type_size(dt),
+            });
+        }
+        Ok(())
+    }
+
+    /// Decode payload as little-endian `f32` values.
+    pub fn data_as_f32(&self) -> TelemetryResult<Vec<f32>> {
+        self._as_le_bytes::<f32>(MessageDataType::Float32)
+    }
+
+    /// Decode payload as little-endian `f64` values.
+    pub fn data_as_f64(&self) -> TelemetryResult<Vec<f64>> {
+        self._as_le_bytes::<f64>(MessageDataType::Float64)
+    }
+
+    /// Decode payload as little-endian `u8` values.
+    pub fn data_as_u8(&self) -> TelemetryResult<Vec<u8>> {
+        self._as_le_bytes::<u8>(MessageDataType::UInt8)
+    }
+
+    /// Decode payload as little-endian `u16` values.
+    pub fn data_as_u16(&self) -> TelemetryResult<Vec<u16>> {
+        self._as_le_bytes::<u16>(MessageDataType::UInt16)
+    }
+
+    /// Decode payload as little-endian `u32` values.
+    pub fn data_as_u32(&self) -> TelemetryResult<Vec<u32>> {
+        self._as_le_bytes::<u32>(MessageDataType::UInt32)
+    }
+
+    /// Decode payload as little-endian `u64` values.
+    pub fn data_as_u64(&self) -> TelemetryResult<Vec<u64>> {
+        self._as_le_bytes::<u64>(MessageDataType::UInt64)
+    }
+
+    /// Decode payload as little-endian `u128` values.
+    pub fn data_as_u128(&self) -> TelemetryResult<Vec<u128>> {
+        self._as_le_bytes::<u128>(MessageDataType::UInt128)
+    }
+
+    /// Decode payload as little-endian `i8` values.
+    pub fn data_as_i8(&self) -> TelemetryResult<Vec<i8>> {
+        self._as_le_bytes::<i8>(MessageDataType::Int8)
+    }
+
+    /// Decode payload as little-endian `i16` values.
+    pub fn data_as_i16(&self) -> TelemetryResult<Vec<i16>> {
+        self._as_le_bytes::<i16>(MessageDataType::Int16)
+    }
+
+    /// Decode payload as little-endian `i32` values.
+    pub fn data_as_i32(&self) -> TelemetryResult<Vec<i32>> {
+        self._as_le_bytes::<i32>(MessageDataType::Int32)
+    }
+
+    /// Decode payload as little-endian `i64` values.
+    pub fn data_as_i64(&self) -> TelemetryResult<Vec<i64>> {
+        self._as_le_bytes::<i64>(MessageDataType::Int64)
+    }
+
+    /// Decode payload as little-endian `i128` values.
+    pub fn data_as_i128(&self) -> TelemetryResult<Vec<i128>> {
+        self._as_le_bytes::<i128>(MessageDataType::Int128)
+    }
+
+    /// Decode payload as `bool`s. Any non-zero byte is treated as `true`.
+    pub fn data_as_bool(&self) -> TelemetryResult<Vec<bool>> {
+        self.ensure_kind(MessageDataType::Bool)?;
+        Ok(self.payload.iter().map(|&b| b != 0).collect())
+    }
+
+    /// Decode payload as a string (for String type).
+    pub fn data_as_string(&self) -> TelemetryResult<String> {
+        self.ensure_kind(MessageDataType::String)?;
+
+        let bytes = &self.payload;
+        let end = bytes
+            .iter()
+            .rposition(|&b| b != 0)
+            .map(|i| i + 1)
+            .unwrap_or(0);
+
+        if end == 0 {
+            return Ok(String::new());
+        }
+
+        let s = core::str::from_utf8(&bytes[..end])
+            .map_err(|_| TelemetryError::InvalidUtf8)?
+            .to_string();
+        Ok(s)
+    }
+
+    /// Decode payload as raw bytes (for Binary type).
+    pub fn data_as_binary(&self) -> TelemetryResult<Vec<u8>> {
+        self.ensure_kind(MessageDataType::Binary)?;
+        Ok(self.payload.to_vec())
+    }
+
+
+    /// Internal helper: build a packet from a slice of primitive values
+    /// encoded as little-endian, using the given sender.
+    ///
+    /// Works for all numeric types (integer and float) as long as the schema's
+    /// element width matches `T`'s width. Not used for String/Binary/Bool.
+    fn from_prim_le_slice_with_sender<T>(
+        ty: DataType,
+        values: &[T],
+        endpoints: &[DataEndpoint],
+        sender: &str,
+        timestamp: u64,
+    ) -> TelemetryResult<Self>
+    where
+        T: Copy + 'static,
+    {
+        let dt = get_data_type(ty);
+
+        // Only allow numeric-ish types here; String/Binary/Bool are handled elsewhere.
+
+        if dt == MessageDataType::Bool
+            || dt == MessageDataType::String
+            || dt == MessageDataType::Binary
+        {
+            // For these, use dedicated constructors (bool / string / binary).
+            return Err(TelemetryError::BadArg);
+        }
+        let element_size = data_type_size(dt);
+
+        // Ensure T's width matches what the schema expects.
+        if element_size != size_of::<T>() {
+            return Err(TelemetryError::TypeMismatch {
+                expected: element_size,
+                got: size_of::<T>(),
+            });
+        }
+
+        let total_bytes = values.len() * element_size;
+
+        // If the schema has a static element count, enforce it up front.
+        if let MessageElementCount::Static(exact) = message_meta(ty).element_count {
+            let exact_bytes = exact * element_size;
+            if total_bytes != exact_bytes {
+                return Err(TelemetryError::SizeMismatch {
+                    expected: exact_bytes,
+                    got: total_bytes,
+                });
+            }
+        }
+
+        let mut bytes = Vec::with_capacity(total_bytes);
+        unsafe { bytes.set_len(total_bytes) };
+
+        for (i, v) in values.iter().copied().enumerate() {
+            let offset = i * element_size;
+            let dst = &mut bytes[offset..offset + element_size];
+
+            // Copy the raw memory of `v` into the buffer.
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    &v as *const T as *const u8,
+                    dst.as_mut_ptr(),
+                    element_size,
+                );
+            }
+
+            // Normalize to little-endian on big-endian targets.
+            // On little-endian this block is compiled out.
+            #[cfg(target_endian = "big")]
+            {
+                dst.reverse();
+            }
+        }
+
+        Self::new(ty, endpoints, sender, timestamp, Arc::<[u8]>::from(bytes))
+    }
+
+    /// Same as `from_prim_le_slice_with_sender` but uses `DEVICE_IDENTIFIER`
+    /// as the sender (mirrors `from_u8_slice`, `from_f32_slice`).
+    pub fn from_prim_le_slice<T>(
+        ty: DataType,
+        values: &[T],
+        endpoints: &[DataEndpoint],
+        timestamp: u64,
+    ) -> TelemetryResult<Self>
+    where
+        T: Copy + 'static,
+    {
+        Self::from_prim_le_slice_with_sender(ty, values, endpoints, DEVICE_IDENTIFIER, timestamp)
+    }
+
+    // -------------------------------------------------------------------------
+    // Convenience wrappers for all numeric types
+    // -------------------------------------------------------------------------
+    pub fn from_u8_slice(
+        ty: DataType,
+        values: &[u8],
+        endpoints: &[DataEndpoint],
+        timestamp: u64,
+    ) -> TelemetryResult<Self> {
+        Self::from_prim_le_slice(ty, values, endpoints, timestamp)
+    }
+    pub fn from_u16_slice(
+        ty: DataType,
+        values: &[u16],
+        endpoints: &[DataEndpoint],
+        timestamp: u64,
+    ) -> TelemetryResult<Self> {
+        Self::from_prim_le_slice(ty, values, endpoints, timestamp)
+    }
+
+    pub fn from_i8_slice(
+        ty: DataType,
+        values: &[i8],
+        endpoints: &[DataEndpoint],
+        timestamp: u64,
+    ) -> TelemetryResult<Self> {
+        Self::from_prim_le_slice(ty, values, endpoints, timestamp)
+    }
+    pub fn from_i16_slice(
+        ty: DataType,
+        values: &[i16],
+        endpoints: &[DataEndpoint],
+        timestamp: u64,
+    ) -> TelemetryResult<Self> {
+        Self::from_prim_le_slice(ty, values, endpoints, timestamp)
+    }
+
+    pub fn from_u32_slice(
+        ty: DataType,
+        values: &[u32],
+        endpoints: &[DataEndpoint],
+        timestamp: u64,
+    ) -> TelemetryResult<Self> {
+        Self::from_prim_le_slice(ty, values, endpoints, timestamp)
+    }
+
+    pub fn from_i32_slice(
+        ty: DataType,
+        values: &[i32],
+        endpoints: &[DataEndpoint],
+        timestamp: u64,
+    ) -> TelemetryResult<Self> {
+        Self::from_prim_le_slice(ty, values, endpoints, timestamp)
+    }
+
+    pub fn from_u64_slice(
+        ty: DataType,
+        values: &[u64],
+        endpoints: &[DataEndpoint],
+        timestamp: u64,
+    ) -> TelemetryResult<Self> {
+        Self::from_prim_le_slice(ty, values, endpoints, timestamp)
+    }
+
+    pub fn from_i64_slice(
+        ty: DataType,
+        values: &[i64],
+        endpoints: &[DataEndpoint],
+        timestamp: u64,
+    ) -> TelemetryResult<Self> {
+        Self::from_prim_le_slice(ty, values, endpoints, timestamp)
+    }
+
+    pub fn from_u128_slice(
+        ty: DataType,
+        values: &[u128],
+        endpoints: &[DataEndpoint],
+        timestamp: u64,
+    ) -> TelemetryResult<Self> {
+        Self::from_prim_le_slice(ty, values, endpoints, timestamp)
+    }
+
+    pub fn from_i128_slice(
+        ty: DataType,
+        values: &[i128],
+        endpoints: &[DataEndpoint],
+        timestamp: u64,
+    ) -> TelemetryResult<Self> {
+        Self::from_prim_le_slice(ty, values, endpoints, timestamp)
+    }
+
+    pub fn from_f64_slice(
+        ty: DataType,
+        values: &[f64],
+        endpoints: &[DataEndpoint],
+        timestamp: u64,
+    ) -> TelemetryResult<Self> {
+        Self::from_prim_le_slice(ty, values, endpoints, timestamp)
+    }
+
+
+    pub fn from_f32_slice(
+        ty: DataType,
+        values: &[f32],
+        endpoints: &[DataEndpoint],
+        timestamp: u64,
+    ) -> TelemetryResult<Self> {
+        Self::from_prim_le_slice(ty, values, endpoints, timestamp)
+    }
+
+    /// Bool constructor: encodes each bool as a single byte (0 / 1).
+    pub fn from_bool_slice(
+        ty: DataType,
+        values: &[bool],
+        endpoints: &[DataEndpoint],
+        timestamp: u64,
+    ) -> TelemetryResult<Self> {
+        if get_data_type(ty) != MessageDataType::Bool {
+            return Err(TelemetryError::TypeMismatch {
+                expected: data_type_size(get_data_type(ty)),
+                got: size_of::<bool>(),
+            });
+        }
+
+        let total_bytes = values.len();
+        if let MessageElementCount::Static(exact) = message_meta(ty).element_count {
+            if total_bytes != exact {
+                return Err(TelemetryError::SizeMismatch {
+                    expected: exact,
+                    got: total_bytes,
+                });
+            }
+        }
+
+        let mut bytes = Vec::with_capacity(total_bytes);
+        bytes.extend(values.iter().map(|b| if *b { 1u8 } else { 0u8 }));
+
+        Self::new(
+            ty,
+            endpoints,
+            DEVICE_IDENTIFIER,
+            timestamp,
+            Arc::<[u8]>::from(bytes),
+        )
+    }
+
+    /// String constructor (dynamic length). Trailing NULs are not added;
+    /// `new()` + `validate_dynamic_len_and_content` will do UTF-8 validation.
+    pub fn from_str_slice(
+        ty: DataType,
+        s: &str,
+        endpoints: &[DataEndpoint],
+        timestamp: u64,
+    ) -> TelemetryResult<Self> {
+        if get_data_type(ty) != MessageDataType::String {
+            return Err(TelemetryError::TypeMismatch {
+                expected: data_type_size(get_data_type(ty)),
+                got: 1,
+            });
+        }
+
+        let bytes: Arc<[u8]> = Arc::from(s.as_bytes());
+        Self::new(ty, endpoints, DEVICE_IDENTIFIER, timestamp, bytes)
     }
 }
 
