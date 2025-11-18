@@ -78,6 +78,23 @@ class Packet:
     def wire_size(self) -> int: ...
     def serialize(self) -> bytes: ...
 
+    # Typed payload decoders (mirror TelemetryPacket::data_as_*)
+    def data_as_u8(self) -> List[int]: ...
+    def data_as_u16(self) -> List[int]: ...
+    def data_as_u32(self) -> List[int]: ...
+    def data_as_u64(self) -> List[int]: ...
+
+    def data_as_i8(self) -> List[int]: ...
+    def data_as_i16(self) -> List[int]: ...
+    def data_as_i32(self) -> List[int]: ...
+    def data_as_i64(self) -> List[int]: ...
+
+    def data_as_f32(self) -> List[float]: ...
+    def data_as_f64(self) -> List[float]: ...
+
+    def data_as_bool(self) -> List[bool]: ...
+    def data_as_string(self) -> str: ...
+
 
 # ==============================
 # Router (lifecycle, logging, queues)
@@ -97,12 +114,13 @@ class Router:
     """
 
     @staticmethod
-    def new_singleton(tx: Optional[TxCallback] = ...,
-            now_ms: Optional[NowMsCallback] = ...,
-            handlers: Optional[
-                Sequence[Tuple[int, Optional[PacketHandler], Optional[SerializedHandler]]]
-            ] = ...,
-        ) -> "Router":
+    def new_singleton(
+        tx: Optional[TxCallback] = ...,
+        now_ms: Optional[NowMsCallback] = ...,
+        handlers: Optional[
+            Sequence[Tuple[int, Optional[PacketHandler], Optional[SerializedHandler]]]
+        ] = ...,
+    ) -> "Router":
         """
         Create or retrieve a per-process singleton Router.
 
@@ -114,7 +132,6 @@ class Router:
         will raise a RuntimeError.
         """
         ...
-
 
     def __init__(
         self,

@@ -231,9 +231,9 @@ mod threaded_system_tests {
 
                 // Message-like data → use TelemetryError as a String-typed payload
                 let msg = "hello world!";
-                let pkt2 = TelemetryPacket::from_u8_slice(
+                let pkt2 = TelemetryPacket::from_str_slice(
                     DataType::TelemetryError,
-                    msg.as_bytes(),
+                    msg,
                     &[DataEndpoint::SdCard, DataEndpoint::Radio],
                     i + 300,
                 )

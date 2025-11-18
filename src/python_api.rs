@@ -153,6 +153,105 @@ impl PyPacket {
         PyBytes::new(py, &self.inner.payload())
     }
 
+    /// Decode payload as `Vec<u8>` for unsigned byte arrays.
+    fn data_as_u8(&self) -> PyResult<Vec<u8>> {
+        self.inner
+            .data_as_u8()
+            .map(|v| v.to_vec())
+            .map_err(py_err_from)
+    }
+
+    /// Decode payload as `Vec<u16>` for unsigned 16-bit arrays.
+    fn data_as_u16(&self) -> PyResult<Vec<u16>> {
+        self.inner
+            .data_as_u16()
+            .map(|v| v.to_vec())
+            .map_err(py_err_from)
+    }
+
+    /// Decode payload as `Vec<u32>` for unsigned 32-bit arrays.
+    fn data_as_u32(&self) -> PyResult<Vec<u32>> {
+        self.inner
+            .data_as_u32()
+            .map(|v| v.to_vec())
+            .map_err(py_err_from)
+    }
+
+    /// Decode payload as `Vec<u64>` for unsigned 64-bit arrays.
+    fn data_as_u64(&self) -> PyResult<Vec<u64>> {
+        self.inner
+            .data_as_u64()
+            .map(|v| v.to_vec())
+            .map_err(py_err_from)
+    }
+
+    /// Decode payload as `Vec<i8>` for signed 8-bit arrays.
+    fn data_as_i8(&self) -> PyResult<Vec<i8>> {
+        self.inner
+            .data_as_i8()
+            .map(|v| v.to_vec())
+            .map_err(py_err_from)
+    }
+
+    /// Decode payload as `Vec<i16>` for signed 16-bit arrays.
+    fn data_as_i16(&self) -> PyResult<Vec<i16>> {
+        self.inner
+            .data_as_i16()
+            .map(|v| v.to_vec())
+            .map_err(py_err_from)
+    }
+
+    /// Decode payload as `Vec<i32>` for signed 32-bit arrays.
+    fn data_as_i32(&self) -> PyResult<Vec<i32>> {
+        self.inner
+            .data_as_i32()
+            .map(|v| v.to_vec())
+            .map_err(py_err_from)
+    }
+
+    /// Decode payload as `Vec<i64>` for signed 64-bit arrays.
+    fn data_as_i64(&self) -> PyResult<Vec<i64>> {
+        self.inner
+            .data_as_i64()
+            .map(|v| v.to_vec())
+            .map_err(py_err_from)
+    }
+
+    /// Decode payload as `Vec<f32>` for float32 arrays.
+    fn data_as_f32(&self) -> PyResult<Vec<f32>> {
+        self.inner
+            .data_as_f32()
+            .map(|v| v.to_vec())
+            .map_err(py_err_from)
+    }
+
+    /// Decode payload as `Vec<f64>` for float64 arrays.
+    fn data_as_f64(&self) -> PyResult<Vec<f64>> {
+        self.inner
+            .data_as_f64()
+            .map(|v| v.to_vec())
+            .map_err(py_err_from)
+    }
+
+    /// Decode payload as `Vec<bool>` for boolean arrays.
+    fn data_as_bool(&self) -> PyResult<Vec<bool>> {
+        self.inner
+            .data_as_bool()
+            .map(|v| v.to_vec())
+            .map_err(py_err_from)
+    }
+
+    /// Decode payload as a UTF-8 string for `DataType::String`.
+    ///
+    /// Uses the same rules as the C FFI helper:
+    /// - strips trailing `\0` bytes
+    /// - errors on invalid UTF-8 or wrong type.
+    fn data_as_string(&self) -> PyResult<String> {
+        self.inner
+            .data_as_string()
+            .map_err(py_err_from)
+    }
+
     /// Human-readable header string (no payload).
     fn header_string(&self) -> String {
         self.inner.header_string()

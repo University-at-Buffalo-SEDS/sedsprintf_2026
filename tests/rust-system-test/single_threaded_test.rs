@@ -166,9 +166,9 @@ mod single_threaded_test {
                 node.router.transmit_message(&pkt1).unwrap();
 
                 // message as bytes
-                let pkt2 = TelemetryPacket::from_u8_slice(
+                let pkt2 = TelemetryPacket::from_str_slice(
                     DataType::TelemetryError,
-                    msg.as_bytes(),
+                    msg,
                     &[DataEndpoint::SdCard, DataEndpoint::Radio],
                     (i + 40_000) as u64,
                 )

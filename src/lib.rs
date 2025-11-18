@@ -355,6 +355,9 @@ pub enum TelemetryError {
 
     /// UTF-8 decoding failed where string payloads are expected.
     InvalidUtf8,
+
+    /// Payload type size mismatch.
+    TypeMismatch { expected: usize, got: usize },
 }
 
 impl TelemetryError {
@@ -375,6 +378,7 @@ impl TelemetryError {
             TelemetryError::Deserialize(_) => TelemetryErrorCode::Deserialize,
             TelemetryError::Io(_) => TelemetryErrorCode::Io,
             TelemetryError::InvalidUtf8 => TelemetryErrorCode::InvalidUtf8,
+            TelemetryError::TypeMismatch { .. } => TelemetryErrorCode::TypeMismatch,
         }
     }
 }
@@ -433,6 +437,7 @@ pub enum TelemetryErrorCode {
     Deserialize = -12,
     Io = -13,
     InvalidUtf8 = -14,
+    TypeMismatch = -15,
 }
 
 // Generate ReprI32Enum helpers for TelemetryErrorCode
@@ -468,6 +473,7 @@ impl TelemetryErrorCode {
             TelemetryErrorCode::Deserialize => "{Deserialize Error}",
             TelemetryErrorCode::Io => "{IO Error}",
             TelemetryErrorCode::InvalidUtf8 => "{Invalid UTF-8}",
+            TelemetryErrorCode::TypeMismatch => "{Type Mismatch}",
         }
     }
 
