@@ -1085,7 +1085,7 @@ mod tests_extra {
         let back = serialize::deserialize_packet(&wire).unwrap();
         assert_eq!(
             &*back.endpoints(),
-            [DataEndpoint::SdCard, DataEndpoint::GroundStation, DataEndpoint::FlightController],
+            [DataEndpoint::SdCard, DataEndpoint::GroundStation, DataEndpoint::FlightController, DataEndpoint::FuelBoard, DataEndpoint::Abort],
             "endpoints must roundtrip 1:1"
         );
         assert_eq!(back.data_type(), pkt.data_type());
@@ -1358,7 +1358,7 @@ mod tests_extra {
     #[test]
     fn from_f32_slice_builds_valid_packet() {
         let need = test_payload_len_for(DataType::GpsData) / 4; // f32 count
-        assert_eq!(need, 3); // schema sanity
+        assert_eq!(need, 2); // schema sanity
 
         let bytes = vec![5.3f32; need];
         let pkt = TelemetryPacket::from_f32_slice(
@@ -1369,8 +1369,8 @@ mod tests_extra {
         )
         .unwrap();
 
-        assert_eq!(pkt.payload().len(), 12);
-        assert_eq!(pkt.data_size(), 12);
+        assert_eq!(pkt.payload().len(), 8);
+        assert_eq!(pkt.data_size(), 8);
         assert_eq!(pkt.timestamp(), 12345);
     }
 
@@ -2251,8 +2251,8 @@ mod data_conversion_types{
     /// data_as_f32 should round-trip values written via from_f32_slice.
     #[test]
     fn data_as_f32_roundtrips_gps() {
-        let eps = &[DataEndpoint::SdCard, DataEndpoint::Radio];
-        let src = [1.5_f32, -2.25, 3.0];
+        let eps = &[DataEndpoint::SdCard, DataEndpoint::GroundStation];
+        let src = [1.5_f32, -2.25];
 
         let pkt =
             TelemetryPacket::from_f32_slice(DataType::GpsData, &src, eps, 42).unwrap();
@@ -2266,7 +2266,7 @@ mod data_conversion_types{
     #[test]
     fn mismatched_typed_accessor_returns_type_mismatch() {
         let eps = &[DataEndpoint::SdCard];
-        let src = [1.0_f32, 2.0, 3.0];
+        let src = [1.0_f32, 2.0];
 
         let pkt =
             TelemetryPacket::from_f32_slice(DataType::GpsData, &src, eps, 0).unwrap();
@@ -2300,7 +2300,7 @@ mod data_conversion_types{
         };
 
         let eps = &[DataEndpoint::SdCard];
-        let vals = [true, false, true, true, false];
+        let vals = [true];
 
         let pkt =
             TelemetryPacket::from_bool_slice(bool_ty, &vals, eps, 0).unwrap();
