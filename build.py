@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 import shutil
 import re
+import os
 
 
 # The line pattern in .gitignore you want to temporarily comment out.
@@ -122,6 +123,9 @@ def install_wheel_file(build_mode: list[str]) -> None:
 
 
 def main(argv: list[str]) -> None:
+    # ensure we are in the correct directory
+    repo_root = Path(__file__).parent.resolve()
+    os.chdir(repo_root)
     build_mode: list[str] = []
     tests = False
     build_embedded = False
@@ -131,7 +135,6 @@ def main(argv: list[str]) -> None:
     release_build = False
     install_wheel = False
     target = ""
-    cmd = []
 
     # Parse args in any order
     for arg in argv:

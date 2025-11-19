@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 import subprocess
 from typing import List
+import os
+from pathlib import Path
 
 
 def run(cmd: List[str], *, capture: bool = False) -> str | None:
@@ -26,6 +30,10 @@ def get_config(key: str) -> str:
 
 
 def main() -> None:
+    # ensure we are in the correct directory
+    repo_root = Path(__file__).parent.resolve()
+    os.chdir(f"{repo_root}/..")
+
     prefix = "sedsprintf_rs"
 
     remote = get_config(f"subtree.{prefix}.remote")
