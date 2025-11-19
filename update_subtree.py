@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 import subprocess
 from pathlib import Path
 import sys
@@ -31,6 +32,9 @@ def import_and_run_update():
 
 
 def main():
+    # ensure we are in the correct directory
+    repo_root = Path(__file__).parent.resolve()
+    os.chdir(f"{repo_root}/..")
     # 1. Stash any uncommitted changes
     run(["git", "stash"])
 
