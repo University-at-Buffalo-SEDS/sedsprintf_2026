@@ -2236,12 +2236,11 @@ mod concurrency_tests {
             LOG_ITERS + RX_ITERS,
             "expected {LOG_ITERS}+{RX_ITERS} handler invocations"
         );
-
     }
 }
-mod data_conversion_types{
+mod data_conversion_types {
 
-        // ---------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     // TelemetryPacket typed data accessors
     // ---------------------------------------------------------------------------
 
@@ -2255,8 +2254,7 @@ mod data_conversion_types{
         let eps = &[DataEndpoint::SdCard, DataEndpoint::Radio];
         let src = [1.5_f32, -2.25, 3.0];
 
-        let pkt =
-            TelemetryPacket::from_f32_slice(DataType::GpsData, &src, eps, 42).unwrap();
+        let pkt = TelemetryPacket::from_f32_slice(DataType::GpsData, &src, eps, 42).unwrap();
         let vals = pkt.data_as_f32().unwrap();
 
         assert_eq!(vals, src);
@@ -2269,8 +2267,7 @@ mod data_conversion_types{
         let eps = &[DataEndpoint::SdCard];
         let src = [1.0_f32, 2.0, 3.0];
 
-        let pkt =
-            TelemetryPacket::from_f32_slice(DataType::GpsData, &src, eps, 0).unwrap();
+        let pkt = TelemetryPacket::from_f32_slice(DataType::GpsData, &src, eps, 0).unwrap();
 
         let res = pkt.data_as_u16();
         match res {
@@ -2303,10 +2300,8 @@ mod data_conversion_types{
         let eps = &[DataEndpoint::SdCard];
         let vals = [true, false, true, true, false];
 
-        let pkt =
-            TelemetryPacket::from_bool_slice(bool_ty, &vals, eps, 0).unwrap();
+        let pkt = TelemetryPacket::from_bool_slice(bool_ty, &vals, eps, 0).unwrap();
         let decoded = pkt.data_as_bool().unwrap();
         assert_eq!(decoded, vals);
     }
-
 }

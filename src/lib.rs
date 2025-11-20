@@ -244,6 +244,15 @@ pub const fn get_data_type(ty: DataType) -> MessageDataType {
     get_message_data_type(ty)
 }
 
+/// Return the default endpoints for a given `DataType`.
+/// # Arguments
+/// - `ty`: Logical data type to query.
+/// # Returns
+/// - Slice of allowed `DataEndpoint` values.
+#[inline]
+pub const fn endpoints_from_datatype(ty: DataType) -> &'static [DataEndpoint] {
+    get_message_meta(ty).endpoints
+}
 /// Primitive element type used by a message.
 ///
 /// This is the underlying "slot" type, not the high-level `DataType`
