@@ -275,6 +275,7 @@ pub enum MessageDataType {
     Bool,
     String,
     Binary,
+    NoData,
 }
 
 /// Size in bytes of a single element for the given [`MessageDataType`].
@@ -303,6 +304,7 @@ pub const fn data_type_size(dt: MessageDataType) -> usize {
         MessageDataType::Bool => size_of::<bool>(),
         MessageDataType::String => MAX_STATIC_STRING_LENGTH,
         MessageDataType::Binary => MAX_STATIC_HEX_LENGTH,
+        MessageDataType::NoData => 0,
     }
 }
 

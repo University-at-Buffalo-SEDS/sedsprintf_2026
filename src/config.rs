@@ -116,6 +116,7 @@ pub enum DataType {
     FuelTankPressure,
     /// Generic string message payload.
     MessageData,
+    Heartbeat, // For testing purposes only
 }
 
 impl DataType {
@@ -138,6 +139,7 @@ impl DataType {
             DataType::FuelFlow => "FUEL_FLOW",
             DataType::FuelTankPressure => "FUEL_TANK_PRESSURE",
             DataType::MessageData => "MESSAGE_DATA",
+            DataType::Heartbeat => "DUMMY_TYPE",
         }
     }
 }
@@ -170,6 +172,7 @@ pub const fn get_message_data_type(data_type: DataType) -> MessageDataType {
         DataType::FuelFlow => MessageDataType::Float32,
         DataType::FuelTankPressure => MessageDataType::Float32,
         DataType::MessageData => MessageDataType::String,
+        DataType::Heartbeat => MessageDataType::NoData,
     }
 }
 
@@ -192,6 +195,7 @@ pub const fn get_message_info_types(message_type: DataType) -> MessageType {
         DataType::FuelFlow => MessageType::Info,
         DataType::FuelTankPressure => MessageType::Info,
         DataType::MessageData => MessageType::Info,
+        DataType::Heartbeat => MessageType::Info,
     }
 }
 

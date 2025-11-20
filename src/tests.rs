@@ -31,6 +31,7 @@ fn test_payload_len_for(ty: DataType) -> usize {
                         | MessageDataType::Float64 => 8,
                         MessageDataType::UInt128 | MessageDataType::Int128 => 16,
                         MessageDataType::String | MessageDataType::Binary => 1,
+                        MessageDataType::NoData => 0,
                     };
                     let elems = get_message_meta(ty).element_count.into().max(1);
                     w * elems
@@ -1374,6 +1375,20 @@ mod tests_extra {
         assert_eq!(pkt.timestamp(), 12345);
     }
 
+    #[test]
+    fn from_none_slice_builds_valid_packet() {
+        let need = 0; // f32 count
+        assert_eq!(need, 0); // schema sanity
+
+        let pkt =
+            TelemetryPacket::from_no_data(DataType::Heartbeat, &[DataEndpoint::SdCard], 12345)
+                .unwrap();
+
+        assert_eq!(pkt.payload().len(), 0);
+        assert_eq!(pkt.data_size(), 0);
+        assert_eq!(pkt.timestamp(), 12345);
+    }
+
     // --------------------------- Header-only happy path smoke ---------------------------
 
     /// Header-only peek (`peek_envelope`) should match full parse for a normal
@@ -1514,6 +1529,7 @@ mod tests_more {
                     }
                     MessageDataType::UInt128 | MessageDataType::Int128 => 16,
                     MessageDataType::String | MessageDataType::Binary => 1,
+                    MessageDataType::NoData => 0,
                 };
                 let elems = get_message_meta(ty).element_count.into().max(1);
                 core::cmp::max(1, w * elems)
@@ -1789,7 +1805,6 @@ mod tests_more {
         for i in 0..=MAX_VALUE_DATA_TYPE {
             if let Some(ty) = DataType::try_from_u32(i) {
                 let len = test_payload_len_for(ty);
-                assert!(len > 0, "test payload length must be > 0 for {ty:?}");
 
                 match get_data_type(ty) {
                     MessageDataType::String | MessageDataType::Binary => {
@@ -1810,7 +1825,16 @@ mod tests_more {
                             | MessageDataType::Float64 => 8,
                             MessageDataType::UInt128 | MessageDataType::Int128 => 16,
                             MessageDataType::String | MessageDataType::Binary => 1,
+                            MessageDataType::NoData => 0,
                         };
+                        if width == 0 {
+                            // NoData must have zero length
+                            assert_eq!(
+                                len, 0,
+                                "NoData type must have zero-length payload for {ty:?}"
+                            );
+                            return;
+                        }
                         assert_eq!(
                             len % width,
                             0,
