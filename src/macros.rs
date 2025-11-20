@@ -199,3 +199,62 @@ macro_rules! do_vec_log_typed {
         }
     }};
 }
+
+/// Helper macros for implementing `TelemetryPacket` constructors and
+/// accessors for primitive slices.
+#[macro_export]
+macro_rules! impl_from_prim_slices {
+    ($($fn_name:ident, $elem_ty:ty);+ $(;)?) => {
+        $(
+            #[inline]
+            pub fn $fn_name(
+                ty: DataType,
+                values: &[$elem_ty],
+                endpoints: &[DataEndpoint],
+                timestamp: u64,
+            ) -> TelemetryResult<Self> {
+                Self::from_prim_le_slice(ty, values, endpoints, timestamp)
+            }
+        )+
+    };
+}
+/// Helper macros for implementing `TelemetryPacket` data accessors for
+/// primitive slices.
+#[macro_export]
+macro_rules! impl_data_as_prim {
+    ($($name:ident, $ty:ty, $variant:expr);+ $(;)?) => {
+        $(
+            #[doc = concat!("Decode payload as little-endian `", stringify!($ty), "` values.")]
+            #[inline]
+            pub fn $name(&self) -> TelemetryResult<Vec<$ty>> {
+                self._as_le_bytes::<$ty>($variant)
+            }
+        )+
+    };
+}
+
+/// Implement the [`LeDecode`] trait for a numeric type with fixed size.
+///
+/// This is used to unify little-endian deserialization for primitive types
+/// like `u16`, `u32`, `f32`, etc.
+///
+/// `$ty`: concrete numeric type (e.g. `u16`, `i32`, `f32`)
+///# Example
+/// ```text
+/// impl_ledecode_auto!(u32);
+/// impl_ledecode_auto!(f32);
+/// ```
+#[macro_export]
+macro_rules! impl_ledecode_auto {
+    ($ty:ty) => {
+        impl LeDecode for $ty {
+            const WIDTH: usize = core::mem::size_of::<$ty>();
+            #[inline]
+            fn from_le(slice: &[u8]) -> Self {
+                let arr: [u8; core::mem::size_of::<$ty>()] =
+                    slice.try_into().expect("slice length mismatch");
+                <$ty>::from_le_bytes(arr)
+            }
+        }
+    };
+}
