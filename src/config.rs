@@ -284,7 +284,7 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
         DataType::Abort => {
             MessageMeta {
                 // Abort Command
-                element_count: MessageElementCount::Static(1), // Abort messages carry 1 boolean element
+                element_count: MessageElementCount::Static(0), // Abort messages carry 1 boolean element
                 endpoints: &[
                     DataEndpoint::Abort,
                 ],
