@@ -253,7 +253,7 @@ SedsResult node_log(
     size_t element_count,
     size_t element_size)
 {
-    if (!n || !n->r || !data || element_count == 0 || element_size == 0) return SEDS_ERR;
+    if (!n || !n->r || !data) return SEDS_ERR;
 
     const size_t total_bytes = element_count * element_size;
     // LOCK();

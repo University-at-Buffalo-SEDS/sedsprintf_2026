@@ -116,7 +116,8 @@ pub enum DataType {
     FuelTankPressure,
     /// Generic string message payload.
     MessageData,
-    Heartbeat, // For testing purposes only
+    /// Heartbeat message (no payload).
+    Heartbeat,
 }
 
 impl DataType {
@@ -139,7 +140,7 @@ impl DataType {
             DataType::FuelFlow => "FUEL_FLOW",
             DataType::FuelTankPressure => "FUEL_TANK_PRESSURE",
             DataType::MessageData => "MESSAGE_DATA",
-            DataType::Heartbeat => "DUMMY_TYPE",
+            DataType::Heartbeat => "HEARTBEAT",
         }
     }
 }

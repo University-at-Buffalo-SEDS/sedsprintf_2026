@@ -424,7 +424,7 @@ impl TelemetryPacket {
         s.push_str(&self.header_string());
 
         if self.payload.is_empty() {
-            s.push_str(", Data: (<empty>)}");
+            s.push_str(", Data: (<NoData>)}");
             return s;
         }
 
