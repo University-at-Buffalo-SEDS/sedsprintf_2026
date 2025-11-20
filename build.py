@@ -164,6 +164,7 @@ def main(argv: list[str]) -> None:
             print(f"Target set to: {target}")
         else:
             print(f"Unknown option: {arg}")
+            exit(1)
 
     # Decide build args
     ensure_rust_target_installed(
