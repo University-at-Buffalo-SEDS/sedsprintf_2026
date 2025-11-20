@@ -22,6 +22,9 @@ typedef uint64_t (* SedsNowMsFn)(void * user);
 
 typedef struct SedsRouter SedsRouter;
 
+typedef struct SedsRelay SedsRelay;
+
+
 typedef struct SedsPacketView
 {
     uint32_t ty;
@@ -258,6 +261,110 @@ SedsOwnedHeader * seds_pkt_deserialize_header_owned(const uint8_t * bytes, size_
 SedsResult seds_owned_header_view(const SedsOwnedHeader * h, SedsPacketView * out_view);
 
 void seds_owned_header_free(SedsOwnedHeader * h);
+
+/* ==============================
+   Relay lifecycle
+   ============================== */
+
+/**
+ * @brief Create a new relay instance.
+ *
+ * @param now_ms_cb  Optional monotonic clock callback (may be NULL).
+ * @param user       Opaque user pointer passed back into @p now_ms_cb.
+ *
+ * @return Non-NULL relay handle on success; NULL on failure.
+ */
+SedsRelay * seds_relay_new(SedsNowMsFn now_ms_cb, void * user);
+
+/**
+ * @brief Destroy a relay previously returned by seds_relay_new().
+ */
+void seds_relay_free(SedsRelay * r);
+
+/**
+ * @brief Add a new side/network to the relay.
+ *
+ * The side is identified by a small integer ID (0,1,2,...) returned from
+ * this function. The same SedsTransmitFn type is used as for SedsRouter.
+ *
+ * @param r         Relay handle.
+ * @param name      Optional UTF-8 name (may be NULL).
+ * @param name_len  Length of @p name in bytes (0 if unused).
+ * @param tx        TX callback for this side (must not be NULL).
+ * @param tx_user   Opaque user pointer passed to @p tx.
+ *
+ * @return On success: non-negative side ID.
+ *         On error:   negative SedsResult error code.
+ */
+int32_t seds_relay_add_side(SedsRelay * r,
+                            const char * name,
+                            size_t name_len,
+                            SedsTransmitFn tx,
+                            void * tx_user);
+
+/**
+ * @brief Feed serialized bytes that arrived on a given side into the relay.
+ *
+ * This corresponds to “RX from network into relay”. The relay will fan-out
+ * the packet to all other sides when you later call the process_* functions.
+ *
+ * @param r        Relay handle.
+ * @param side_id  Side ID returned by seds_relay_add_side().
+ * @param bytes    Serialized packet bytes.
+ * @param len      Length of @p bytes.
+ *
+ * @return SEDS_OK on success or a negative SedsResult on error.
+ */
+SedsResult seds_relay_rx_serialized_from_side(SedsRelay * r,
+                                              uint32_t side_id,
+                                              const uint8_t * bytes,
+                                              size_t len);
+
+/* --- Relay queue processing (matching router style) --- */
+
+/**
+ * @brief Process all pending RX in the relay RX queue (expand into TX).
+ */
+SedsResult seds_relay_process_rx_queue(SedsRelay * r);
+
+/**
+ * @brief Process all pending TX in the relay TX queue (invoke side TX callbacks).
+ */
+SedsResult seds_relay_process_tx_queue(SedsRelay * r);
+
+/**
+ * @brief Process both RX and TX queues until they are empty.
+ */
+SedsResult seds_relay_process_all_queues(SedsRelay * r);
+
+/**
+ * @brief Clear both RX and TX queues without processing.
+ */
+SedsResult seds_relay_clear_queues(SedsRelay * r);
+
+/* --- Relay queue processing with time budget (ms) --- */
+
+/**
+ * @brief Process RX queue until timeout (ms) or completion.
+ *
+ * If @p timeout_ms is 0, drains the queue fully.
+ */
+SedsResult seds_relay_process_rx_queue_with_timeout(SedsRelay * r, uint32_t timeout_ms);
+
+/**
+ * @brief Process TX queue until timeout (ms) or completion.
+ *
+ * If @p timeout_ms is 0, drains the queue fully.
+ */
+SedsResult seds_relay_process_tx_queue_with_timeout(SedsRelay * r, uint32_t timeout_ms);
+
+/**
+ * @brief Process RX and TX queues until timeout (ms) or completion.
+ *
+ * If @p timeout_ms is 0, drains both queues fully.
+ */
+SedsResult seds_relay_process_all_queues_with_timeout(SedsRelay * r, uint32_t timeout_ms);
+
 
 #ifdef __cplusplus
 } /* extern "C" */
