@@ -19,7 +19,8 @@ use crate::{
 };
 use alloc::{boxed::Box, string::String, sync::Arc, vec, vec::Vec};
 use core::{ffi::c_char, ffi::c_void, mem::size_of, ptr, slice, str::from_utf8};
-
+use crate::config::get_message_data_type;
+use crate::MessageDataType::NoData;
 // ============================================================================
 //  Constants / basic types shared with the C side
 // ============================================================================
@@ -242,7 +243,7 @@ unsafe fn write_str_to_buf(s: &str, buf: *mut c_char, buf_len: usize) -> i32 {
 /// Used in FFI logging helpers.
 #[inline]
 fn width_is_valid(width: usize) -> bool {
-    matches!(width, 1 | 2 | 4 | 8 | 16)
+    matches!(width, 0| 1 | 2 | 4 | 8 | 16)
 }
 
 /// FFI-facing clock adapter that calls back into C when present.
@@ -593,6 +594,22 @@ fn finish_with<T: LeBytes + Copy>(
     required_elems: usize,
     elem_size: usize,
 ) -> i32 {
+    if get_message_data_type(ty) == NoData{
+        return ok_or_status(unsafe {
+            let router = &(*r).inner; // shared borrow
+            if queue {
+                match ts {
+                    Some(t) => router.log_queue_ts::<T>(ty, t, &[]),
+                    None => router.log_queue::<T>(ty, &[]),
+                }
+            } else {
+                match ts {
+                    Some(t) => router.log_ts::<T>(ty, t, &[]),
+                    None => router.log::<T>(ty, &[]),
+                }
+            }
+        });
+    }
     let mut tmp: Vec<T> = Vec::with_capacity(required_elems);
     // vectorize_data reads unaligned little-endian elements into tmp
     if let Err(_) = vectorize_data::<T>(padded.as_ptr(), required_elems, elem_size, &mut tmp) {

@@ -93,6 +93,9 @@ static void * sender_B(void * arg)
         make_series(buf, 3, 101.3f);
         assert(node_log(B, SEDS_DT_BAROMETER_DATA, buf, 3, sizeof(buf[0])) == SEDS_OK);
         usleep(gen_random_us());
+        uint8_t buff[0];
+        assert(node_log(B, SEDS_DT_HEARTBEAT, buff, 0, 0) == SEDS_OK);
+        usleep(gen_random_us());
     }
     return NULL;
 }
@@ -177,8 +180,8 @@ int main(void)
            powerBoard.radio_hits, powerBoard.sd_hits);
 
     // 7) Assertions (same as your single-thread example)
-    assert(radioBoard.radio_hits == 25);
-    assert(flightControllerBoard.sd_hits == 25);
+    assert(radioBoard.radio_hits == 30);
+    assert(flightControllerBoard.sd_hits == 30);
     assert(powerBoard.radio_hits == 0);
     assert(powerBoard.sd_hits == 0);
 
