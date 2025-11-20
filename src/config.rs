@@ -11,7 +11,7 @@
 #[allow(unused_imports)]
 use crate::{MessageDataType, MessageElementCount, MessageMeta, MessageType, STRING_VALUE_ELEMENT};
 use strum_macros::EnumCount;
-
+use crate::EndpointsBroadcastMode;
 // -----------------------------------------------------------------------------
 // User-editable configuration
 // -----------------------------------------------------------------------------
@@ -70,10 +70,17 @@ impl DataEndpoint {
     ///
     /// This should remain stable over time for compatibility with tests and
     /// external tooling.
-    pub fn as_str(self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             DataEndpoint::SdCard => "SD_CARD",
             DataEndpoint::Radio => "RADIO",
+        }
+    }
+    
+    pub fn get_broadast_mode(&self) -> EndpointsBroadcastMode{
+        match self {
+            DataEndpoint::SdCard => EndpointsBroadcastMode::Default,
+            DataEndpoint::Radio => EndpointsBroadcastMode::Default,
         }
     }
 }

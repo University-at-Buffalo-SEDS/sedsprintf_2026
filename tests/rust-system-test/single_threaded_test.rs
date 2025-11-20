@@ -137,7 +137,7 @@ mod single_threaded_test {
                 let node = &mut nodes[0];
                 make_series(&mut gps_buf[..3], 10.0);
                 let pkt = make_packet(DataType::GpsData, &gps_buf[..3], i as u64);
-                node.router.transmit_message(&pkt).unwrap();
+                node.router.tx(&pkt).unwrap();
             }
 
             // --- Sender B (flight controller) ---
@@ -147,12 +147,12 @@ mod single_threaded_test {
                 // "gyro"
                 make_series(&mut gyro_buf[..3], 0.5);
                 let pkt1 = make_packet(DataType::GpsData, &gyro_buf[..3], (i + 10_000) as u64);
-                node.router.transmit_message(&pkt1).unwrap();
+                node.router.tx(&pkt1).unwrap();
 
                 // "barometer"
                 make_series(&mut baro_buf[..3], 101.3);
                 let pkt2 = make_packet(DataType::GpsData, &baro_buf[..3], (i + 20_000) as u64);
-                node.router.transmit_message(&pkt2).unwrap();
+                node.router.tx(&pkt2).unwrap();
             }
 
             // --- Sender C (power board) ---
@@ -163,7 +163,7 @@ mod single_threaded_test {
                 make_series(&mut batt_buf[..2], 3.7);
                 let pkt1 =
                     make_packet(DataType::BatteryStatus, &batt_buf[..2], (i + 30_000) as u64);
-                node.router.transmit_message(&pkt1).unwrap();
+                node.router.tx(&pkt1).unwrap();
 
                 // message as bytes
                 let pkt2 = TelemetryPacket::from_str_slice(
@@ -173,7 +173,7 @@ mod single_threaded_test {
                     (i + 40_000) as u64,
                 )
                 .unwrap();
-                node.router.transmit_message(&pkt2).unwrap();
+                node.router.tx(&pkt2).unwrap();
             }
 
             // --- Deliver all bus frames for this iteration ---

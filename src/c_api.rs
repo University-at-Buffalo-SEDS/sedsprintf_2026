@@ -928,7 +928,7 @@ pub extern "C" fn seds_router_receive_serialized(
     }
     let router = unsafe { &(*r).inner }; // shared borrow
     let slice = unsafe { slice::from_raw_parts(bytes, len) };
-    ok_or_status(router.receive_serialized(slice))
+    ok_or_status(router.rx_serialized(slice))
 }
 
 /// Feed a packet view (constructed on the C side) into the router RX path.
@@ -942,7 +942,7 @@ pub extern "C" fn seds_router_receive(r: *mut SedsRouter, view: *const SedsPacke
         Ok(p) => p,
         Err(_) => return status_from_err(TelemetryError::InvalidType),
     };
-    ok_or_status(router.receive(&pkt))
+    ok_or_status(router.rx(&pkt))
 }
 
 /// Transmit a packet view via the router’s TX queue immediately.
@@ -959,7 +959,7 @@ pub extern "C" fn seds_router_transmit_message_queue(
         Ok(p) => p,
         Err(_) => return status_from_err(TelemetryError::InvalidType),
     };
-    ok_or_status(router.transmit_message_queue(pkt))
+    ok_or_status(router.tx_queue(pkt))
 }
 
 // ----- Queue processing (no time budget) -----

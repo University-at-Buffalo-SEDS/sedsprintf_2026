@@ -1,11 +1,4 @@
-use crate::{
-    config::{DataEndpoint, DataType, DEVICE_IDENTIFIER, MAX_HANDLER_RETRIES}, get_needed_message_size, impl_letype_num,
-    lock::RouterMutex,
-    message_meta, serialize,
-    telemetry_packet::TelemetryPacket,
-    MessageElementCount, TelemetryError,
-    TelemetryResult,
-};
+use crate::{config::{DataEndpoint, DataType, DEVICE_IDENTIFIER, MAX_HANDLER_RETRIES}, get_needed_message_size, impl_letype_num, lock::RouterMutex, message_meta, serialize, telemetry_packet::TelemetryPacket, EndpointsBroadcastMode, MessageElementCount, TelemetryError, TelemetryResult};
 use alloc::{boxed::Box, collections::VecDeque, format, sync::Arc, vec, vec::Vec};
 
 #[cfg(all(not(feature = "std"), target_os = "none"))]
@@ -357,7 +350,7 @@ impl Router {
             payload,
         )?;
 
-        self.transmit_message(&error_pkt)
+        self.tx(&error_pkt)
     }
 
     // ---------- PUBLIC API: now all &self (thread-safe via internal locking) ----------
@@ -374,7 +367,7 @@ impl Router {
                 st.transmit_queue.pop_front()
             };
             let Some(pkt) = pkt_opt else { break };
-            self.transmit_message(&pkt)?; // No lock held while calling user code
+            self.tx(&pkt)?; // No lock held while calling user code
         }
         Ok(())
     }
@@ -430,7 +423,7 @@ impl Router {
                 st.transmit_queue.pop_front()
             };
             let Some(pkt) = pkt_opt else { break };
-            self.transmit_message(&pkt)?;
+            self.tx(&pkt)?;
             if self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
                 break;
             }
@@ -444,7 +437,7 @@ impl Router {
     /// # Returns
     /// A TelemetryResult indicating success or failure.
     fn process_rx_queue_item(&self, item: RxItem) -> TelemetryResult<()> {
-        self.receive_item(&item)
+        self.rx_item(&item)
     }
 
     /// Process packets in the receive queue for up to `timeout_ms` milliseconds.
@@ -491,7 +484,7 @@ impl Router {
                 let mut st = self.state.lock();
                 st.transmit_queue.pop_front()
             } {
-                self.transmit_message(&pkt)?;
+                self.tx(&pkt)?;
                 did_any = true;
             }
             if !drain_fully && self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
@@ -525,7 +518,7 @@ impl Router {
     /// * `pkt` - The TelemetryPacket to enqueue.
     /// # Returns
     /// A TelemetryResult indicating success or failure.
-    pub fn transmit_message_queue(&self, pkt: TelemetryPacket) -> TelemetryResult<()> {
+    pub fn tx_queue(&self, pkt: TelemetryPacket) -> TelemetryResult<()> {
         pkt.validate()?;
         let mut st = self.state.lock();
         st.transmit_queue.push_back(pkt);
@@ -736,7 +729,7 @@ impl Router {
             env.timestamp_ms,
             payload,
         )?;
-        self.transmit_message(&error_pkt)
+        self.tx(&error_pkt)
     }
 
     /// Core receive function handling both Packet and Serialized RxItems.
@@ -745,7 +738,7 @@ impl Router {
     /// * `item` - The RxItem to process (either Packet or Serialized).
     /// # Returns
     /// A TelemetryResult indicating success or failure.
-    pub fn receive_item(&self, item: &RxItem) -> TelemetryResult<()> {
+    pub fn rx_item(&self, item: &RxItem) -> TelemetryResult<()> {
         match item {
             RxItem::Packet(pkt) => {
                 pkt.validate()?;
@@ -832,7 +825,7 @@ impl Router {
     /// * `pkt` - The TelemetryPacket to transmit.
     /// # Returns
     /// A TelemetryResult indicating success or failure.
-    pub fn transmit_message(&self, pkt: &TelemetryPacket) -> TelemetryResult<()> {
+    pub fn tx(&self, pkt: &TelemetryPacket) -> TelemetryResult<()> {
         pkt.validate()?;
 
         let has_serialized_local = pkt
@@ -843,7 +836,7 @@ impl Router {
         let send_remote = pkt
             .endpoints()
             .iter()
-            .any(|e| !self.cfg.is_local_endpoint(*e));
+            .any(|e| (!self.cfg.is_local_endpoint(*e) && e.get_broadast_mode() != EndpointsBroadcastMode::Never) || e.get_broadast_mode() == EndpointsBroadcastMode::Always);
 
         // Only serialize if needed.
         let bytes_opt = if has_serialized_local || send_remote {
@@ -892,9 +885,9 @@ impl Router {
     /// * `bytes` - The serialized telemetry packet as a byte slice.
     /// # Returns
     /// A TelemetryResult indicating success or failure.
-    pub fn receive_serialized(&self, bytes: &[u8]) -> TelemetryResult<()> {
+    pub fn rx_serialized(&self, bytes: &[u8]) -> TelemetryResult<()> {
         let item = RxItem::Serialized(Arc::from(bytes));
-        self.receive_item(&item)
+        self.rx_item(&item)
     }
 
     /// Enqueue and process a telemetry packet.
@@ -903,9 +896,9 @@ impl Router {
     /// * `pkt` - The TelemetryPacket to process.
     /// # Returns
     /// A TelemetryResult indicating success or failure.
-    pub fn receive(&self, pkt: &TelemetryPacket) -> TelemetryResult<()> {
+    pub fn rx(&self, pkt: &TelemetryPacket) -> TelemetryResult<()> {
         let item = RxItem::Packet(pkt.clone());
-        self.receive_item(&item)
+        self.rx_item(&item)
     }
 
     /// Build a packet then send immediately.
@@ -916,7 +909,7 @@ impl Router {
     /// A TelemetryResult indicating success or failure.
     pub fn log<T: LeBytes>(&self, ty: DataType, data: &[T]) -> TelemetryResult<()> {
         log_raw(self.sender, ty, data, self.clock.now_ms(), |pkt| {
-            self.transmit_message(&pkt)
+            self.tx(&pkt)
         })
     }
 
@@ -928,7 +921,7 @@ impl Router {
     /// A TelemetryResult indicating success or failure.
     pub fn log_queue<T: LeBytes>(&self, ty: DataType, data: &[T]) -> TelemetryResult<()> {
         log_raw(self.sender, ty, data, self.clock.now_ms(), |pkt| {
-            self.transmit_message_queue(pkt)
+            self.tx_queue(pkt)
         })
     }
 
@@ -946,7 +939,7 @@ impl Router {
         data: &[T],
     ) -> TelemetryResult<()> {
         log_raw(self.sender, ty, data, timestamp, |pkt| {
-            self.transmit_message(&pkt)
+            self.tx(&pkt)
         })
     }
 
@@ -964,7 +957,7 @@ impl Router {
         data: &[T],
     ) -> TelemetryResult<()> {
         log_raw(self.sender, ty, data, timestamp, |pkt| {
-            self.transmit_message_queue(pkt)
+            self.tx_queue(pkt)
         })
     }
 }
