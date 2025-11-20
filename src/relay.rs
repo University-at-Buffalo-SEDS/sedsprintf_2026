@@ -3,6 +3,7 @@ use crate::{
     {lock::RouterMutex, TelemetryError, TelemetryResult},
 };
 use alloc::{collections::VecDeque, sync::Arc, vec::Vec};
+use alloc::boxed::Box;
 
 /// Logical side index (CAN, UART, RADIO, etc.)
 pub type RelaySideId = usize;
