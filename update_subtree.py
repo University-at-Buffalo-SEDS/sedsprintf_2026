@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
+import importlib.util
 import os
 import subprocess
-from pathlib import Path
 import sys
-import importlib.util
+from pathlib import Path
 
 
 def run(cmd: list[str]) -> None:

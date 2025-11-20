@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import subprocess
-from typing import List
 import os
+import subprocess
 from pathlib import Path
+from typing import List
 
 
 def run(cmd: List[str], *, capture: bool = False) -> str | None:
