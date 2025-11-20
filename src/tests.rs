@@ -2328,3 +2328,259 @@ mod data_conversion_types {
         assert_eq!(decoded, vals);
     }
 }
+
+
+// -----------------------------------------------------------------------------
+// Relay tests
+// -----------------------------------------------------------------------------
+#[cfg(test)]
+mod relay_tests {
+    //! Tests for the serialized relay fan-out behavior and timeout semantics.
+
+    use crate::router::{Clock};
+
+    use crate::tests::timeout_tests::StepClock;
+    use crate::{TelemetryError, TelemetryResult};
+    use core::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+    use crate::relay::Relay;
+
+    /// Simple zero clock for tests that don't care about timeouts.
+    fn zero_clock() -> Box<dyn Clock + Send + Sync> {
+        Box::new(|| 0u64)
+    }
+
+    /// A small "bus" that records frames seen by each relay side.
+    #[derive(Clone)]
+    struct SideBus {
+        frames: Arc<Mutex<Vec<Vec<u8>>>>,
+    }
+
+    impl SideBus {
+        fn new() -> (Self, impl Fn(&[u8]) -> TelemetryResult<()> + Send + Sync + 'static) {
+            let frames = Arc::new(Mutex::new(Vec::<Vec<u8>>::new()));
+            let frames_c = frames.clone();
+            let tx = move |bytes: &[u8]| -> TelemetryResult<()> {
+                frames_c.lock().unwrap().push(bytes.to_vec());
+                Ok(())
+            };
+            (Self { frames }, tx)
+        }
+
+        fn len(&self) -> usize {
+            self.frames.lock().unwrap().len()
+        }
+
+        fn first(&self) -> Option<Vec<u8>> {
+            self.frames.lock().unwrap().get(0).cloned()
+        }
+    }
+
+    /// Basic fan-out: one source side should be relayed to all *other* sides,
+    /// and never loop back to the source.
+    #[test]
+    fn relay_basic_fan_out() {
+        let relay = Relay::new(zero_clock());
+
+        // Three sides: A, B, C
+        let (bus_a, tx_a) = SideBus::new();
+        let (bus_b, tx_b) = SideBus::new();
+        let (bus_c, tx_c) = SideBus::new();
+
+        let id_a = relay.add_side("A", tx_a);
+        let _id_b = relay.add_side("B", tx_b);
+        let _id_c = relay.add_side("C", tx_c);
+
+        let frame = [0xAAu8, 0xBB, 0xCC];
+
+        // Inject from A
+        relay
+            .rx_serialized_from_side(id_a, &frame)
+            .expect("rx_serialized_from_side failed");
+
+        // Drain all queues → should deliver once to B and once to C.
+        relay.process_all_queues().expect("process_all_queues failed");
+
+        assert_eq!(bus_a.len(), 0, "source side must not receive its own frame");
+        assert_eq!(bus_b.len(), 1, "side B should see one frame");
+        assert_eq!(bus_c.len(), 1, "side C should see one frame");
+
+        assert_eq!(bus_b.first().unwrap(), frame);
+        assert_eq!(bus_c.first().unwrap(), frame);
+    }
+
+    /// Ensure invalid side IDs are rejected with a TelemetryError::HandlerError.
+    #[test]
+    fn relay_invalid_side_id_returns_error() {
+        let relay = Relay::new(zero_clock());
+
+        // No sides registered; any index is invalid.
+        let res = relay.rx_serialized_from_side(0, &[0x01, 0x02]);
+        match res {
+            Err(TelemetryError::HandlerError(msg)) => {
+                assert!(
+                    msg.contains("relay: invalid side id"),
+                    "unexpected error message: {msg}"
+                );
+            }
+            other => panic!("expected HandlerError for invalid side id, got {other:?}"),
+        }
+    }
+
+    /// After clear_queues, no pending TX/RX items should be processed.
+    #[test]
+    fn relay_clear_queues_drops_pending_work() {
+        let relay = Relay::new(zero_clock());
+
+        let tx_count_b = Arc::new(AtomicUsize::new(0));
+        let tx_count_c = Arc::new(AtomicUsize::new(0));
+
+        let tx_b_c = tx_count_b.clone();
+        let tx_b = move |bytes: &[u8]| -> TelemetryResult<()> {
+            assert!(!bytes.is_empty());
+            tx_b_c.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        };
+
+        let tx_c_c = tx_count_c.clone();
+        let tx_c = move |bytes: &[u8]| -> TelemetryResult<()> {
+            assert!(!bytes.is_empty());
+            tx_c_c.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        };
+
+        let id_a = relay.add_side("A", |_b| Ok(()));
+        relay.add_side("B", tx_b);
+        relay.add_side("C", tx_c);
+
+        // Queue some RX work from A.
+        relay
+            .rx_serialized_from_side(id_a, &[0x01, 0x02, 0x03])
+            .unwrap();
+        relay
+            .rx_serialized_from_side(id_a, &[0x04, 0x05, 0x06])
+            .unwrap();
+
+        // Expand RX → TX, but do not deliver yet.
+        relay.process_rx_queue().unwrap();
+
+        // Drop all queued items.
+        relay.clear_queues();
+
+        // Nothing should be delivered now.
+        relay.process_all_queues().unwrap();
+
+        assert_eq!(
+            tx_count_b.load(Ordering::SeqCst),
+            0,
+            "no frames should be sent to side B after clear_queues"
+        );
+        assert_eq!(
+            tx_count_c.load(Ordering::SeqCst),
+            0,
+            "no frames should be sent to side C after clear_queues"
+        );
+    }
+
+    /// Non-zero timeout budget should be able to stop processing early,
+    /// leaving additional work for a later drain.
+    #[test]
+    fn relay_timeout_limits_work_per_call() {
+        // Step clock: each now_ms() call advances by 10ms.
+        let clock = StepClock::new_box(0, 10);
+        let relay = Relay::new(clock);
+
+        let tx_count = Arc::new(AtomicUsize::new(0));
+        let txc = tx_count.clone();
+        let tx = move |bytes: &[u8]| -> TelemetryResult<()> {
+            assert!(!bytes.is_empty());
+            txc.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        };
+
+        let id_src = relay.add_side("SRC", |_b| Ok(()));
+        relay.add_side("DST", tx);
+
+        // Queue multiple RX items from SRC.
+        for _ in 0..5 {
+            relay
+                .rx_serialized_from_side(id_src, &[0xDE, 0xAD, 0xBE, 0xEF])
+                .unwrap();
+        }
+
+        // With step=10 and timeout=5:
+        //   - start = 0
+        //   - after first RX, now_ms() == 10 → exceeds budget before any TX.
+        relay
+            .process_all_queues_with_timeout(5)
+            .expect("process_all_queues_with_timeout failed");
+
+        // No TX should have happened yet, but there is still work queued.
+        assert_eq!(
+            tx_count.load(Ordering::SeqCst),
+            0,
+            "timeout should have prevented any TX in first call"
+        );
+
+        // Now drain fully; all fan-out TX items should be delivered.
+        relay
+            .process_all_queues_with_timeout(0)
+            .expect("final drain failed");
+
+        // Each of the 5 RX frames fans out from SRC -> DST (1 destination).
+        assert_eq!(
+            tx_count.load(Ordering::SeqCst),
+            5,
+            "expected all queued frames to be delivered after full drain"
+        );
+    }
+
+    /// Basic sanity: concurrent RX producers should not panic and should
+    /// deliver all frames after a full drain.
+    #[test]
+    fn relay_concurrent_rx_is_thread_safe() {
+        use std::thread;
+
+        const THREADS: usize = 4;
+        const ITERS_PER_THREAD: usize = 25;
+        let total_frames = THREADS * ITERS_PER_THREAD;
+
+        let relay = Arc::new(Relay::new(zero_clock()));
+
+        let tx_count = Arc::new(AtomicUsize::new(0));
+        let txc = tx_count.clone();
+        relay.add_side("SRC", |_b| Ok(()));
+        relay.add_side("DST", move |bytes: &[u8]| -> TelemetryResult<()> {
+            assert!(!bytes.is_empty());
+            txc.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        });
+
+        // Multiple threads enqueue RX from side 0 ("SRC").
+        let mut threads_vec = Vec::new();
+        for _ in 0..THREADS {
+            let r = relay.clone();
+            threads_vec.push(thread::spawn(move || {
+                for _ in 0..ITERS_PER_THREAD {
+                    r.rx_serialized_from_side(0, &[1, 2, 3]).unwrap();
+                }
+            }));
+        }
+
+        for t in threads_vec {
+            t.join().expect("producer thread panicked");
+        }
+
+        // Drain fully.
+        relay
+            .process_all_queues_with_timeout(0)
+            .expect("drain failed");
+
+        // Each RX frame from SRC fans out once to DST.
+        assert_eq!(
+            tx_count.load(Ordering::SeqCst),
+            total_frames,
+            "expected {total_frames} relayed frames"
+        );
+    }
+}

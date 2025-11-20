@@ -29,7 +29,8 @@ use pyo3::types::{PyBytes, PyDict, PyList, PyModule, PyTuple};
 use std::sync::{Arc as SArc, Mutex, OnceLock};
 
 use crate::{
-    config::DataEndpoint, get_needed_message_size, message_meta, router::{BoardConfig, Clock, EndpointHandler, LeBytes, Router},
+    config::DataEndpoint, get_needed_message_size, message_meta, relay::Relay,
+    router::{BoardConfig, Clock, EndpointHandler, LeBytes, Router},
     serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet},
     telemetry_packet::{DataType, TelemetryPacket},
     try_enum_from_u32, MessageElementCount,
@@ -798,7 +799,7 @@ impl PyRouter {
             .inner
             .lock()
             .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
-        rtr.receive_serialized(bytes).map_err(py_err_from)
+        rtr.rx_serialized(bytes).map_err(py_err_from)
     }
 
     /// Process the router's send/TX queue until empty.
@@ -886,6 +887,162 @@ impl PyRouter {
             .map_err(py_err_from)
     }
 }
+
+// ============================================================================
+    //  Relay (PyRelay)
+    // ============================================================================
+
+    /// Python-visible relay wrapper.
+    ///
+    /// The Relay:
+    ///   - fans out serialized packets from one side to all others
+    ///   - has RX/TX queues and time-budgeted processing
+    ///   - uses the same Clock abstraction as Router.
+    #[pyclass(name = "Relay")]
+    pub struct PyRelay {
+        inner: SArc<Relay>,
+        _now_cb: Option<Py<PyAny>>,
+        _tx_cbs: Vec<Py<PyAny>>, // keep per-side TX callbacks alive
+    }
+
+    #[pymethods]
+    impl PyRelay {
+        /// Create a new Relay.
+        ///
+        /// Parameters
+        /// ----------
+        /// now_ms : callable | None
+        ///     Zero-arg callback returning an integer timestamp in ms.
+        ///     If None, relay timeouts use 0.
+        #[new]
+        #[pyo3(signature = (now_ms=None))]
+        fn new(py: Python<'_>, now_ms: Option<Py<PyAny>>) -> PyResult<Self> {
+            let now_keep = now_ms.as_ref().map(|p| p.clone_ref(py));
+
+            let clock = PyClock {
+                cb: now_keep.as_ref().map(|p| p.clone_ref(py)),
+            };
+
+            let relay = Relay::new(Box::new(clock));
+
+            Ok(PyRelay {
+                inner: SArc::new(relay),
+                _now_cb: now_keep,
+                _tx_cbs: Vec::new(),
+            })
+        }
+
+        /// Add a new side (e.g. "CAN", "UART", "RADIO") with a TX callback.
+        ///
+        /// Parameters
+        /// ----------
+        /// name : str
+        ///     Human-readable name for the side.
+        /// tx : callable
+        ///     Called as `tx(bytes: bytes)` when the relay wants to send on this side.
+        ///
+        /// Returns
+        /// -------
+        /// int
+        ///     Side ID to use in `rx_serialized_from_side`.
+        fn add_side(&mut self, py: Python<'_>, name: &str, tx: Py<PyAny>) -> PyResult<u32> {
+            // Keep callback alive on the Python side
+            let cb_keep = tx.clone_ref(py);
+            let cb_for_closure = cb_keep.clone_ref(py);
+            self._tx_cbs.push(cb_keep);
+
+            // Relay::add_side expects &'static str – leak a boxed string to get 'static.
+            let name_static: &'static str = Box::leak(name.to_owned().into_boxed_str());
+
+            let id = self.inner.add_side(name_static, move |bytes| {
+                Python::attach(|py| {
+                    let arg = PyBytes::new(py, bytes);
+                    match cb_for_closure.call1(py, (&arg,)) {
+                        Ok(_) => Ok(()),
+                        Err(err) => {
+                            err.restore(py);
+                            Err(TelemetryError::Io("relay tx error"))
+                        }
+                    }
+                })
+            });
+
+            Ok(id as u32)
+        }
+
+        /// Enqueue serialized bytes that arrived on a given side into the relay RX queue.
+        ///
+        /// Parameters
+        /// ----------
+        /// side_id : int
+        ///     Side ID returned from `add_side`.
+        /// data : bytes-like
+        ///     Serialized packet bytes.
+        fn rx_serialized_from_side(
+            &self,
+            _py: Python<'_>,
+            side_id: u32,
+            data: &Bound<'_, PyAny>,
+        ) -> PyResult<()> {
+            let bytes: &[u8] = data.extract()?;
+            self.inner
+                .rx_serialized_from_side(side_id as usize, bytes)
+                .map_err(py_err_from)
+        }
+
+        /// Clear both RX and TX queues.
+        fn clear_queues(&self) {
+            self.inner.clear_queues();
+        }
+
+        /// Clear only the RX queue.
+        fn clear_rx_queue(&self) {
+            self.inner.clear_rx_queue();
+        }
+
+        /// Clear only the TX queue.
+        fn clear_tx_queue(&self) {
+            self.inner.clear_tx_queue();
+        }
+
+        /// Process the RX queue until empty.
+        fn process_rx_queue(&self) -> PyResult<()> {
+            self.inner.process_rx_queue().map_err(py_err_from)
+        }
+
+        /// Process the TX queue until empty.
+        fn process_tx_queue(&self) -> PyResult<()> {
+            self.inner.process_tx_queue().map_err(py_err_from)
+        }
+
+        /// Process both RX and TX queues until empty.
+        fn process_all_queues(&self) -> PyResult<()> {
+            self.inner.process_all_queues().map_err(py_err_from)
+        }
+
+        /// Process the RX queue until timeout (ms) or completion.
+        fn process_rx_queue_with_timeout(&self, timeout_ms: u32) -> PyResult<()> {
+            self.inner
+                .process_rx_queue_with_timeout(timeout_ms)
+                .map_err(py_err_from)
+        }
+
+        /// Process the TX queue until timeout (ms) or completion.
+        fn process_tx_queue_with_timeout(&self, timeout_ms: u32) -> PyResult<()> {
+            self.inner
+                .process_tx_queue_with_timeout(timeout_ms)
+                .map_err(py_err_from)
+        }
+
+        /// Process RX and TX queues until timeout (ms) or both empty.
+        ///
+        /// If `timeout_ms == 0`, drains fully.
+        fn process_all_queues_with_timeout(&self, timeout_ms: u32) -> PyResult<()> {
+            self.inner
+                .process_all_queues_with_timeout(timeout_ms)
+                .map_err(py_err_from)
+        }
+    }
 
 // ============================================================================
 //  Top-level helper functions
@@ -985,6 +1142,7 @@ pub fn sedsprintf_rs_2026(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<(
     // === Classes ===
     m.add_class::<PyRouter>()?;
     m.add_class::<PyPacket>()?;
+    m.add_class::<PyRelay>()?;
 
     // === Functions ===
     m.add_function(wrap_pyfunction!(deserialize_packet_py, m)?)?;

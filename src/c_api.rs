@@ -8,6 +8,8 @@
 //! - Fixed-size schema queries
 //! - Typed payload extraction
 
+use crate::config::get_message_data_type;
+use crate::MessageDataType::NoData;
 use crate::{
     config::DataEndpoint, do_vec_log_typed, get_needed_message_size, message_meta,
     router::{BoardConfig, EndpointHandler, Router},
@@ -19,8 +21,9 @@ use crate::{
 };
 use alloc::{boxed::Box, string::String, sync::Arc, vec, vec::Vec};
 use core::{ffi::c_char, ffi::c_void, mem::size_of, ptr, slice, str::from_utf8};
-use crate::config::get_message_data_type;
-use crate::MessageDataType::NoData;
+
+use crate::relay::{Relay, RelaySideId};
+
 // ============================================================================
 //  Constants / basic types shared with the C side
 // ============================================================================
@@ -58,6 +61,11 @@ pub struct SedsOwnedHeader {
     timestamp: u64,
 }
 
+/// Opaque relay handle exposed to C.
+#[repr(C)]
+pub struct SedsRelay {
+    inner: Arc<Relay>,
+}
 // ============================================================================
 //  Status / error helpers (shared for all FFI functions)
 // ============================================================================
@@ -243,7 +251,7 @@ unsafe fn write_str_to_buf(s: &str, buf: *mut c_char, buf_len: usize) -> i32 {
 /// Used in FFI logging helpers.
 #[inline]
 fn width_is_valid(width: usize) -> bool {
-    matches!(width, 0| 1 | 2 | 4 | 8 | 16)
+    matches!(width, 0 | 1 | 2 | 4 | 8 | 16)
 }
 
 /// FFI-facing clock adapter that calls back into C when present.
@@ -555,6 +563,209 @@ pub extern "C" fn seds_dtype_expected_size(ty_u32: u32) -> i32 {
 }
 
 // ============================================================================
+//  FFI: Relay lifecycle (new / free)
+// ============================================================================
+
+/// Create a new relay instance.
+///
+/// - `now_ms_cb` provides a monotonic clock (may be NULL).
+/// - `user` is an opaque pointer passed back into the clock callback.
+///
+/// Returns a non-null pointer on success or NULL on failure.
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_relay_new(now_ms_cb: CNowMs, user: *mut c_void) -> *mut SedsRelay {
+    let clock = FfiClock {
+        cb: now_ms_cb,
+        user_addr: user as usize,
+    };
+
+    let relay = Relay::new(Box::new(clock));
+    Box::into_raw(Box::new(SedsRelay {
+        inner: Arc::new(relay),
+    }))
+}
+
+/// Destroy a relay previously returned by `seds_relay_new`.
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_relay_free(r: *mut SedsRelay) {
+    if r.is_null() {
+        return;
+    }
+    unsafe {
+        drop(Box::from_raw(r));
+    }
+}
+
+// ============================================================================
+//  FFI: Relay side registration
+// ============================================================================
+
+/// Add a new side (e.g. "CAN", "UART") to the relay.
+///
+/// - `name` / `name_len` give a UTF-8 name for debugging/logging (may be empty).
+/// - `tx` / `tx_user` are the serialized TX callback for that side.
+///   The callback must return 0 on success, or a negative error code.
+///
+/// On success, returns a non-negative side ID (RelaySideId).
+/// On failure, returns a negative error code.
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_relay_add_side(
+    r: *mut SedsRelay,
+    name: *const c_char,
+    name_len: usize,
+    tx: CTransmit,
+    tx_user: *mut c_void,
+) -> i32 {
+    if r.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+
+    // Decode name (best-effort UTF-8; fall back to empty)
+    let side_name: &'static str = if name.is_null() || name_len == 0 {
+        ""
+    } else {
+        let bytes = unsafe { slice::from_raw_parts(name as *const u8, name_len) };
+        // If invalid UTF-8, just treat as empty to avoid panicking in FFI.
+        match from_utf8(bytes) {
+            Ok(s) => {
+                // Leak into 'static so we can store &str in Relay without copying.
+                let owned = alloc::string::String::from(s);
+                Box::leak(owned.into_boxed_str())
+            }
+            Err(_) => "",
+        }
+    };
+
+    let relay = unsafe { &(*r).inner }; // shared borrow
+
+    // Build per-side TX closure
+    let tx_closure = tx.map(|f| {
+        let user_addr = tx_user as usize;
+        move |bytes: &[u8]| -> TelemetryResult<()> {
+            let code = f(bytes.as_ptr(), bytes.len(), user_addr as *mut c_void);
+            if code == status_from_result_code(SedsResult::SedsOk) {
+                Ok(())
+            } else {
+                Err(TelemetryError::Io("relay tx error"))
+            }
+        }
+    });
+
+    let Some(tx_fn) = tx_closure else {
+        return status_from_err(TelemetryError::BadArg);
+    };
+
+    let side_id: RelaySideId = relay.add_side(side_name, tx_fn);
+    side_id as i32
+}
+
+// ============================================================================
+//  FFI: Relay RX / TX queueing
+// ============================================================================
+
+/// Enqueue serialized bytes that originated from `side_id` into the relay RX queue.
+///
+/// - `side_id` must be the value returned by `seds_relay_add_side`.
+/// - `bytes` / `len` are the serialized packet bytes.
+/// - Returns 0 on success or a negative error code.
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_relay_rx_serialized_from_side(
+    r: *mut SedsRelay,
+    side_id: u32,
+    bytes: *const u8,
+    len: usize,
+) -> i32 {
+    if r.is_null() || (len > 0 && bytes.is_null()) {
+        return status_from_err(TelemetryError::BadArg);
+    }
+
+    let relay = unsafe { &(*r).inner }; // shared borrow
+    let slice = unsafe { slice::from_raw_parts(bytes, len) };
+
+    ok_or_status(relay.rx_serialized_from_side(side_id as usize, slice))
+}
+
+/// Process all pending RX in the relay RX queue (expand to TX).
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_relay_process_rx_queue(r: *mut SedsRelay) -> i32 {
+    if r.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let relay = unsafe { &(*r).inner };
+    ok_or_status(relay.process_rx_queue())
+}
+
+/// Process all pending TX in the relay TX queue (invoke side TX callbacks).
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_relay_process_tx_queue(r: *mut SedsRelay) -> i32 {
+    if r.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let relay = unsafe { &(*r).inner };
+    ok_or_status(relay.process_tx_queue())
+}
+
+/// Process RX then TX queues until both are empty.
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_relay_process_all_queues(r: *mut SedsRelay) -> i32 {
+    if r.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let relay = unsafe { &(*r).inner };
+    ok_or_status(relay.process_all_queues())
+}
+
+/// Clear both RX and TX queues.
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_relay_clear_queues(r: *mut SedsRelay) -> i32 {
+    if r.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let relay = unsafe { &(*r).inner };
+    relay.clear_queues();
+    status_from_result_code(SedsResult::SedsOk)
+}
+
+/// Process RX queue until timeout or completion.
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_relay_process_rx_queue_with_timeout(
+    r: *mut SedsRelay,
+    timeout_ms: u32,
+) -> i32 {
+    if r.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let relay = unsafe { &(*r).inner };
+    ok_or_status(relay.process_rx_queue_with_timeout(timeout_ms))
+}
+
+/// Process TX queue until timeout or completion.
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_relay_process_tx_queue_with_timeout(
+    r: *mut SedsRelay,
+    timeout_ms: u32,
+) -> i32 {
+    if r.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let relay = unsafe { &(*r).inner };
+    ok_or_status(relay.process_tx_queue_with_timeout(timeout_ms))
+}
+
+/// Process both RX and TX queues until timeout or completion.
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_relay_process_all_queues_with_timeout(
+    r: *mut SedsRelay,
+    timeout_ms: u32,
+) -> i32 {
+    if r.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let relay = unsafe { &(*r).inner };
+    ok_or_status(relay.process_all_queues_with_timeout(timeout_ms))
+}
+
+// ============================================================================
 //  Internal logging helper: dispatch queue vs immediate, with optional ts
 // ============================================================================
 
@@ -594,7 +805,7 @@ fn finish_with<T: LeBytes + Copy>(
     required_elems: usize,
     elem_size: usize,
 ) -> i32 {
-    if get_message_data_type(ty) == NoData{
+    if get_message_data_type(ty) == NoData {
         return ok_or_status(unsafe {
             let router = &(*r).inner; // shared borrow
             if queue {
