@@ -110,6 +110,7 @@ pub enum DataType {
     BarometerData,
     /// Generic string message payload.
     MessageData,
+    Heartbeat, // For testing purposes only
 }
 
 impl DataType {
@@ -126,6 +127,7 @@ impl DataType {
             DataType::SystemStatus => "SYSTEM_STATUS",
             DataType::BarometerData => "BAROMETER_DATA",
             DataType::MessageData => "MESSAGE_DATA",
+            DataType::Heartbeat => "DUMMY_TYPE",
         }
     }
 }
@@ -152,6 +154,7 @@ pub const fn get_message_data_type(data_type: DataType) -> MessageDataType {
         DataType::SystemStatus => MessageDataType::UInt8,
         DataType::BarometerData => MessageDataType::Float32,
         DataType::MessageData => MessageDataType::String,
+        DataType::Heartbeat => MessageDataType::NoData,
     }
 }
 
@@ -168,6 +171,7 @@ pub const fn get_message_info_types(message_type: DataType) -> MessageType {
         DataType::SystemStatus => MessageType::Info,
         DataType::BarometerData => MessageType::Info,
         DataType::MessageData => MessageType::Info,
+        DataType::Heartbeat => MessageType::Info,
     }
 }
 
@@ -222,6 +226,10 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
             // Message Data:
             // Dynamic string payload (e.g. free-form log message).
             element_count: MessageElementCount::Dynamic,
+            endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
+        },
+        DataType::Heartbeat => MessageMeta {
+            element_count: MessageElementCount::Static(0),
             endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
         },
     }
