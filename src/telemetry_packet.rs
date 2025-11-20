@@ -92,6 +92,7 @@ const fn element_width(dt: MessageDataType) -> usize {
         MessageDataType::UInt128 | MessageDataType::Int128 => 16,
         // For String/Hex we treat width as 1 (byte granularity) when checking dynamic multiples.
         MessageDataType::String | MessageDataType::Binary => 1,
+        MessageDataType::NoData => 0,
     }
 }
 
@@ -492,6 +493,9 @@ impl TelemetryPacket {
                 // Already handled above via `data_as_utf8_ref`.
             }
             MessageDataType::Binary => return self.to_hex_string(),
+            MessageDataType::NoData => {
+                s.push_str("<no data>");
+            }
         }
 
         s.push_str(")}");
@@ -698,6 +702,37 @@ impl TelemetryPacket {
         from_f32_slice,  f32;
         from_f64_slice,  f64;
     }
+
+    #[inline]
+    pub fn from_no_data(
+        ty: DataType,
+        endpoints: &[DataEndpoint],
+        timestamp: u64,
+    ) -> TelemetryResult<Self> {
+        let meta = message_meta(ty);
+        match meta.element_count {
+            MessageElementCount::Static(need) => {
+                if need != 0 {
+                    return Err(TelemetryError::SizeMismatch {
+                        expected: need,
+                        got: 0,
+                    });
+                }
+            }
+            MessageElementCount::Dynamic => {
+                // Dynamic with zero-length payload is OK.
+            }
+        }
+
+        Self::new(
+            ty,
+            endpoints,
+            DEVICE_IDENTIFIER,
+            timestamp,
+            Arc::<[u8]>::from([]),
+        )
+    }
+
     /// Bool constructor: encodes each bool as a single byte (0 / 1).
     #[inline]
     pub fn from_bool_slice(
