@@ -42,6 +42,8 @@ PacketHandler = Callable[["Packet"], None]
 SerializedHandler = Callable[[bytes], None]
 """Endpoint handler invoked with raw serialized packet bytes."""
 
+SideId = int
+"""Logical relay side index (e.g. CAN, UART, RADIO)."""
 
 # ==============================
 # Packet object (immutable view of a telemetry packet)
@@ -179,6 +181,127 @@ class Router:
     def process_tx_queue_with_timeout(self, timeout_ms: int) -> None: ...
     def process_rx_queue_with_timeout(self, timeout_ms: int) -> None: ...
     def process_all_queues_with_timeout(self, timeout_ms: int) -> None: ...
+
+
+# ==============================
+# Relay (fan-out of serialized packets)
+# ==============================
+
+class Relay:
+    """
+    Serialized-packet relay.
+
+    The Relay:
+        - fans out serialized telemetry packets from one side to all others
+        - has RX and TX queues (same pattern as Router)
+        - supports time-budgeted queue processing
+        - uses the same monotonic clock callback style as Router
+    """
+
+    def __init__(self, now_ms: Optional[NowMsCallback] = ...) -> None:
+        """
+        Create a new Relay.
+
+        Parameters
+        ----------
+        now_ms:
+            Optional zero-arg callback returning an integer timestamp in ms.
+            If None, timeouts are based on a default clock that returns 0.
+        """
+        ...
+
+    def add_side(self, name: str, tx: TxCallback) -> SideId:
+        """
+        Add a new relay side (e.g. 'CAN', 'UART', 'RADIO').
+
+        Parameters
+        ----------
+        name:
+            Human-readable name for this side (used for debugging).
+        tx:
+            Transmit callback. Called as ``tx(bytes)`` when the relay
+            wants to send data on this side.
+
+        Returns
+        -------
+        SideId
+            Integer side id to use with ``rx_serialized_from_side``.
+        """
+        ...
+
+    def rx_serialized_from_side(
+        self,
+        side_id: SideId,
+        data: Buffer | bytes | bytearray | memoryview,
+    ) -> None:
+        """
+        Enqueue serialized bytes that arrived on a given side into the relay RX queue.
+
+        Parameters
+        ----------
+        side_id:
+            Side id previously returned by :meth:`add_side`.
+        data:
+            Serialized packet bytes.
+        """
+        ...
+
+    # Queue clearing
+
+    def clear_queues(self) -> None:
+        """Clear both RX and TX queues."""
+        ...
+
+    def clear_rx_queue(self) -> None:
+        """Clear only the RX queue."""
+        ...
+
+    def clear_tx_queue(self) -> None:
+        """Clear only the TX queue."""
+        ...
+
+    # Queue processing (no timeout)
+
+    def process_rx_queue(self) -> None:
+        """Drain the RX queue fully, expanding each item into TX items."""
+        ...
+
+    def process_tx_queue(self) -> None:
+        """Drain the TX queue fully, invoking per-side TX callbacks."""
+        ...
+
+    def process_all_queues(self) -> None:
+        """
+        Process RX then TX queues fully (one pass), until both queues are empty.
+        """
+        ...
+
+    # Time-budgeted queue processing
+
+    def process_rx_queue_with_timeout(self, timeout_ms: int) -> None:
+        """
+        Process the RX queue with a time budget in milliseconds.
+
+        Stops when the queue is empty or the timeout elapses.
+        """
+        ...
+
+    def process_tx_queue_with_timeout(self, timeout_ms: int) -> None:
+        """
+        Process the TX queue with a time budget in milliseconds.
+
+        Stops when the queue is empty or the timeout elapses.
+        """
+        ...
+
+    def process_all_queues_with_timeout(self, timeout_ms: int) -> None:
+        """
+        Process RX and TX queues interleaved with a time budget in ms.
+
+        If ``timeout_ms == 0``, drains fully (no time limit), matching the Rust
+        implementation semantics.
+        """
+        ...
 
 
 # ==============================
