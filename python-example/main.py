@@ -131,12 +131,15 @@ def producer_proc(name: str, cmd_q: mp.Queue, n_iters: int, seed: int):
     random.seed(seed + os.getpid())
     print(f"[{name}] start PID={os.getpid()} iters={n_iters}")
     for i in range(n_iters):
-        which = random.randint(0, 2)
+        # 0=log_bytes, 1=log_f32, 2=log, 3=empty NoData packet
+        which = random.randint(0, 3)
+
         if which == 0:
             msg = f"{name} hello there {i}".encode("utf-8")
             cmd_q.put(deep_coerce_enums(("log_bytes", {
                 "ty": DT.MESSAGE_DATA, "data": msg
             })))
+
         elif which == 1:
             vals = [101325.0 + random.random() * 100.0,
                     20.0 + random.random() * 10.0,
@@ -144,11 +147,19 @@ def producer_proc(name: str, cmd_q: mp.Queue, n_iters: int, seed: int):
             cmd_q.put(deep_coerce_enums(("log_f32", {
                 "ty": DT.BAROMETER_DATA, "values": vals
             })))
-        else:
+
+        elif which == 2:
             arr = np.array([random.randint(0, 1000) for _ in range(8)], dtype=np.uint16)
             cmd_q.put(deep_coerce_enums(("log", {
                 "ty": DT.GPS_DATA, "data": arr,
                 "elem_size": 2, "elem_kind": EK.UNSIGNED
+            })))
+
+        else:
+            # Replace DT.HEARTBEAT with your actual NoData DataType
+            cmd_q.put(deep_coerce_enums(("log_bytes", {
+                "ty": DT.HEARTBEAT,  # or whatever logical DataType uses MessageDataType::NoData
+                "data": b"",
             })))
         time.sleep(random.random() * 0.002)  # 0–2ms jitter
     print(f"[{name}] done")
