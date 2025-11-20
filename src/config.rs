@@ -110,7 +110,8 @@ pub enum DataType {
     BarometerData,
     /// Generic string message payload.
     MessageData,
-    Heartbeat, // For testing purposes only
+    /// Heartbeat message (no payload).
+    Heartbeat,
 }
 
 impl DataType {
@@ -127,7 +128,7 @@ impl DataType {
             DataType::SystemStatus => "SYSTEM_STATUS",
             DataType::BarometerData => "BAROMETER_DATA",
             DataType::MessageData => "MESSAGE_DATA",
-            DataType::Heartbeat => "DUMMY_TYPE",
+            DataType::Heartbeat => "HEARTBEAT",
         }
     }
 }
