@@ -525,7 +525,7 @@ mod handler_failure_tests {
         )
         .unwrap();
 
-        handle_errors(router.transmit_message(&pkt));
+        handle_errors(router.tx(&pkt));
 
         // The capturing handler should have seen the original packet and then the error packet.
         assert!(
@@ -588,7 +588,7 @@ mod handler_failure_tests {
         )
         .unwrap();
 
-        handle_errors(router.transmit_message(&pkt));
+        handle_errors(router.tx(&pkt));
 
         assert!(
             saw_error.load(Ordering::SeqCst) >= 1,
@@ -1281,7 +1281,7 @@ mod tests_extra {
         )
         .unwrap();
 
-        r.transmit_message_queue(pkt_tx).unwrap();
+        r.tx_queue(pkt_tx).unwrap();
         r.rx_packet_to_queue(pkt_rx).unwrap();
 
         // Clearing should drop both queues before any processing.
@@ -1339,7 +1339,7 @@ mod tests_extra {
         .unwrap();
 
         // Sending should surface a HandlerError after all retries.
-        let res = r.transmit_message(&pkt);
+        let res = r.tx(&pkt);
         match res {
             Err(TelemetryError::HandlerError(_)) => {}
             other => panic!("expected HandlerError after retries, got {other:?}"),
@@ -1459,7 +1459,7 @@ mod tests_extra {
         )
         .unwrap();
 
-        let res = r.transmit_message(&pkt);
+        let res = r.tx(&pkt);
         match res {
             Err(TelemetryError::HandlerError(_)) => {} // TX path wraps as HandlerError
             other => panic!("expected HandlerError from TX failure, got {other:?}"),
@@ -1631,7 +1631,7 @@ mod tests_more {
             BoardConfig::new(vec![handler]),
             zero_clock(),
         );
-        r.receive_serialized(&wire).unwrap();
+        r.rx_serialized(&wire).unwrap();
         assert_eq!(called.load(Ordering::SeqCst), 1);
     }
 
@@ -1669,7 +1669,7 @@ mod tests_more {
             zero_clock(),
         );
 
-        r.receive_serialized(&wire).unwrap();
+        r.rx_serialized(&wire).unwrap();
         assert_eq!(packet_called.load(Ordering::SeqCst), 1);
         assert_eq!(serialized_called.load(Ordering::SeqCst), 1);
     }
@@ -1704,7 +1704,7 @@ mod tests_more {
             0,
         )
         .unwrap();
-        r.transmit_message(&pkt).unwrap();
+        r.tx(&pkt).unwrap();
 
         assert_eq!(tx_called.load(Ordering::SeqCst), 0);
         assert_eq!(hits.load(Ordering::SeqCst), 1);
@@ -1733,7 +1733,7 @@ mod tests_more {
             0,
         )
         .unwrap();
-        r.receive(&pkt).unwrap();
+        r.rx(&pkt).unwrap();
 
         assert_eq!(called.load(Ordering::SeqCst), 1);
     }
@@ -1769,7 +1769,7 @@ mod tests_more {
             1,
         )
         .unwrap();
-        let _ = r.transmit_message(&pkt);
+        let _ = r.tx(&pkt);
 
         let s = captured.lock().unwrap().clone();
         assert!(!s.is_empty());
@@ -2085,7 +2085,7 @@ mod concurrency_tests {
             threads_vec.push(thread::spawn(move || {
                 for _ in 0..ITERS_PER_THREAD {
                     r_cloned
-                        .receive_serialized(&w_cloned)
+                        .rx_serialized(&w_cloned)
                         .expect("receive_serialized failed");
                 }
             }));

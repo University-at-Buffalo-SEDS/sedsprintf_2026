@@ -10,7 +10,6 @@ mod single_threaded_test {
     use std::sync::mpsc::{self, TryRecvError};
     use std::sync::Arc;
 
-
     /// Clock that always returns 0
     fn zero_clock() -> Box<dyn Clock + Send + Sync> {
         Box::new(|| 0u64)
@@ -25,10 +24,13 @@ mod single_threaded_test {
 
     /// Build a handler that counts packets received on the Radio endpoint.
     fn make_radio_handler(counter: Arc<AtomicUsize>) -> EndpointHandler {
-        EndpointHandler::new_packet_handler(DataEndpoint::GroundStation, move |_pkt: &TelemetryPacket| {
-            counter.fetch_add(1, Ordering::SeqCst);
-            Ok(())
-        })
+        EndpointHandler::new_packet_handler(
+            DataEndpoint::GroundStation,
+            move |_pkt: &TelemetryPacket| {
+                counter.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+        )
     }
 
     /// Build a handler that counts packets received on the SdCard endpoint.
@@ -142,7 +144,7 @@ mod single_threaded_test {
                 let node = &mut nodes[0];
                 make_series(&mut gps_buf[..2], 10.0);
                 let pkt = make_packet(DataType::GpsData, &gps_buf[..2], i as u64);
-                node.router.transmit_message(&pkt).unwrap();
+                node.router.tx(&pkt).unwrap();
             }
 
             // --- Sender B (flight controller) ---
@@ -152,12 +154,12 @@ mod single_threaded_test {
                 // "gyro"
                 make_series(&mut gyro_buf[..2], 0.5);
                 let pkt1 = make_packet(DataType::GpsData, &gyro_buf[..2], (i + 10_000) as u64);
-                node.router.transmit_message(&pkt1).unwrap();
+                node.router.tx(&pkt1).unwrap();
 
                 // "barometer"
                 make_series(&mut baro_buf[..2], 101.3);
                 let pkt2 = make_packet(DataType::GpsData, &baro_buf[..2], (i + 20_000) as u64);
-                node.router.transmit_message(&pkt2).unwrap();
+                node.router.tx(&pkt2).unwrap();
             }
 
             // --- Sender C (power board) ---
@@ -166,9 +168,12 @@ mod single_threaded_test {
 
                 // battery
                 make_series(&mut batt_buf[..1], 3.7);
-                let pkt1 =
-                    make_packet(DataType::BatteryVoltage, &batt_buf[..1], (i + 30_000) as u64);
-                node.router.transmit_message(&pkt1).unwrap();
+                let pkt1 = make_packet(
+                    DataType::BatteryVoltage,
+                    &batt_buf[..1],
+                    (i + 30_000) as u64,
+                );
+                node.router.tx(&pkt1).unwrap();
 
                 // message as bytes
                 let pkt2 = TelemetryPacket::from_str_slice(
@@ -178,7 +183,7 @@ mod single_threaded_test {
                     (i + 40_000) as u64,
                 )
                 .unwrap();
-                node.router.transmit_message(&pkt2).unwrap();
+                node.router.tx(&pkt2).unwrap();
             }
 
             // --- Deliver all bus frames for this iteration ---
