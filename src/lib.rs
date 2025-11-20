@@ -150,7 +150,6 @@ impl_repr_u32_enum!(DataEndpoint, MAX_VALUE_DATA_ENDPOINT);
 // ============================================================================
 
 /// Describes how many elements are present for a given message type.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub enum MessageElementCount {
     /// Fixed number of elements.
@@ -159,6 +158,12 @@ pub enum MessageElementCount {
     Dynamic,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub enum EndpointsBroadcastMode {
+    Always,
+    Never,
+    Default,
+}
 /// Static metadata for a message type: element count and valid endpoints.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct MessageMeta {
@@ -182,7 +187,8 @@ pub fn message_meta(ty: DataType) -> MessageMeta {
 
 impl Mul<MessageElementCount> for usize {
     type Output = usize;
-
+    
+    #[inline]
     fn mul(self, rhs: MessageElementCount) -> usize {
         self * rhs.into()
     }
@@ -191,6 +197,7 @@ impl Mul<MessageElementCount> for usize {
 impl Mul<usize> for MessageElementCount {
     type Output = usize;
 
+    #[inline]
     fn mul(self, rhs: usize) -> usize {
         self.into() * rhs
     }
@@ -201,6 +208,7 @@ impl MessageElementCount {
     ///
     /// - `Static(n)` → `n`
     /// - `Dynamic`   → `0` (caller must handle dynamic sizing separately)
+    #[inline]
     fn into(self) -> usize {
         match self {
             MessageElementCount::Static(a) => a,
