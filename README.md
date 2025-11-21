@@ -167,8 +167,8 @@ git subtree pull --prefix=sedsprintf_rs sedsprintf-upstream main \
 Helper scripts:
 
 ```bash
-./scripts/update_subtree_no_stash.py
-./scripts/update_subtree.py            # stash → update → stash-pop
+./scripts/subtree_update_no_stash.py
+./scripts/subtree_update.py            # stash → update → stash-pop
 ```
 
 ---
