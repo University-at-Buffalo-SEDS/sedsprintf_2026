@@ -20,7 +20,10 @@ use crate::EndpointsBroadcastMode;
 ///
 /// This string is attached to every telemetry packet and is used to identify
 /// the platform in downstream tools. It should be **unique per platform**.
-pub const DEVICE_IDENTIFIER: &str = "TEST_PLATFORM";
+pub const DEVICE_IDENTIFIER: &str = match option_env!("DEVICE_IDENTIFIER") {
+    Some(val) => val,
+    None => "TEST_PLATFORM",
+};
 
 /// Maximum length, in bytes, of any **static** UTF-8 string payload.
 ///

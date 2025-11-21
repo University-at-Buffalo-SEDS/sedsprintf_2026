@@ -359,17 +359,9 @@ impl Router {
     /// until the queue is empty.
     /// # Returns
     /// A TelemetryResult indicating success or failure.
+    #[inline]
     pub fn process_tx_queue(&self) -> TelemetryResult<()> {
-        loop {
-            let pkt_opt = {
-                // Pop exactly one under the lock, then release it.
-                let mut st = self.state.lock();
-                st.transmit_queue.pop_front()
-            };
-            let Some(pkt) = pkt_opt else { break };
-            self.tx(&pkt)?; // No lock held while calling user code
-        }
-        Ok(())
+        self.process_tx_queue_with_timeout(0)
     }
 
     /// Process all packets in the receive queue.
@@ -377,10 +369,9 @@ impl Router {
     /// until the queue is empty.
     /// # Returns
     /// A TelemetryResult indicating success or failure.
+    #[inline]
     pub fn process_all_queues(&self) -> TelemetryResult<()> {
-        self.process_tx_queue()?;
-        self.process_rx_queue()?;
-        Ok(())
+        self.process_all_queues_with_timeout(0)
     }
 
     /// Clear both the transmit and receive queues.
@@ -424,7 +415,7 @@ impl Router {
             };
             let Some(pkt) = pkt_opt else { break };
             self.tx(&pkt)?;
-            if self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
+            if timeout_ms != 0 && self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
                 break;
             }
         }
@@ -456,7 +447,7 @@ impl Router {
             };
             let Some(item) = item_opt else { break };
             self.process_rx_queue_item(item)?;
-            if self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
+            if timeout_ms != 0 && self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
                 break;
             }
         }
@@ -530,16 +521,9 @@ impl Router {
     /// until the queue is empty.
     /// # Returns
     /// A TelemetryResult indicating success or failure.
+    #[inline]
     pub fn process_rx_queue(&self) -> TelemetryResult<()> {
-        loop {
-            let item_opt = {
-                let mut st = self.state.lock();
-                st.received_queue.pop_front()
-            };
-            let Some(item) = item_opt else { break };
-            self.process_rx_queue_item(item)?;
-        }
-        Ok(())
+        self.process_rx_queue_with_timeout(0)
     }
 
     /// Enqueue a serialized telemetry packet (byte slice) for processing.

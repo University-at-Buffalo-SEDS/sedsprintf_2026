@@ -154,7 +154,7 @@ int main(void)
 
     for (;;)
     {
-        if (radioBoard.radio_hits == 25 && flightControllerBoard.sd_hits == 25) break;
+        if (radioBoard.radio_hits == 30 && flightControllerBoard.sd_hits == 30) break;
 
         gettimeofday(&now, NULL);
         uint64_t elapsed_us =
