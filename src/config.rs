@@ -64,6 +64,7 @@ pub enum DataEndpoint {
     FlightController,
     FuelBoard,
     Abort,
+
 }
 
 impl DataEndpoint {
@@ -126,6 +127,7 @@ pub enum DataType {
     FuelTankPressure,
     FlightState,
     Heartbeat,
+    Warning,
     /// Generic string message payload.
     MessageData,
 }
@@ -151,6 +153,7 @@ impl DataType {
             DataType::FuelTankPressure => "FUEL_TANK_PRESSURE",
             DataType::FlightState => "FLIGHT_STATE",
             DataType::Heartbeat => "HEARTBEAT",
+            DataType::Warning => "WARNING",
             DataType::MessageData => "MESSAGE_DATA",
         }
     }
@@ -185,6 +188,7 @@ pub const fn get_message_data_type(data_type: DataType) -> MessageDataType {
         DataType::FuelTankPressure => MessageDataType::Float32,
         DataType::FlightState => MessageDataType::UInt8,
         DataType::MessageData => MessageDataType::String,
+        DataType::Warning => MessageDataType::String,
         DataType::Heartbeat => MessageDataType::NoData,
     }
 }
@@ -209,6 +213,7 @@ pub const fn get_message_info_types(message_type: DataType) -> MessageType {
         DataType::FuelTankPressure => MessageType::Info,
         DataType::FlightState => MessageType::Info,
         DataType::MessageData => MessageType::Info,
+        DataType::Warning => MessageType::Info,
         DataType::Heartbeat => MessageType::Info,
     }
 }
@@ -326,6 +331,13 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
                 // Heartbeat Data
                 element_count: MessageElementCount::Static(0), // Heartbeat messages carry 1 binary element
                 endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
+            }
+        }
+        DataType::Warning => {
+            MessageMeta {
+                // Warning Data
+                element_count: MessageElementCount::Dynamic, // Warning messages have dynamic length
+                endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
             }
         }
         DataType::MessageData => {
