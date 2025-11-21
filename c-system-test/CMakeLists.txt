@@ -16,6 +16,7 @@ target_include_directories(c_system_test PRIVATE
 
 # 3) Bring in the Rust crate (parent dir) with an explicit build dir
 get_filename_component(SEDSPRINTF_RS_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." REALPATH)
+set(SEDSPRINTF_RS_DEVICE_IDENTIFIER "SYSTEM_TEST" CACHE STRING "" FORCE)
 add_subdirectory(
         "${SEDSPRINTF_RS_ROOT}"
         "${CMAKE_CURRENT_BINARY_DIR}/sedsprintf_rs-build"

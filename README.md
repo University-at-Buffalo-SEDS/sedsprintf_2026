@@ -38,8 +38,8 @@ project.
 
 Building with python bindings can be done with the build script on posix systems:
 
-```bash
-./build.py release maturin-develop 
+```
+./build.py release maturin-develop
 ```
 
 When building in an embedded environment the library will compile to a static library that can be linked to your C code.
@@ -48,69 +48,74 @@ by creating shims that expose pvPortMalloc and vPortFree.
 
 ## Dependencies
 
-- Rust
-
-  get it from https://rustup.rs/
-- Cmake
+- Rust → https://rustup.rs/
+- CMake
 - A C++ compiler
 - A C compiler
 
 ## Usage
 
-- When using this library as a submodule or subtree in a C or C++ project, make sure to add the following to your
-  cmakelists.txt and adjust the target as needed:
-  ```cmake
-  # Example: building for an embedded target
-  set(SEDSPRINTF_RS_TARGET "thumbv7m-none-eabi" CACHE STRING "" FORCE)
+### Linking from a C/C++ CMake project
 
-  # If you use the provided CMake glue for sedsprintf_rs:
-  #   <repo-root>/cmake/CMakeLists.txt (or similar)
-  add_subdirectory(${CMAKE_SOURCE_DIR}/sedsprintf_rs/cmake sedsprintf_rs_build)
+```
+# Example: building for an embedded target
+set(SEDSPRINTF_RS_TARGET "thumbv7m-none-eabi" CACHE STRING "" FORCE)
 
-  # Link against the imported target
-  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE sedsprintf_rs::sedsprintf_rs)
-  ```
-- Setup the config.rs to match your application needs. All config options are in the config.rs file and are very
+# set the sender name
+set(SEDSPRINTF_RS_DEVICE_IDENTIFIER "FC26_MAIN" CACHE STRING "" FORCE)
+
+# Use the provided CMake glue
+add_subdirectory(${CMAKE_SOURCE_DIR}/sedsprintf_rs/cmake sedsprintf_rs_build)
+
+# Link against the imported target
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE sedsprintf_rs::sedsprintf_rs)
+```
+
+- Set up the config.rs to match your application needs. All config options are in the config.rs file and are very
   self-explanatory.
   NOTE: (ON EVERY SYSTEM THIS LIBRARY IS USED, THE CONFIG ENUMS MUST BE THE SAME OR UNDEFINED BEHAVIOR MAY OCCUR). So
   for most
-  applications I would recommend making a fork and setting the config values you need for your application minus the
-  sender,
-  and then only changing the sender string on each system, this will ensure that the enum values are the same on all
-  systems.
+  applications I would recommend making a fork and setting the config values you need for your application.
+
 
 ---
 
-## Setting the device / platform name (CMake + build.py)
+## Setting the device / platform name
 
-Each build of `sedsprintf_rs` has a **device identifier string** that is embedded into telemetry packets. In Rust this
-is exposed as:
+Each build of `sedsprintf_rs` embeds a **device identifier** which appears in every telemetry packet header.
 
-```rust
+Rust resolves it using:
+
+```
 pub const DEVICE_IDENTIFIER: &str = match option_env!("DEVICE_IDENTIFIER") {
     Some(v) => v,
     None => "TEST_PLATFORM",
 };
 ```
 
-By default the name is `"TEST_PLATFORM"`, but you can override it at build time.
+### Set it globally using `.cargo/config.toml` (recommended)
 
-### Via CMake (recommended in C/C++ projects)
+Create:
 
-The CMake integration forwards a `device_id=...` argument into `build.py`, which then sets the `DEVICE_IDENTIFIER`
-environment variable for Cargo.
-
-In your parent project’s `CMakeLists.txt`:
-
-```cmake
-# Give this particular firmware / binary a unique name
-set(SEDSPRINTF_RS_DEVICE_IDENTIFIER "FC26_MAIN" CACHE STRING "" FORCE)
-
-# Point this at the sedsprintf_rs CMake glue directory
-add_subdirectory(${CMAKE_SOURCE_DIR}/sedsprintf_rs/cmake sedsprintf_rs_build)
-
-target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE sedsprintf_rs::sedsprintf_rs)
 ```
+# .cargo/config.toml
+[env]
+DEVICE_IDENTIFIER = "GROUND_STATION_26"
+```
+
+After this, any `cargo build`, `cargo run`, or CI build will embed `"GROUND_STATION_26"` automatically.
+
+No build script changes required.
+
+---
+
+### Setting the name from CMake
+
+```
+set(SEDSPRINTF_RS_DEVICE_IDENTIFIER "FC26_MAIN" CACHE STRING "" FORCE)
+```
+
+Note: This must be set **before** including the sedsprintf_rs CMake as a subdirectory.
 
 Typical examples:
 
@@ -118,18 +123,16 @@ Typical examples:
 # Flight computer firmware
 set(SEDSPRINTF_RS_DEVICE_IDENTIFIER "FC26_MAIN" CACHE STRING "" FORCE)
 
+# or
+
 # Ground station app
 set(SEDSPRINTF_RS_DEVICE_IDENTIFIER "GS26" CACHE STRING "" FORCE)
 ```
 
-If you leave `SEDSPRINTF_RS_DEVICE_IDENTIFIER` empty, the library falls back to `"TEST_PLATFORM"`.
-
-### Directly via build.py (manual builds)
-
+### Manually via build.py
 ```bash
 # Host build
 ./build.py release device_id=GROUND_STATION
-
 # Embedded build
 ./build.py embedded release target=thumbv7em-none-eabihf device_id=FC
 ```
@@ -138,32 +141,34 @@ If you leave `SEDSPRINTF_RS_DEVICE_IDENTIFIER` empty, the library falls back to 
 
 ## Using this repo as a subtree
 
-- To add this repo as a subtree to allow for modifications, use the following command:
-  ```bash
-  git remote add sedsprintf-upstream https://github.com/Rylan-Meilutis/sedsprintf_rs.git
-  git fetch sedsprintf-upstream
-  
-  git config subtree.sedsprintf_rs.remote sedsprintf-upstream
-  git config subtree.sedsprintf_rs.branch main   # or dev or the branch of your choosing
+```
+git remote add sedsprintf-upstream https://github.com/Rylan-Meilutis/sedsprintf_rs.git
+git fetch sedsprintf-upstream
 
-  git subtree add --prefix=sedsprintf_rs sedsprintf-upstream main
-  ```
-  To switch branches:
-  ```bash
-  git config subtree.sedsprintf_rs.branch <the-new-branch> 
-  ```
+git config subtree.sedsprintf_rs.remote sedsprintf-upstream
+git config subtree.sedsprintf_rs.branch main
 
-- To update the subtree:
-  ```bash
-  git subtree pull --prefix=sedsprintf_rs sedsprintf-upstream main \
-      -m "Merge sedsprintf_rs upstream main"
-  ```
+git subtree add --prefix=sedsprintf_rs sedsprintf-upstream main
+```
+
+To Switch branches:
+
+```bash
+git config subtree.sedsprintf_rs.branch <the-new-branch>
+```
+
+Update:
+
+```bash
+git subtree pull --prefix=sedsprintf_rs sedsprintf-upstream main \
+    -m "Merge sedsprintf_rs upstream main"
+```
 
 Helper scripts:
 
 ```bash
-./scripts/update_subtree_no_stash.py
-./scripts/update_subtree.py            # stash → update → stash-pop
+./scripts/subtree_update_no_stash.py
+./scripts/subtree_update.py            # stash → update → stash-pop
 ```
 
 ---
@@ -186,9 +191,6 @@ git submodule update --init --recursive
 
 Update using helper scripts:
 
-```bash
-./scripts/submodule_update_no_stash.py     # clean tree
-./scripts/submodule_update.py              # stash → update → pop
 ```
 
 The scripts:
@@ -200,7 +202,7 @@ The scripts:
 
 ---
 
-## Embedded Allocator Hook Example
+## Embedded allocator hook example (C)
 
 ```C
 // telemetry_hooks.c
