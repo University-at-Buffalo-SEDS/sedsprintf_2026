@@ -30,28 +30,57 @@ def get_config(key: str) -> str:
 
 
 def main() -> None:
-    # ensure we are in the correct directory
-    repo_root = Path(__file__).parent.resolve()
-    os.chdir(f"{repo_root}/..")
+    # Script is located inside the submodule working tree:
+    #   <super_repo_root>/sedsprintf_rs/update_subtree.py (renamed use)
+    submodule_root = Path(__file__).parent.resolve()
+    super_repo_root = submodule_root.parent
+    submodule_name = submodule_root.name  # "sedsprintf_rs"
 
-    prefix = "sedsprintf_rs"
+    # Determine which branch the submodule should track.
+    # Prefer submodule.<name>.branch from the superproject, else default to "main".
+    os.chdir(super_repo_root)
+    try:
+        branch = get_config(f"submodule.{submodule_name}.branch")
+    except SystemExit:
+        branch = "main"
+        print(f"submodule.{submodule_name}.branch not set; defaulting to '{branch}'")
 
-    remote = get_config(f"subtree.{prefix}.remote")
-    branch = get_config(f"subtree.{prefix}.branch")
+    print(f"Updating submodule '{submodule_name}' to latest '{branch}'")
 
-    print(f"Using subtree remote: {remote}")
-    print(f"Using subtree branch: {branch}")
+    # Step 1: Update the submodule itself.
+    os.chdir(submodule_root)
 
-    run([
-        "git",
-        "subtree",
-        "pull",
-        "--prefix", prefix,
-        remote,
-        branch,
-        "-m",
-        f"Merge {prefix} upstream {branch}",
-    ])
+    # Ensure we have the latest from the remote.
+    run(["git", "fetch", "origin"])
+
+    # Check out the desired branch (creating local branch if necessary),
+    # then fast-forward to origin/<branch>.
+    try:
+        # Try to check out existing local branch
+        run(["git", "checkout", branch])
+    except subprocess.CalledProcessError:
+        # If it doesn't exist locally, create it to track origin/<branch>
+        print(f"Local branch '{branch}' not found; creating to track origin/{branch}")
+        run(["git", "checkout", "-b", branch, f"origin/{branch}"])
+
+    # Fast-forward to the latest remote commit
+    run(["git", "pull", "--ff-only", "origin", branch])
+
+    # Step 2: Record the new submodule commit in the superproject.
+    os.chdir(super_repo_root)
+    run(["git", "add", submodule_name])
+
+    try:
+        run(
+            [
+                "git",
+                "commit",
+                "-m",
+                f"Update {submodule_name} submodule to latest {branch}",
+            ]
+        )
+    except subprocess.CalledProcessError:
+        print("No changes to commit; submodule already up to date.")
 
 
 if __name__ == "__main__":
