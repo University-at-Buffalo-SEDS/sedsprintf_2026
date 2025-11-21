@@ -9,6 +9,12 @@ set(SEDSPRINTF_RS_DIR_DEFAULT "${CMAKE_CURRENT_LIST_DIR}/")
 set(SEDSPRINTF_RS_DIR "${SEDSPRINTF_RS_DIR_DEFAULT}" CACHE PATH "Path to sedsprintf_rs crate root")
 get_filename_component(RUST_DIR "${SEDSPRINTF_RS_DIR}" REALPATH)
 
+# ============================================================
+# Device identifier override for Rust (passed to build.py)
+# ============================================================
+set(SEDSPRINTF_RS_DEVICE_IDENTIFIER "" CACHE STRING
+    "Override DEVICE_IDENTIFIER passed to build.py (empty = use default)")
+
 # Detect embedded build
 # Option: allow user/parent to force embedded on/off
 option(SEDSPRINTF_EMBEDDED_BUILD "Build sedsprintf_rs for embedded" OFF)
@@ -24,40 +30,32 @@ if (NOT SEDSPRINTF_EMBEDDED_BUILD)
     endif ()
 endif ()
 
-
 # ============================================================
 # Rust target triple selection
-# - Default uses current "mode" (host vs STM)
-# - Can be overridden upstream with:
-#     set(SEDSPRINTF_RS_TARGET "thumbv7m-none-eabi" CACHE STRING "" FORCE)
-#   *before* add_subdirectory(...)
 # ============================================================
 if (NOT DEFINED SEDSPRINTF_RS_TARGET)
     if (SEDSPRINTF_EMBEDDED_BUILD)
-        # Default embedded triple
-        set(SEDSPRINTF_RS_TARGET "thumbv7em-none-eabihf" CACHE STRING "Rust target triple for sedsprintf_rs (empty = host default)" )
+        set(SEDSPRINTF_RS_TARGET "thumbv7em-none-eabihf" CACHE STRING "Rust target triple for sedsprintf_rs (empty = host default)")
     else ()
-        # Host build: empty means Cargo's default host triple
-        set(SEDSPRINTF_RS_TARGET "" CACHE STRING "Rust target triple for sedsprintf_rs (empty = host default)" )
+        set(SEDSPRINTF_RS_TARGET "" CACHE STRING "Rust target triple for sedsprintf_rs (empty = host default)")
     endif ()
 endif ()
 
 set(RUST_TRIPLE "${SEDSPRINTF_RS_TARGET}")
 
-# Figure out Rust output paths depending on whether we use a cross target
+# ============================================================
+# Compute Rust output paths
+# ============================================================
 set(RUST_PROFILE "$<IF:$<CONFIG:Debug>,debug,release>")
-# If embedded it is release-embedded otherwise release
 set(RELEASE_PROFILE_DIR "release")
 if (SEDSPRINTF_EMBEDDED_BUILD)
     set(RELEASE_PROFILE_DIR "release-embedded")
 endif ()
 
 if (RUST_TRIPLE STREQUAL "")
-    # Host build: Cargo outputs target/debug / target/release
     set(RS_LIB_DBG "${RUST_DIR}/target/debug/libsedsprintf_rs.a")
     set(RS_LIB_REL "${RUST_DIR}/target/release/libsedsprintf_rs.a")
 else ()
-    # Cross build: Cargo outputs target/<triple>/debug / target/<triple>/release
     set(RS_LIB_DBG "${RUST_DIR}/target/${RUST_TRIPLE}/debug/libsedsprintf_rs.a")
     set(RS_LIB_REL "${RUST_DIR}/target/${RUST_TRIPLE}/${RELEASE_PROFILE_DIR}/libsedsprintf_rs.a")
 endif ()
@@ -65,19 +63,25 @@ endif ()
 set(RS_INCLUDE "${RUST_DIR}/C-Headers")
 set(RS_HEADER "${RS_INCLUDE}/sedsprintf.h")
 
-# --- Build-time args (with generator expression) ---
+# ============================================================
+# Build-time args (for logging only)
+# ============================================================
 set(RS_ARGS_STR "")
 if (SEDSPRINTF_EMBEDDED_BUILD)
     set(RS_ARGS_STR "${RS_ARGS_STR} embedded")
 endif ()
-# Add target=... when a non-empty triple is used (for logging / info only)
 if (NOT RUST_TRIPLE STREQUAL "")
     set(RS_ARGS_STR "${RS_ARGS_STR} target=${RUST_TRIPLE}")
+endif ()
+if (NOT SEDSPRINTF_RS_DEVICE_IDENTIFIER STREQUAL "")
+    set(RS_ARGS_STR "${RS_ARGS_STR} device_id=${SEDSPRINTF_RS_DEVICE_IDENTIFIER}")
 endif ()
 set(RS_ARG_REL " $<$<CONFIG:Release>:release>")
 set(RS_ARGS_STR "${RS_ARGS_STR} ${RS_ARG_REL}")
 
-# --- Configure-time bootstrap args (NO generator expressions) ---
+# ============================================================
+# Configure-time args passed to build.py
+# ============================================================
 set(RS_ARGS_BOOTSTRAP "")
 if (SEDSPRINTF_EMBEDDED_BUILD)
     list(APPEND RS_ARGS_BOOTSTRAP "embedded")
@@ -86,27 +90,33 @@ if (NOT RUST_TRIPLE STREQUAL "")
     list(APPEND RS_ARGS_BOOTSTRAP "target=${RUST_TRIPLE}")
 endif ()
 if (CMAKE_BUILD_TYPE STREQUAL "Release")
-    # For single-config generators like Makefile/Ninja
     list(APPEND RS_ARGS_BOOTSTRAP "release")
 endif ()
+if (NOT SEDSPRINTF_RS_DEVICE_IDENTIFIER STREQUAL "")
+    list(APPEND RS_ARGS_BOOTSTRAP "device_id=${SEDSPRINTF_RS_DEVICE_IDENTIFIER}")
+endif ()
 
-# Ensure the include directory exists (header may be generated later)
+# Ensure include dir exists
 file(MAKE_DIRECTORY "${RS_INCLUDE}")
 
-# If the header is missing at configure time, try building once to generate it.
+# ============================================================
+# Bootstrap build if header missing
+# ============================================================
 if (NOT EXISTS "${RS_HEADER}")
-    message(STATUS "sedsprintf_rs: header not found (${RS_HEADER}); attempting to build once to generate it…")
+    message(STATUS "sedsprintf_rs: header not found (${RS_HEADER}); building once…")
     execute_process(
         COMMAND "${PYTHON_EXECUTABLE}" build.py ${RS_ARGS_BOOTSTRAP}
         WORKING_DIRECTORY "${RUST_DIR}"
         RESULT_VARIABLE _hdr_build_res
     )
     if (NOT _hdr_build_res EQUAL 0)
-        message(WARNING "Initial build to generate header failed (exit ${_hdr_build_res}); will rely on custom build step.")
+        message(WARNING "Header bootstrap failed (exit ${_hdr_build_res}); will rely on full build step.")
     endif ()
 endif ()
 
-# Track inputs
+# ============================================================
+# Track Rust source inputs
+# ============================================================
 file(GLOB_RECURSE RS_SRC CONFIGURE_DEPENDS
     "${RUST_DIR}/src/*.rs"
     "${RUST_DIR}/build.rs"
@@ -114,31 +124,36 @@ file(GLOB_RECURSE RS_SRC CONFIGURE_DEPENDS
     "${RUST_DIR}/Cargo.lock"
 )
 
-# Build rule: produce libs AND the header (generator expressions OK here)
+# ============================================================
+# Main build rule
+# ============================================================
 add_custom_command(
-    OUTPUT
-        "${RS_LIB_DBG}" "${RS_LIB_REL}" "${RS_HEADER}"
-    COMMAND ${CMAKE_COMMAND} -E chdir "${RUST_DIR}" "${PYTHON_EXECUTABLE}" build.py ${RS_ARGS_BOOTSTRAP}
+    OUTPUT "${RS_LIB_DBG}" "${RS_LIB_REL}" "${RS_HEADER}"
+    COMMAND ${CMAKE_COMMAND} -E chdir "${RUST_DIR}"
+            "${PYTHON_EXECUTABLE}" build.py ${RS_ARGS_BOOTSTRAP}
     DEPENDS ${RS_SRC}
-    COMMENT "Building sedsprintf_rs (${RUST_PROFILE}) for ${RUST_TRIPLE}"
+    COMMENT "Building sedsprintf_rs (${RUST_PROFILE}) ${RS_ARGS_STR}"
     USES_TERMINAL
     VERBATIM
 )
 
 add_custom_target(sedsprintf_rs_build
-    DEPENDS
-        "${RS_LIB_DBG}" "${RS_LIB_REL}" "${RS_HEADER}"
+    DEPENDS "${RS_LIB_DBG}" "${RS_LIB_REL}" "${RS_HEADER}"
 )
 
-# Imported library the C/C++ links against
+# ============================================================
+# Import library for C/C++
+# ============================================================
 add_library(sedsprintf_rs STATIC IMPORTED GLOBAL)
 set_target_properties(sedsprintf_rs PROPERTIES
     IMPORTED_LOCATION_DEBUG "${RS_LIB_DBG}"
     IMPORTED_LOCATION_RELEASE "${RS_LIB_REL}"
     INTERFACE_INCLUDE_DIRECTORIES "${RS_INCLUDE}"
 )
+
 add_dependencies(sedsprintf_rs sedsprintf_rs_build)
 
+# Security flags for embedded
 include(CheckLinkerFlag)
 include(CheckCCompilerFlag)
 check_linker_flag(C "-Wl,-z,noexecstack" HAVE_LD_NOEXECSTACK)
@@ -149,10 +164,12 @@ if (SEDSPRINTF_EMBEDDED_BUILD)
     target_link_options(sedsprintf_rs INTERFACE -Wl,-z,noexecstack)
 endif ()
 
+# Optimize
 add_compile_options(-ffunction-sections -fdata-sections -Os)
 add_link_options(-Wl,--gc-sections -Wl,--icf=all)
 
 add_library(sedsprintf_rs::sedsprintf_rs ALIAS sedsprintf_rs)
+
 set(SEDSPRINTF_RS_LIB_DEBUG "${RS_LIB_DBG}" PARENT_SCOPE)
 set(SEDSPRINTF_RS_LIB_RELEASE "${RS_LIB_REL}" PARENT_SCOPE)
 set(SEDSPRINTF_RS_INCLUDE_DIR "${RS_INCLUDE}" PARENT_SCOPE)
