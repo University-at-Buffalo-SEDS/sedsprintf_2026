@@ -115,11 +115,15 @@ No build script changes required.
 set(SEDSPRINTF_RS_DEVICE_IDENTIFIER "FC26_MAIN" CACHE STRING "" FORCE)
 ```
 
+Note: This must be set **before** including the sedsprintf_rs CMake as a subdirectory.
+
 Typical examples:
 
 ```cmake
 # Flight computer firmware
 set(SEDSPRINTF_RS_DEVICE_IDENTIFIER "FC26_MAIN" CACHE STRING "" FORCE)
+
+# or
 
 # Ground station app
 set(SEDSPRINTF_RS_DEVICE_IDENTIFIER "GS26" CACHE STRING "" FORCE)
