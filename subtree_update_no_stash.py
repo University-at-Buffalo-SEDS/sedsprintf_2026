@@ -69,6 +69,8 @@ def main() -> None:
     # Step 2: Record the new submodule commit in the superproject.
     os.chdir(super_repo_root)
 
+    run(["git", "add", submodule_name])
+
     try:
         run(
             [
