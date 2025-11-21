@@ -67,10 +67,11 @@ by creating shims that expose pvPortMalloc and vPortFree.
   #   <repo-root>/cmake/CMakeLists.txt (or similar)
   add_subdirectory(${CMAKE_SOURCE_DIR}/sedsprintf_rs/cmake sedsprintf_rs_build)
 
-  # Link against the imported target
-  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE sedsprintf_rs::sedsprintf_rs)
-  ```
-- Setup the config.rs to match your application needs. All config options are in the config.rs file and are very
+# Link against the imported target
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE sedsprintf_rs::sedsprintf_rs)
+```
+
+- Set up the config.rs to match your application needs. All config options are in the config.rs file and are very
   self-explanatory.
   NOTE: (ON EVERY SYSTEM THIS LIBRARY IS USED, THE CONFIG ENUMS MUST BE THE SAME OR UNDEFINED BEHAVIOR MAY OCCUR). So
   for most
