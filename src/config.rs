@@ -183,7 +183,7 @@ pub const fn get_message_data_type(data_type: DataType) -> MessageDataType {
         DataType::GyroData => MessageDataType::Float32,
         DataType::AccelData => MessageDataType::Float32,
         DataType::BarometerData => MessageDataType::Float32,
-        DataType::Abort => MessageDataType::NoData,
+        DataType::Abort => MessageDataType::String,
         DataType::FuelFlow => MessageDataType::Float32,
         DataType::FuelTankPressure => MessageDataType::Float32,
         DataType::FlightState => MessageDataType::UInt8,
@@ -299,7 +299,7 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
         DataType::Abort => {
             MessageMeta {
                 // Abort Command
-                element_count: MessageElementCount::Static(0), // Abort messages carry 1 boolean element
+                element_count: MessageElementCount::Dynamic, // Abort messages carry 1 boolean element
                 endpoints: &[
                     DataEndpoint::Abort,
                 ],
