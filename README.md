@@ -61,6 +61,9 @@ by creating shims that expose pvPortMalloc and vPortFree.
 # Example: building for an embedded target
 set(SEDSPRINTF_RS_TARGET "thumbv7m-none-eabi" CACHE STRING "" FORCE)
 
+# set the sender name
+set(SEDSPRINTF_RS_DEVICE_IDENTIFIER "FC26_MAIN" CACHE STRING "" FORCE)
+
 # Use the provided CMake glue
 add_subdirectory(${CMAKE_SOURCE_DIR}/sedsprintf_rs/cmake sedsprintf_rs_build)
 
@@ -110,9 +113,6 @@ No build script changes required.
 
 ```
 set(SEDSPRINTF_RS_DEVICE_IDENTIFIER "FC26_MAIN" CACHE STRING "" FORCE)
-
-add_subdirectory(${CMAKE_SOURCE_DIR}/sedsprintf_rs/cmake sedsprintf_rs_build)
-target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE sedsprintf_rs::sedsprintf_rs)
 ```
 
 Typical examples:
