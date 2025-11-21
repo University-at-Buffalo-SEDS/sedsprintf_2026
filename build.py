@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
+import os
+import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
-import shutil
-import re
-import os
-
 
 # The line pattern in .gitignore you want to temporarily comment out.
 # This is treated as a literal and turned into a whole-line regex.
@@ -81,7 +82,7 @@ def _comment_out_pyi_ignore(gitignore: Path) -> None:
         gitignore.write_text("".join(new_lines), encoding="utf-8")
 
 
-def run_with_pyi_unignored(cmd: list[str]) -> None:
+def run_with_pyi_unignored(cmd: list[str], env: dict | None = None) -> None:
     """
     Temporarily comment out the PYI_IGNORE_LINE in .gitignore using pure Python,
     run the given command, and then restore .gitignore.
@@ -98,17 +99,17 @@ def run_with_pyi_unignored(cmd: list[str]) -> None:
             _comment_out_pyi_ignore(gitignore)
 
         print("Running:", " ".join(cmd))
-        subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True, env=env)
     finally:
         if backup and backup.exists():
             print("info: Restoring original .gitignore")
             shutil.move(backup, gitignore)
 
 
-def install_wheel_file(build_mode: list[str]) -> None:
+def install_wheel_file(build_mode: list[str], env: dict | None = None) -> None:
     # Build wheel with maturin under the .gitignore hack
     cmd_build = ["maturin", "build", *build_mode]
-    run_with_pyi_unignored(cmd_build)
+    run_with_pyi_unignored(cmd_build, env=env)
 
     # Install the built wheel
     wheels_dir = Path("target") / "wheels"
@@ -119,7 +120,7 @@ def install_wheel_file(build_mode: list[str]) -> None:
 
     cmd_install = ["uv", "pip", "install", str(wheel)]
     print("Running:", " ".join(cmd_install))
-    subprocess.run(cmd_install, check=True)
+    subprocess.run(cmd_install, check=True, env=env)
 
 
 def main(argv: list[str]) -> None:
@@ -135,6 +136,7 @@ def main(argv: list[str]) -> None:
     release_build = False
     install_wheel = False
     target = ""
+    device_id = ""  # <--- NEW
 
     # Parse args in any order
     for arg in argv:
@@ -162,8 +164,17 @@ def main(argv: list[str]) -> None:
         elif arg.startswith("target="):
             target = arg.split("=", 1)[1]
             print(f"Target set to: {target}")
+        elif arg.startswith("device_id="):
+            device_id = arg.split("=", 1)[1]
+            print(f"Device identifier set to: {device_id}")
         else:
             print(f"Unknown option: {arg}")
+            exit(1)
+
+    # Build environment (inject DEVICE_IDENTIFIER if provided)
+    env = os.environ.copy()
+    if device_id:
+        env["DEVICE_IDENTIFIER"] = device_id
 
     # Decide build args
     ensure_rust_target_installed(
@@ -202,19 +213,19 @@ def main(argv: list[str]) -> None:
     if tests:
         cmd = ["cargo", "test", *build_mode, *build_args]
         print("Running:", " ".join(cmd))
-        subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True, env=env)
     elif build_wheel:
         # maturin build with temporary .gitignore modification
-        run_with_pyi_unignored(["maturin", "build", *build_mode])
+        run_with_pyi_unignored(["maturin", "build", *build_mode], env=env)
     elif develop_wheel:
         # maturin develop with temporary .gitignore modification
-        run_with_pyi_unignored(["maturin", "develop", *build_mode])
+        run_with_pyi_unignored(["maturin", "develop", *build_mode], env=env)
     elif install_wheel:
-        install_wheel_file(build_mode)
+        install_wheel_file(build_mode, env=env)
     else:
         cmd = ["cargo", "build", *build_mode, *build_args]
         print("Running:", " ".join(cmd))
-        subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True, env=env)
 
 
 if __name__ == "__main__":

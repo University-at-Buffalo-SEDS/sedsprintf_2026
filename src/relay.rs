@@ -2,8 +2,8 @@ use crate::{
     router::Clock,
     {lock::RouterMutex, TelemetryError, TelemetryResult},
 };
-use alloc::{collections::VecDeque, sync::Arc, vec::Vec};
 use alloc::boxed::Box;
+use alloc::{collections::VecDeque, sync::Arc, vec::Vec};
 
 /// Logical side index (CAN, UART, RADIO, etc.)
 pub type RelaySideId = usize;
@@ -122,46 +122,21 @@ impl Relay {
     }
 
     /// Drain the RX queue fully, expanding to TX items.
+    #[inline]
     pub fn process_rx_queue(&self) -> TelemetryResult<()> {
-        loop {
-            let item_opt = {
-                let mut st = self.state.lock();
-                st.rx_queue.pop_front()
-            };
-            let Some(item) = item_opt else { break };
-            self.process_rx_queue_item(item);
-        }
-        Ok(())
+        self.process_rx_queue_with_timeout(0)
     }
 
     /// Drain the TX queue fully, invoking per-side tx_handler.
+    #[inline]
     pub fn process_tx_queue(&self) -> TelemetryResult<()> {
-        loop {
-            // Grab one item + its handler under the lock, then drop lock.
-            let opt: Option<(
-                Arc<dyn Fn(&[u8]) -> TelemetryResult<()> + Send + Sync>,
-                Arc<[u8]>,
-            )> = {
-                let mut st = self.state.lock();
-                if let Some(item) = st.tx_queue.pop_front() {
-                    let handler = st.sides.get(item.dst).map(|s| s.tx_handler.clone());
-                    handler.map(|h| (h, item.bytes))
-                } else {
-                    None
-                }
-            };
-
-            let Some((handler, bytes)) = opt else { break };
-            handler(&bytes)?;
-        }
-        Ok(())
+        self.process_tx_queue_with_timeout(0)
     }
 
     /// Drain RX then TX queues fully (one pass).
+    #[inline]
     pub fn process_all_queues(&self) -> TelemetryResult<()> {
-        self.process_rx_queue()?;
-        self.process_tx_queue()?;
-        Ok(())
+        self.process_all_queues_with_timeout(0)
     }
 
     /// Process TX queue with timeout in ms (same style as Router).
@@ -184,7 +159,7 @@ impl Relay {
             let Some((handler, bytes)) = opt else { break };
             handler(&bytes)?;
 
-            if self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
+            if timeout_ms != 0 && self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
                 break;
             }
         }
@@ -202,7 +177,7 @@ impl Relay {
             let Some(item) = item_opt else { break };
             self.process_rx_queue_item(item);
 
-            if self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
+            if timeout_ms != 0 && self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
                 break;
             }
         }

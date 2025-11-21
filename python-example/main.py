@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-import os
-import time
-import random
-import numpy as np
 import multiprocessing as mp
+import os
+import random
+import time
 from queue import Empty
 
+import numpy as np
 import sedsprintf_rs_2026 as seds
 
 DT = seds.DataType
 EP = seds.DataEndpoint
 EK = seds.ElemKind
+
 
 # ---------------- Enum helpers ----------------
 def enum_to_int(obj):
@@ -18,6 +19,7 @@ def enum_to_int(obj):
         return int(obj)
     except Exception:
         return obj
+
 
 def deep_coerce_enums(x):
     if isinstance(x, dict):
@@ -27,20 +29,25 @@ def deep_coerce_enums(x):
         return t(deep_coerce_enums(v) for v in x)
     return enum_to_int(x)
 
+
 # ---------------- Router callbacks ----------------
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
 
 def _tx(_bytes_buf: bytes):
     # Transmission stub (no-op)
     pass
 
+
 def _on_packet(pkt: seds.Packet):
     print("[RX Packet]")
     print(pkt)  # pretty header + summary
 
+
 def _on_serialized(data: bytes):
     print(f"[RX Serialized] {len(data)} bytes: {data.hex()}")
+
 
 # ---------------- Server (single-threaded) ----------------
 def router_server(cmd_q: mp.Queue, _done_evt_unused: mp.Event,
@@ -57,7 +64,7 @@ def router_server(cmd_q: mp.Queue, _done_evt_unused: mp.Event,
     """
     handlers = [
         (int(EP.SD_CARD), _on_packet, None),
-        (int(EP.RADIO),   None,       _on_serialized),
+        (int(EP.RADIO), None, _on_serialized),
     ]
     router = seds.Router(tx=_tx, now_ms=_now_ms, handlers=handlers)
     print(f"[SERVER] Router up. PID={os.getpid()}")
@@ -126,6 +133,7 @@ def router_server(cmd_q: mp.Queue, _done_evt_unused: mp.Event,
         print(f"[SERVER] final drain error: {e!r}")
     print("[SERVER] Shutdown complete.")
 
+
 # ---------------- Producer processes ----------------
 def producer_proc(name: str, cmd_q: mp.Queue, n_iters: int, seed: int):
     random.seed(seed + os.getpid())
@@ -164,18 +172,19 @@ def producer_proc(name: str, cmd_q: mp.Queue, n_iters: int, seed: int):
         time.sleep(random.random() * 0.002)  # 0–2ms jitter
     print(f"[{name}] done")
 
+
 # ---------------- Main ----------------
 def main():
     mp.set_start_method("spawn", force=True)
 
-    cmd_q    = mp.Queue(maxsize=8192)
+    cmd_q = mp.Queue(maxsize=8192)
     done_evt = mp.Event()
 
     server = mp.Process(target=router_server, args=(cmd_q, done_evt, 2, 3.0, 120.0), daemon=False)
     server.start()
 
     n_producers = 6
-    iters_per   = 500
+    iters_per = 500
 
     procs = []
     for i in range(n_producers):
@@ -204,6 +213,7 @@ def main():
         raise SystemExit(1)
 
     print("[MAIN] All done ✔️")
+
 
 if __name__ == "__main__":
     try:

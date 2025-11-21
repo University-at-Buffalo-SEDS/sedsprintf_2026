@@ -60,9 +60,15 @@ by creating shims that expose pvPortMalloc and vPortFree.
 - When using this library as a submodule or subtree in a C or C++ project, make sure to add the following to your
   cmakelists.txt and adjust the target as needed:
   ```cmake
-  set(SEDSPRINTF_RS_TARGET "thumbv7m-none-eabi" CACHE STRING "" FORCE) # Set target for embedded systems
-  add_subdirectory(${CMAKE_SOURCE_DIR}/sedsprintf_rs)
-  target_link_libraries(${CMAKE_PROJECT_NAME} sedsprintf_rs)
+  # Example: building for an embedded target
+  set(SEDSPRINTF_RS_TARGET "thumbv7m-none-eabi" CACHE STRING "" FORCE)
+
+  # If you use the provided CMake glue for sedsprintf_rs:
+  #   <repo-root>/cmake/CMakeLists.txt (or similar)
+  add_subdirectory(${CMAKE_SOURCE_DIR}/sedsprintf_rs/cmake sedsprintf_rs_build)
+
+  # Link against the imported target
+  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE sedsprintf_rs::sedsprintf_rs)
   ```
 - Setup the config.rs to match your application needs. All config options are in the config.rs file and are very
   self-explanatory.
@@ -73,6 +79,64 @@ by creating shims that expose pvPortMalloc and vPortFree.
   and then only changing the sender string on each system, this will ensure that the enum values are the same on all
   systems.
 
+---
+
+## Setting the device / platform name (CMake + build.py)
+
+Each build of `sedsprintf_rs` has a **device identifier string** that is embedded into telemetry packets. In Rust this
+is exposed as:
+
+```rust
+pub const DEVICE_IDENTIFIER: &str = match option_env!("DEVICE_IDENTIFIER") {
+    Some(v) => v,
+    None => "TEST_PLATFORM",
+};
+```
+
+By default the name is `"TEST_PLATFORM"`, but you can override it at build time.
+
+### Via CMake (recommended in C/C++ projects)
+
+The CMake integration forwards a `device_id=...` argument into `build.py`, which then sets the `DEVICE_IDENTIFIER`
+environment variable for Cargo.
+
+In your parent project’s `CMakeLists.txt`:
+
+```cmake
+# Give this particular firmware / binary a unique name
+set(SEDSPRINTF_RS_DEVICE_IDENTIFIER "FC26_MAIN" CACHE STRING "" FORCE)
+
+# Point this at the sedsprintf_rs CMake glue directory
+add_subdirectory(${CMAKE_SOURCE_DIR}/sedsprintf_rs/cmake sedsprintf_rs_build)
+
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE sedsprintf_rs::sedsprintf_rs)
+```
+
+Typical examples:
+
+```cmake
+# Flight computer firmware
+set(SEDSPRINTF_RS_DEVICE_IDENTIFIER "FC26_MAIN" CACHE STRING "" FORCE)
+
+# Ground station app
+set(SEDSPRINTF_RS_DEVICE_IDENTIFIER "GS26" CACHE STRING "" FORCE)
+```
+
+If you leave `SEDSPRINTF_RS_DEVICE_IDENTIFIER` empty, the library falls back to `"TEST_PLATFORM"`.
+
+### Directly via build.py (manual builds)
+
+```bash
+# Host build
+./build.py release device_id=GROUND_STATION
+
+# Embedded build
+./build.py embedded release target=thumbv7em-none-eabihf device_id=FC
+```
+
+---
+
+## Using this repo as a subtree
 
 - To add this repo as a subtree to allow for modifications, use the following command:
   ```bash
@@ -80,26 +144,63 @@ by creating shims that expose pvPortMalloc and vPortFree.
   git fetch sedsprintf-upstream
   
   git config subtree.sedsprintf_rs.remote sedsprintf-upstream
-  git config subtree.sedsprintf_rs.branch dev   # or main or the branch of your choosing
+  git config subtree.sedsprintf_rs.branch main   # or dev or the branch of your choosing
 
   git subtree add --prefix=sedsprintf_rs sedsprintf-upstream main
   ```
-  To switch branches, run the following
+  To switch branches:
   ```bash
   git config subtree.sedsprintf_rs.branch <the-new-branch> 
   ```
-- To update the subtree, use the following command (Note all local changes must be committed before you can update):
+
+- To update the subtree:
   ```bash
-  git subtree pull --prefix=sedsprintf_rs sedsprintf-upstream main -m "Merge sedsprintf_rs upstream main"
+  git subtree pull --prefix=sedsprintf_rs sedsprintf-upstream main \
+      -m "Merge sedsprintf_rs upstream main"
   ```
 
+Helper scripts:
 
-- If using in an embedded environment, make sure to provide the necessary allocation functions if using a custom
-  allocator.
-  Below is an example implementation using malloc, free, and fwrite, feel free to implement to use your own allocator or
-  use ones provided by your RTOS. In the same sense, feel free to implement your own logging mechanism for when the
-  telemetry falls back to local logging for errors.
+```bash
+./scripts/update_subtree_no_stash.py
+./scripts/update_subtree.py            # stash → update → stash-pop
+```
 
+---
+
+## Using this repo as a submodule
+
+If you prefer a **submodule** instead of a subtree:
+
+```bash
+git submodule add -b main https://github.com/Rylan-Meilutis/sedsprintf_rs.git sedsprintf_rs
+
+git config submodule.sedsprintf_rs.branch main   # (or dev, etc.)
+```
+
+Initialize:
+
+```bash
+git submodule update --init --recursive
+```
+
+Update using helper scripts:
+
+```bash
+./scripts/submodule_update_no_stash.py     # clean tree
+./scripts/submodule_update.py              # stash → update → pop
+```
+
+The scripts:
+
+- read `submodule.sedsprintf_rs.branch`
+- fetch `origin/<branch>`
+- fast-forward the submodule repo
+- stage & commit the updated submodule pointer in the parent repo
+
+---
+
+## Embedded Allocator Hook Example
 
 ```C
 // telemetry_hooks.c
