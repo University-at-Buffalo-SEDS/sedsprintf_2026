@@ -609,7 +609,7 @@ pub extern "C" fn seds_relay_free(r: *mut SedsRelay) {
 /// On success, returns a non-negative side ID (RelaySideId).
 /// On failure, returns a negative error code.
 #[unsafe(no_mangle)]
-pub extern "C" fn seds_relay_add_side(
+pub extern "C" fn seds_relay_add_side_serialized(
     r: *mut SedsRelay,
     name: *const c_char,
     name_len: usize,
@@ -659,6 +659,95 @@ pub extern "C" fn seds_relay_add_side(
     side_id as i32
 }
 
+
+/// Add a new side whose TX callback receives packet views instead of raw bytes.
+///
+/// This is analogous to router packet handlers:
+///   - `tx` is called with a transient SedsPacketView built from the TelemetryPacket
+///   - it must return SEDS_OK (0) on success, or a negative error on failure.
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_relay_add_side_packet(
+    r: *mut SedsRelay,
+    name: *const c_char,
+    name_len: usize,
+    tx: CEndpointHandler,
+    tx_user: *mut c_void,
+) -> i32 {
+    if r.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+
+    // Decode name (best-effort UTF-8; fall back to empty)
+    let side_name: &'static str = if name.is_null() || name_len == 0 {
+        ""
+    } else {
+        let bytes = unsafe { slice::from_raw_parts(name as *const u8, name_len) };
+        match from_utf8(bytes) {
+            Ok(s) => {
+                let owned = alloc::string::String::from(s);
+                Box::leak(owned.into_boxed_str())
+            }
+            Err(_) => "",
+        }
+    };
+
+    let relay = unsafe { &(*r).inner }; // shared borrow
+
+    let Some(cb_fn) = tx else {
+        return status_from_err(TelemetryError::BadArg);
+    };
+
+    let user_addr = tx_user as usize;
+
+    // Build per-side TX closure that receives TelemetryPacket and forwards as SedsPacketView
+    let tx_closure = move |pkt: &TelemetryPacket| -> TelemetryResult<()> {
+        // Fast path: up to STACK_EPS endpoints, no heap alloc
+        let mut stack_eps: [u32; STACK_EPS] = [0; STACK_EPS];
+
+        let (endpoints_ptr, num_endpoints, _owned_vec): (*const u32, usize, Option<Vec<u32>>) =
+            if pkt.endpoints().len() <= STACK_EPS {
+                for (i, e) in pkt.endpoints().iter().enumerate() {
+                    stack_eps[i] = *e as u32;
+                }
+                (stack_eps.as_ptr(), pkt.endpoints().len(), None)
+            } else {
+                let mut eps_u32 = Vec::with_capacity(pkt.endpoints().len());
+                for e in pkt.endpoints().iter() {
+                    eps_u32.push(*e as u32);
+                }
+                let ptr = eps_u32.as_ptr();
+                let len = eps_u32.len();
+                (ptr, len, Some(eps_u32))
+            };
+
+        let sender_bytes = pkt.sender().as_bytes();
+        let view = SedsPacketView {
+            ty: pkt.data_type() as u32,
+            data_size: pkt.data_size(),
+            sender: sender_bytes.as_ptr() as *const c_char,
+            sender_len: sender_bytes.len(),
+            endpoints: endpoints_ptr,
+            num_endpoints,
+            timestamp: pkt.timestamp(),
+            payload: pkt.payload().as_ptr(),
+            payload_len: pkt.payload().len(),
+        };
+
+        let code = cb_fn(&view as *const _, user_addr as *mut c_void);
+        if code == status_from_result_code(SedsResult::SedsOk) {
+            Ok(())
+        } else {
+            Err(TelemetryError::Io("relay packet tx error"))
+        }
+    };
+
+    // This assumes your Relay now has an `add_side_packet` method that
+    // registers a packet-style TX handler (similar to Router's packet handlers).
+    let side_id: RelaySideId = relay.add_side_packet(side_name, tx_closure);
+    side_id as i32
+}
+
+
 // ============================================================================
 //  FFI: Relay RX / TX queueing
 // ============================================================================
@@ -684,6 +773,33 @@ pub extern "C" fn seds_relay_rx_serialized_from_side(
 
     ok_or_status(relay.rx_serialized_from_side(side_id as usize, slice))
 }
+
+/// Enqueue a TelemetryPacket (via SedsPacketView) that originated from `side_id`
+/// into the relay RX queue.
+///
+/// - `side_id` must be the value returned by `seds_relay_add_side` (or friends).
+/// - `view` describes the packet (type, endpoints, sender, timestamp, payload).
+/// - Returns 0 on success or a negative error code.
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_relay_rx_packet_from_side(
+    r: *mut SedsRelay,
+    side_id: u32,
+    view: *const SedsPacketView,
+) -> i32 {
+    if r.is_null() || view.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+
+    let relay = unsafe { &(*r).inner }; // shared borrow
+
+    let pkt = match view_to_packet(unsafe { &*view }) {
+        Ok(p) => p,
+        Err(_) => return status_from_err(TelemetryError::InvalidType),
+    };
+
+    ok_or_status(relay.rx_from_side(side_id as usize, pkt))
+}
+
 
 /// Process all pending RX in the relay RX queue (expand to TX).
 #[unsafe(no_mangle)]

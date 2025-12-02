@@ -210,7 +210,7 @@ class Relay:
         """
         ...
 
-    def add_side(self, name: str, tx: TxCallback) -> SideId:
+    def add_side_serialized(self, name: str, tx: TxCallback) -> SideId:
         """
         Add a new relay side (e.g. 'CAN', 'UART', 'RADIO').
 
@@ -229,6 +229,38 @@ class Relay:
         """
         ...
 
+    def add_side_packet(self, name: str, tx: Callable[[Packet], None]) -> SideId:
+        """
+        Add a new side with a packet-based TX callback.
+
+        Parameters
+        ----------
+        name:
+            Human-readable name for this side (used for debugging).
+        tx:
+            Transmit callback. Called as ``tx(pkt: Packet)`` when the relay
+            wants to send a TelemetryPacket on this side.
+
+        Returns
+        -------
+        SideId
+            Integer side id to use with ``rx_serialized_from_side`` and ``rx_from_side``.
+        """
+        ...
+
+    def rx_packet_from_side(self, side_id: SideId, packet: Packet) -> None:
+        """
+        Enqueue a full Packet that arrived on a given side into the relay RX queue.
+
+        Parameters
+        ----------
+        side_id:
+            Side id previously returned by :meth:`add_side` or :meth:`add_side_packet`.
+        packet:
+            A :class:`Packet` instance.
+        """
+        ...
+        
     def rx_serialized_from_side(
         self,
         side_id: SideId,

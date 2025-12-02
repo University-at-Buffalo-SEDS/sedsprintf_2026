@@ -1,8 +1,16 @@
-use crate::{config::{DataEndpoint, DataType, DEVICE_IDENTIFIER, MAX_HANDLER_RETRIES}, get_needed_message_size, impl_letype_num, lock::RouterMutex, message_meta, serialize, telemetry_packet::TelemetryPacket, EndpointsBroadcastMode, MessageElementCount, TelemetryError, TelemetryResult};
-use alloc::{boxed::Box, collections::VecDeque, format, sync::Arc, vec, vec::Vec};
-
+use crate::config::{MAX_RECENT_RX_IDS, STARTING_QUEUE_SIZE};
 #[cfg(all(not(feature = "std"), target_os = "none"))]
 use crate::seds_error_msg;
+use crate::telemetry_packet::hash_bytes_u64;
+use crate::{
+    config::{DataEndpoint, DataType, DEVICE_IDENTIFIER, MAX_HANDLER_RETRIES}, get_needed_message_size, impl_letype_num, lock::RouterMutex,
+    message_meta,
+    serialize, telemetry_packet::TelemetryPacket,
+    EndpointsBroadcastMode,
+    MessageElementCount, TelemetryError,
+    TelemetryResult,
+};
+use alloc::{boxed::Box, collections::VecDeque, format, sync::Arc, vec, vec::Vec};
 
 pub enum RxItem {
     Packet(TelemetryPacket),
@@ -229,6 +237,7 @@ fn fallback_stdout(msg: &str) {
 struct RouterInner {
     received_queue: VecDeque<RxItem>,
     transmit_queue: VecDeque<TelemetryPacket>,
+    recent_rx: VecDeque<u64>,
 }
 
 /// Telemetry Router for handling incoming and outgoing telemetry packets.
@@ -288,10 +297,39 @@ impl Router {
             transmit: transmit.map(|t| Box::new(t) as _),
             cfg,
             state: RouterMutex::new(RouterInner {
-                received_queue: VecDeque::with_capacity(16),
-                transmit_queue: VecDeque::with_capacity(16),
+                received_queue: VecDeque::with_capacity(STARTING_QUEUE_SIZE),
+                transmit_queue: VecDeque::with_capacity(STARTING_QUEUE_SIZE),
+                recent_rx: VecDeque::with_capacity(MAX_RECENT_RX_IDS),
             }),
             clock,
+        }
+    }
+
+    /// Compute a dedupe ID for an RxItem and record it.
+    /// Returns true if this item was seen recently (and should be skipped).
+    fn is_duplicate_rx(&self, item: &RxItem) -> bool {
+        // Derive ID from packet or from raw bytes.
+        let id = match item {
+            RxItem::Packet(pkt) => pkt.packet_id(),
+            RxItem::Serialized(bytes) => {
+                // Hash raw serialized bytes; duplicates over the network
+                // will be identical at the byte level.
+                let mut h: u64 = 0x9E37_79B9_7F4A_7C15;
+                h = hash_bytes_u64(h, bytes.as_ref());
+                h
+            }
+        };
+
+        let mut st = self.state.lock();
+
+        if st.recent_rx.contains(&id) {
+            true
+        } else {
+            if st.recent_rx.len() >= MAX_RECENT_RX_IDS {
+                st.recent_rx.pop_front();
+            }
+            st.recent_rx.push_back(id);
+            false
         }
     }
     /// Error helper when we have a full TelemetryPacket.
@@ -723,6 +761,10 @@ impl Router {
     /// # Returns
     /// A TelemetryResult indicating success or failure.
     pub fn rx_item(&self, item: &RxItem) -> TelemetryResult<()> {
+        if self.is_duplicate_rx(item) {
+            // Already processed an identical packet recently; ignore.
+            return Ok(());
+        }
         match item {
             RxItem::Packet(pkt) => {
                 pkt.validate()?;
@@ -817,10 +859,11 @@ impl Router {
             .iter()
             .copied()
             .any(|ep| self.endpoint_has_serialized_handler(ep));
-        let send_remote = pkt
-            .endpoints()
-            .iter()
-            .any(|e| (!self.cfg.is_local_endpoint(*e) && e.get_broadast_mode() != EndpointsBroadcastMode::Never) || e.get_broadast_mode() == EndpointsBroadcastMode::Always);
+        let send_remote = pkt.endpoints().iter().any(|e| {
+            (!self.cfg.is_local_endpoint(*e)
+                && e.get_broadast_mode() != EndpointsBroadcastMode::Never)
+                || e.get_broadast_mode() == EndpointsBroadcastMode::Always
+        });
 
         // Only serialize if needed.
         let bytes_opt = if has_serialized_local || send_remote {
@@ -922,9 +965,7 @@ impl Router {
         timestamp: u64,
         data: &[T],
     ) -> TelemetryResult<()> {
-        log_raw(self.sender, ty, data, timestamp, |pkt| {
-            self.tx(&pkt)
-        })
+        log_raw(self.sender, ty, data, timestamp, |pkt| self.tx(&pkt))
     }
 
     /// Build a packet with a specific timestamp and queue it for later TX.
@@ -940,8 +981,6 @@ impl Router {
         timestamp: u64,
         data: &[T],
     ) -> TelemetryResult<()> {
-        log_raw(self.sender, ty, data, timestamp, |pkt| {
-            self.tx_queue(pkt)
-        })
+        log_raw(self.sender, ty, data, timestamp, |pkt| self.tx_queue(pkt))
     }
 }
