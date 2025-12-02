@@ -25,6 +25,16 @@ pub const DEVICE_IDENTIFIER: &str = match option_env!("DEVICE_IDENTIFIER") {
     None => "TEST_PLATFORM",
 };
 
+/// Maximum number of recent received packet IDs to track for duplicate
+/// detection.
+///
+/// Higher values increase memory usage but improve duplicate detection for
+/// high-throughput links or bursty traffic patterns.
+//// This value should be a power of two for optimal performance.
+pub const MAX_RECENT_RX_IDS: usize = 128;
+
+pub const STARTING_QUEUE_SIZE: usize = 16;
+
 /// Maximum length, in bytes, of any **static** UTF-8 string payload.
 ///
 /// Dynamic string messages may be longer, but many tests and error paths

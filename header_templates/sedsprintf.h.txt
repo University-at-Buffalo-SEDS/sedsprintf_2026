@@ -296,11 +296,34 @@ void seds_relay_free(SedsRelay * r);
  * @return On success: non-negative side ID.
  *         On error:   negative SedsResult error code.
  */
-int32_t seds_relay_add_side(SedsRelay * r,
+int32_t seds_relay_add_side_serialized(SedsRelay * r,
                             const char * name,
                             size_t name_len,
                             SedsTransmitFn tx,
                             void * tx_user);
+
+/**
+ * @brief Add a new side/network to the relay whose TX callback receives packets.
+ *
+ * The callback uses the same SedsPacketView shape as router endpoint handlers.
+ * This is useful when the “side” is an in-process consumer instead of a raw
+ * network link.
+ *
+ * @param r         Relay handle.
+ * @param name      Optional UTF-8 name (may be NULL).
+ * @param name_len  Length of @p name in bytes (0 if unused).
+ * @param tx        TX callback for this side (packet-based, must not be NULL).
+ * @param tx_user   Opaque user pointer passed to @p tx.
+ *
+ * @return On success: non-negative side ID.
+ *         On error:   negative SedsResult error code.
+ */
+int32_t seds_relay_add_side_packet(SedsRelay *r,
+                                   const char *name,
+                                   size_t name_len,
+                                   SedsEndpointHandlerFn tx,
+                                   void *tx_user);
+
 
 /**
  * @brief Feed serialized bytes that arrived on a given side into the relay.
@@ -319,6 +342,24 @@ SedsResult seds_relay_rx_serialized_from_side(SedsRelay * r,
                                               uint32_t side_id,
                                               const uint8_t * bytes,
                                               size_t len);
+
+
+/**
+ * @brief Feed a TelemetryPacket (described by SedsPacketView) that arrived on
+ *        a given side into the relay.
+ *
+ * This is the packet-based counterpart to seds_relay_rx_serialized_from_side().
+ *
+ * @param r        Relay handle.
+ * @param side_id  Side ID returned by seds_relay_add_side*().
+ * @param view     Packet view describing the incoming packet.
+ *
+ * @return SEDS_OK on success or a negative SedsResult on error.
+ */
+SedsResult seds_relay_rx_packet_from_side(SedsRelay *r,
+                                          uint32_t side_id,
+                                          const SedsPacketView *view);
+
 
 /* --- Relay queue processing (matching router style) --- */
 

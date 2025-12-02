@@ -96,6 +96,22 @@ const fn element_width(dt: MessageDataType) -> usize {
     }
 }
 
+
+// Simple 64-bit hash used for packet IDs (no_std friendly).
+/// Not cryptographic; just a decent mix for deduplication.
+/// Takes an initial hash value and a byte slice, returns the updated hash.
+#[inline]
+pub fn hash_bytes_u64(mut h: u64, bytes: &[u8]) -> u64 {
+    // Arbitrary odd constant (not FNV, but good enough for dedupe).
+    const PRIME: u64 = 0x9E37_79B1;
+    for &b in bytes {
+        h ^= b as u64;
+        h = h.wrapping_mul(PRIME);
+        // a tiny extra mix
+        h ^= h >> 27;
+    }
+    h
+}
 /// Validate the payload of a dynamic-length message.
 ///
 /// - For `String`: trims trailing NULs for validation and ensures UTF-8 (if non-empty).
@@ -225,6 +241,44 @@ impl TelemetryPacket {
             timestamp,
             payload: SmallPayload::new(&payload),
         })
+    }
+
+
+    /// Compute a stable 64-bit identifier for this packet.
+    ///
+    /// This is *not* serialized – it is derived locally from:
+    /// - sender
+    /// - logical type (DataType)
+    /// - endpoints
+    /// - timestamp
+    /// - payload bytes
+    ///
+    /// Identical packets on different boards/links will compute the same ID,
+    /// so the Router/Relay can use it to drop duplicates.
+    #[inline]
+    pub fn packet_id(&self) -> u64 {
+        // Seed with an arbitrary non-zero constant.
+        let mut h: u64 = 0x9E37_79B9_7F4A_7C15;
+
+        // Sender (string)
+        h = hash_bytes_u64(h, self.sender.as_bytes());
+
+        // Logical type as string
+        h = hash_bytes_u64(h, self.ty.as_str().as_bytes());
+
+        // Endpoints (as their string names)
+        for ep in self.endpoints.iter() {
+            h = hash_bytes_u64(h, ep.as_str().as_bytes());
+        }
+
+        // Timestamp + data_size as bytes
+        h = hash_bytes_u64(h, &self.timestamp.to_le_bytes());
+        h = hash_bytes_u64(h, &self.data_size.to_le_bytes());
+
+        // Payload bytes
+        h = hash_bytes_u64(h, self.payload());
+
+        h
     }
 
     /// Generic helper: decode the payload as a Vec<T> in little-endian,
@@ -461,8 +515,7 @@ impl TelemetryPacket {
                 self.data_to_string::<u16>(&mut s);
             }
             MessageDataType::UInt8 => {
-                // NOTE: this uses i8 for historical reasons; kept for compatibility.
-                self.data_to_string::<i8>(&mut s);
+                self.data_to_string::<u8>(&mut s);
             }
             MessageDataType::Int128 => {
                 self.data_to_string::<i128>(&mut s);
