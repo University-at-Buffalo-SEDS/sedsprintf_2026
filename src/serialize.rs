@@ -15,7 +15,8 @@ use crate::{
     TelemetryResult,
     {config::DataType, MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE},
 };
-use alloc::{sync::Arc, vec::Vec};
+
+use alloc::{sync::Arc, vec::Vec, borrow::ToOwned, string::String};
 
 /// Lightweight header-only view of a serialized [`TelemetryPacket`].
 ///
@@ -328,7 +329,7 @@ pub fn deserialize_packet(buf: &[u8]) -> Result<TelemetryPacket, TelemetryError>
 
     // ----- Sender handling -----
     let sender_wire_bytes = r.read_bytes(sender_wire_len)?;
-    let sender_str: alloc::string::String = if sender_is_compressed {
+    let sender_str: String = if sender_is_compressed {
         let decompressed = payload_compression::decompress(sender_wire_bytes, slen)?;
         core::str::from_utf8(&decompressed)
             .map_err(|_| TelemetryError::Deserialize("sender not UTF-8 after decompress"))?
