@@ -155,7 +155,7 @@ impl DataType {
             DataType::TelemetryError => "TELEMETRY_ERROR",
             DataType::GenericError => "GENERIC_ERROR",
             DataType::GpsData => "GPS_DATA",
-            DataType::KalmanFilterData => "Kalman_Filter_Data",
+            DataType::KalmanFilterData => "KALMAN_FILTER_DATA",
             DataType::GyroData => "GYRO_DATA",
             DataType::AccelData => "ACCEL_DATA",
             DataType::BatteryVoltage => "BATTERY_VOLTAGE",
