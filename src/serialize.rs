@@ -32,33 +32,31 @@ pub struct TelemetryEnvelope {
     pub timestamp_ms: u64,
 }
 
-// ===========================================================================
-// Compact v2 wire format
-// ===========================================================================
+// packet Layout:
 //
-// Layout:
+//   [FLAGS: u8]
+//       Bit 0: payload compressed flag (1 = compressed)
+//       Bit 1: sender compressed flag (1 = compressed)
+//       Bits 2..7: reserved (0 for now)
 //
 //   [NEP: u8]
-//       Number of selected endpoints (i.e. bits set in the endpoint bitmap).
+//       Number of selected endpoints (bits set in the endpoint bitmap).
 //
-//   VARINT(ty: u32 as u64)       -- ULEB128
-//   VARINT(data_size: u64)       -- ULEB128
-//   VARINT(timestamp: u64)       -- ULEB128
-//   VARINT(sender_len: u64)      -- ULEB128
+//   VARINT(ty: u32 as u64)           -- ULEB128
+//   VARINT(data_size: u64)           -- ULEB128   (LOGICAL payload size, uncompressed)
+//   VARINT(timestamp: u64)           -- ULEB128
+//   VARINT(sender_len: u64)          -- ULEB128   (LOGICAL sender length, uncompressed)
+//   [VARINT(sender_wire_len: u64)]   -- ULEB128   (ONLY if sender compressed)
 //
-//   ENDPOINTS_BITMAP             -- 1 bit per possible DataEndpoint; LSB-first
-//   SENDER BYTES                 -- UTF-8, length = sender_len
-//   PAYLOAD BYTES                -- raw payload, length = data_size
-//
-// Notes:
-// - Bitmap has one bit per possible `DataEndpoint` discriminant
-//   in the range `0..=MAX_VALUE_DATA_ENDPOINT`.
-// - NEP is the count of bits set in the bitmap (not the total possible).
-// - VARINT fields use unsigned LEB128 encoding (ULEB128).
-//
+//   ENDPOINTS_BITMAP                 -- 1 bit per possible DataEndpoint; LSB-first
+//   SENDER BYTES                     -- raw or compressed, length = sender_wire_len
+//   PAYLOAD BYTES                    -- raw or compressed payload bytes
+
 // ===========================================================================
 // ULEB128 (varint) encoding helpers
 // ===========================================================================
+const FLAG_COMPRESSED_PAYLOAD: u8 = 0x01;
+const FLAG_COMPRESSED_SENDER: u8 = 0x02;
 
 /// Encode a `u64` as ULEB128 and append it to `out`.
 #[inline]
@@ -223,22 +221,52 @@ fn expand_endpoint_bitmap(
 pub fn serialize_packet(pkt: &TelemetryPacket) -> Arc<[u8]> {
     let bm = build_endpoint_bitmap(&pkt.endpoints());
 
-    // Heuristic capacity: fixed prelude + bitmap + sender + payload.
-    let mut out =
-        Vec::with_capacity(16 + EP_BITMAP_BYTES + pkt.sender().len() + pkt.payload().len());
+    // Decide whether to compress the sender.
+    let sender_bytes = pkt.sender().as_bytes();
+    let (sender_compressed, sender_wire) =
+        payload_compression::compress_if_beneficial(sender_bytes);
 
-    // Prelude: NEP = number of UNIQUE endpoints (bits set in bitmap).
+    // Decide whether to compress the payload.
+    let payload = pkt.payload();
+    let (payload_compressed, payload_wire) = payload_compression::compress_if_beneficial(payload);
+
+    // Heuristic capacity: fixed prelude + bitmap + sender_wire + payload_wire.
+    let mut out = Vec::with_capacity(16 + EP_BITMAP_BYTES + sender_wire.len() + payload_wire.len());
+
+    // FLAGS byte
+    let mut flags: u8 = 0;
+    if payload_compressed {
+        flags |= FLAG_COMPRESSED_PAYLOAD;
+    }
+    if sender_compressed {
+        flags |= FLAG_COMPRESSED_SENDER;
+    }
+    out.push(flags);
+
+    // NEP = number of UNIQUE endpoints (bits set in bitmap).
     let nep_unique = bitmap_popcount(&bm);
+    assert!(
+        nep_unique <= u8::MAX as usize,
+        "too many endpoints selected to fit in NEP u8"
+    );
     out.push(nep_unique as u8);
 
+    // NOTE: data_size is the *logical* (uncompressed) payload size.
     write_uleb128(pkt.data_type() as u64, &mut out);
     write_uleb128(pkt.data_size() as u64, &mut out);
     write_uleb128(pkt.timestamp(), &mut out);
-    write_uleb128(pkt.sender().len() as u64, &mut out);
+
+    // Logical sender length (uncompressed).
+    write_uleb128(sender_bytes.len() as u64, &mut out);
+
+    // If sender compressed, we also need its wire length to find the payload.
+    if sender_compressed {
+        write_uleb128(sender_wire.len() as u64, &mut out);
+    }
 
     out.extend_from_slice(&bm);
-    out.extend_from_slice(pkt.sender().as_bytes());
-    out.extend_from_slice(&pkt.payload());
+    out.extend_from_slice(&sender_wire);
+    out.extend_from_slice(&payload_wire);
 
     Arc::<[u8]>::from(out)
 }
@@ -261,14 +289,34 @@ pub fn deserialize_packet(buf: &[u8]) -> Result<TelemetryPacket, TelemetryError>
     }
     let mut r = ByteReader::new(buf);
 
-    let nep = r.read_bytes(1)?[0] as usize;
-    let ty_v = read_uleb128(&mut r)?;
-    let dsz = read_uleb128(&mut r)? as usize;
-    let ts_v = read_uleb128(&mut r)?;
-    let slen = read_uleb128(&mut r)? as usize;
+    let flags = r.read_bytes(1)?[0];
+    let payload_is_compressed = (flags & FLAG_COMPRESSED_PAYLOAD) != 0;
+    let sender_is_compressed = (flags & FLAG_COMPRESSED_SENDER) != 0;
 
-    if r.remaining() < EP_BITMAP_BYTES + slen + dsz {
-        return Err(TelemetryError::Deserialize("short buffer"));
+    let nep = r.read_bytes(1)?[0] as usize;
+
+    let ty_v = read_uleb128(&mut r)?;
+    let dsz = read_uleb128(&mut r)? as usize; // logical (uncompressed) payload size
+    let ts_v = read_uleb128(&mut r)?;
+    let slen = read_uleb128(&mut r)? as usize; // logical (uncompressed) sender length
+
+    // If sender is compressed, next varint is its wire length; else wire_len == slen.
+    let sender_wire_len = if sender_is_compressed {
+        read_uleb128(&mut r)? as usize
+    } else {
+        slen
+    };
+
+    // For uncompressed payload: bitmap + sender_wire + payload(dsz)
+    // For compressed payload: bitmap + sender_wire + at least 1 byte of payload.
+    if !payload_is_compressed {
+        if r.remaining() < EP_BITMAP_BYTES + sender_wire_len + dsz {
+            return Err(TelemetryError::Deserialize("short buffer"));
+        }
+    } else {
+        if r.remaining() < EP_BITMAP_BYTES + sender_wire_len + 1 {
+            return Err(TelemetryError::Deserialize("short buffer"));
+        }
     }
 
     let bm = r.read_bytes(EP_BITMAP_BYTES)?;
@@ -278,10 +326,29 @@ pub fn deserialize_packet(buf: &[u8]) -> Result<TelemetryPacket, TelemetryError>
     }
     let eps: Arc<[DataEndpoint]> = Arc::from(&ep_buf[..ep_len]);
 
-    let sender_bytes = r.read_bytes(slen)?;
-    let sender_str = core::str::from_utf8(sender_bytes)
-        .map_err(|_| TelemetryError::Deserialize("sender not UTF-8"))?;
-    let payload_slice = r.read_bytes(dsz)?;
+    // ----- Sender handling -----
+    let sender_wire_bytes = r.read_bytes(sender_wire_len)?;
+    let sender_str: alloc::string::String = if sender_is_compressed {
+        let decompressed = payload_compression::decompress(sender_wire_bytes, slen)?;
+        core::str::from_utf8(&decompressed)
+            .map_err(|_| TelemetryError::Deserialize("sender not UTF-8 after decompress"))?
+            .to_owned()
+    } else {
+        core::str::from_utf8(sender_wire_bytes)
+            .map_err(|_| TelemetryError::Deserialize("sender not UTF-8"))?
+            .to_owned()
+    };
+
+    // ----- Payload handling -----
+    let payload_arc: Arc<[u8]> = if !payload_is_compressed {
+        let payload_slice = r.read_bytes(dsz)?;
+        Arc::<[u8]>::from(payload_slice)
+    } else {
+        let comp_len = r.remaining();
+        let comp_bytes = r.read_bytes(comp_len)?;
+        let decompressed = payload_compression::decompress(comp_bytes, dsz)?;
+        Arc::<[u8]>::from(decompressed)
+    };
 
     let ty_u32 = u32::try_from(ty_v).map_err(|_| TelemetryError::Deserialize("type too large"))?;
     if ty_u32 > MAX_VALUE_DATA_TYPE {
@@ -289,7 +356,7 @@ pub fn deserialize_packet(buf: &[u8]) -> Result<TelemetryPacket, TelemetryError>
     }
     let ty = DataType::try_from_u32(ty_u32).ok_or(TelemetryError::InvalidType)?;
 
-    TelemetryPacket::new(ty, &eps, sender_str, ts_v, Arc::<[u8]>::from(payload_slice))
+    TelemetryPacket::new(ty, &eps, &sender_str, ts_v, payload_arc)
 }
 
 // ===========================================================================
@@ -318,13 +385,25 @@ pub fn peek_envelope(buf: &[u8]) -> TelemetryResult<TelemetryEnvelope> {
     }
     let mut r = ByteReader::new(buf);
 
+    let flags = r.read_bytes(1)?[0];
+    let sender_is_compressed = (flags & FLAG_COMPRESSED_SENDER) != 0;
+    // We don't care about payload compression here.
+    let _payload_is_compressed = (flags & FLAG_COMPRESSED_PAYLOAD) != 0;
+
     let nep = r.read_bytes(1)?[0] as usize;
+
     let ty_v = read_uleb128(&mut r)?;
     let _dsz = read_uleb128(&mut r)? as usize;
     let ts_v = read_uleb128(&mut r)?;
     let slen = read_uleb128(&mut r)? as usize;
 
-    if r.remaining() < EP_BITMAP_BYTES + slen {
+    let sender_wire_len = if sender_is_compressed {
+        read_uleb128(&mut r)? as usize
+    } else {
+        slen
+    };
+
+    if r.remaining() < EP_BITMAP_BYTES + sender_wire_len {
         return Err(TelemetryError::Deserialize("short buffer"));
     }
 
@@ -335,9 +414,17 @@ pub fn peek_envelope(buf: &[u8]) -> TelemetryResult<TelemetryEnvelope> {
     }
     let eps: Arc<[DataEndpoint]> = Arc::from(&ep_buf[..ep_len]);
 
-    let sender_bytes = r.read_bytes(slen)?;
-    let sender_str = core::str::from_utf8(sender_bytes)
-        .map_err(|_| TelemetryError::Deserialize("sender not UTF-8"))?;
+    let sender_wire_bytes = r.read_bytes(sender_wire_len)?;
+    let sender_str: alloc::string::String = if sender_is_compressed {
+        let decompressed = payload_compression::decompress(sender_wire_bytes, slen)?;
+        core::str::from_utf8(&decompressed)
+            .map_err(|_| TelemetryError::Deserialize("sender not UTF-8 after decompress"))?
+            .to_owned()
+    } else {
+        core::str::from_utf8(sender_wire_bytes)
+            .map_err(|_| TelemetryError::Deserialize("sender not UTF-8"))?
+            .to_owned()
+    };
 
     let ty_u32 = u32::try_from(ty_v).map_err(|_| TelemetryError::Deserialize("type too large"))?;
     if ty_u32 > MAX_VALUE_DATA_TYPE {
@@ -366,12 +453,23 @@ pub fn peek_envelope(buf: &[u8]) -> TelemetryResult<TelemetryEnvelope> {
 /// # Returns
 /// - `usize`: Size of the header in bytes.
 pub fn header_size_bytes(pkt: &TelemetryPacket) -> usize {
-    let prelude = 1; // NEP (u8)
+    let prelude = 2; // FLAGS (u8) + NEP (u8)
+
+    let sender_bytes = pkt.sender().as_bytes();
+    let (sender_compressed, sender_wire) =
+        payload_compression::compress_if_beneficial(sender_bytes);
+
     prelude
         + uleb128_size(pkt.data_type() as u32 as u64)
         + uleb128_size(pkt.data_size() as u64)
         + uleb128_size(pkt.timestamp())
-        + uleb128_size(pkt.sender().len() as u64)
+        + uleb128_size(sender_bytes.len() as u64)
+        + if sender_compressed {
+            // extra varint for sender_wire_len when compressed
+            uleb128_size(sender_wire.len() as u64)
+        } else {
+            0
+        }
 }
 
 /// Compute the total wire size (header + bitmap + sender + payload) in bytes.
@@ -381,7 +479,16 @@ pub fn header_size_bytes(pkt: &TelemetryPacket) -> usize {
 /// # Returns
 /// - `usize`: Total size of the serialized packet in bytes.
 pub fn packet_wire_size(pkt: &TelemetryPacket) -> usize {
-    header_size_bytes(pkt) + EP_BITMAP_BYTES + pkt.sender().len() + pkt.payload().len()
+    let header = header_size_bytes(pkt);
+
+    let sender_bytes = pkt.sender().as_bytes();
+    let (_sender_compressed, sender_wire) =
+        payload_compression::compress_if_beneficial(sender_bytes);
+
+    let payload = pkt.payload();
+    let (_payload_compressed, payload_wire) = payload_compression::compress_if_beneficial(payload);
+
+    header + EP_BITMAP_BYTES + sender_wire.len() + payload_wire.len()
 }
 
 // ===========================================================================
@@ -409,5 +516,68 @@ impl DataEndpoint {
     /// - `Option<DataEndpoint>`: Corresponding `DataEndpoint` variant or `None
     pub fn try_from_u32(x: u32) -> Option<Self> {
         try_enum_from_u32(x)
+    }
+}
+
+mod payload_compression {
+    use crate::TelemetryError;
+    use alloc::vec::Vec;
+
+    #[cfg(feature = "compression")]
+    use crate::config::{PAYLOAD_COMPRESSION_LEVEL, PAYLOAD_COMPRESS_THRESHOLD};
+
+    /// Compress the given payload if it is beneficial to do so.
+    /// # Arguments
+    /// - `payload`: Original uncompressed payload bytes.
+    /// # Returns
+    /// - `(bool, Vec<u8>)`: Tuple where the first element indicates whether
+    ///   compression was applied, and the second element is the resulting
+    ///   payload bytes (compressed or original).
+    #[cfg(feature = "compression")]
+    pub fn compress_if_beneficial(payload: &[u8]) -> (bool, Vec<u8>) {
+        if payload.len() < PAYLOAD_COMPRESS_THRESHOLD {
+            return (false, payload.to_vec());
+        }
+
+        let compressed = miniz_oxide::deflate::compress_to_vec(payload, PAYLOAD_COMPRESSION_LEVEL);
+
+        // Only use compressed form if it actually saves space.
+        if compressed.len() + 1 >= payload.len() {
+            (false, payload.to_vec())
+        } else {
+            (true, compressed)
+        }
+    }
+
+    /// Decompress the given compressed payload.
+    /// # Arguments
+    /// - `compressed`: Compressed payload bytes.
+    /// - `expected_len`: Expected length of the decompressed payload.
+    /// # Returns
+    /// - `Vec<u8>`: Decompressed payload bytes.
+    /// # Errors
+    /// - `TelemetryError::Deserialize` if decompression fails or the size
+    ///   does not match `expected_len`.
+    #[cfg(feature = "compression")]
+    pub fn decompress(compressed: &[u8], expected_len: usize) -> Result<Vec<u8>, TelemetryError> {
+        let decompressed = miniz_oxide::inflate::decompress_to_vec(compressed)
+            .map_err(|_| TelemetryError::Deserialize("decompression failed"))?;
+        if decompressed.len() != expected_len {
+            return Err(TelemetryError::Deserialize("decompressed size mismatch"));
+        }
+        Ok(decompressed)
+    }
+
+    // Stub when compression is disabled (never actually produces compressed payloads).
+    #[cfg(not(feature = "compression"))]
+    pub fn compress_if_beneficial(payload: &[u8]) -> (bool, Vec<u8>) {
+        (false, payload.to_vec())
+    }
+
+    #[cfg(not(feature = "compression"))]
+    pub fn decompress(_compressed: &[u8], _expected_len: usize) -> Result<Vec<u8>, TelemetryError> {
+        Err(TelemetryError::Deserialize(
+            "compressed payloads not supported (compression feature disabled)",
+        ))
     }
 }

@@ -143,7 +143,10 @@ def producer_proc(name: str, cmd_q: mp.Queue, n_iters: int, seed: int):
         which = random.randint(0, 3)
 
         if which == 0:
-            msg = f"{name} hello there {i}".encode("utf-8")
+            msg = (f"{name} hello there, how is life, it should be good, if not then that is a real trajity and that "
+                   f"would make life really hard now wouldn't it, let's add some more text to make this a bit longer "
+                   f"so we can see how compression works in sedsprintf_rs! Iteration number:"
+                   f" {i}").encode("utf-8")
             cmd_q.put(deep_coerce_enums(("log_bytes", {
                 "ty": DT.MESSAGE_DATA, "data": msg
             })))

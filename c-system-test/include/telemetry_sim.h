@@ -7,6 +7,7 @@
 extern "C" {
 
 
+
 #endif
 
 // Forward declare via typedef, then define the named struct.
@@ -17,7 +18,11 @@ typedef struct
     SimNode ** nodes;
     size_t count;
     size_t cap;
-    uint64_t t0_ms; // bus start time (m
+    uint64_t t0_ms; // bus start time (ms)
+
+    // NEW: optional relay linkage
+    SedsRelay * relay;
+    uint32_t relay_side_id;
 } SimBus;
 
 struct SimNode

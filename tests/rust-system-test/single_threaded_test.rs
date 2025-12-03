@@ -5,9 +5,10 @@ mod single_threaded_test {
     use sedsprintf_rs_2026::router::{BoardConfig, Clock, EndpointHandler, Router};
     use sedsprintf_rs_2026::telemetry_packet::TelemetryPacket;
     use sedsprintf_rs_2026::TelemetryResult;
+    use sedsprintf_rs_2026::relay::Relay;
 
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::mpsc::{self, TryRecvError};
+    use std::sync::mpsc::{self, Receiver, TryRecvError};
     use std::sync::Arc;
 
     /// Clock that always returns 0
@@ -59,20 +60,119 @@ mod single_threaded_test {
         .unwrap()
     }
 
-    /// Single-threaded stress test to profile router performance.
+    /// Drain both buses once and run the relay once.
+    ///
+    /// This is intentionally "one pass": we call it repeatedly inside the main
+    /// loop and again in the final drain phase to converge all traffic.
+    fn drain_buses_and_relay_once(
+        nodes: &mut [SimNode],
+        bus1_rx: &Receiver<(usize, Vec<u8>)>,
+        bus2_rx: &Receiver<(usize, Vec<u8>)>,
+        relay: &Relay,
+        bus1_side_id: usize,
+        bus2_side_id: usize,
+    ) {
+        // bus1 has nodes 0 and 1
+        loop {
+            match bus1_rx.try_recv() {
+                Ok((from, frame)) => {
+                    for (idx, node) in nodes.iter_mut().enumerate() {
+                        if idx > 1 {
+                            continue; // only nodes 0 and 1 live on bus1
+                        }
+                        if idx == from {
+                            continue; // no loopback to sender on this bus
+                        }
+                        node.router
+                            .rx_serialized_packet_to_queue(&frame)
+                            .expect("bus1: rx_serialized_packet_to_queue failed");
+                    }
+
+                    // Feed into relay from bus1 side (even if it came from relay,
+                    // dedupe in Relay will ignore duplicates).
+                    relay
+                        .rx_serialized_from_side(bus1_side_id, &frame)
+                        .expect("bus1 -> relay failed");
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    panic!("bus1 channel disconnected unexpectedly");
+                }
+            }
+        }
+
+        // bus2 has node 2
+        loop {
+            match bus2_rx.try_recv() {
+                Ok((from, frame)) => {
+                    for (idx, node) in nodes.iter_mut().enumerate() {
+                        if idx != 2 {
+                            continue; // only node 2 lives on bus2
+                        }
+                        if idx == from {
+                            continue;
+                        }
+                        node.router
+                            .rx_serialized_packet_to_queue(&frame)
+                            .expect("bus2: rx_serialized_packet_to_queue failed");
+                    }
+
+                    // Feed into relay from bus2 side
+                    relay
+                        .rx_serialized_from_side(bus2_side_id, &frame)
+                        .expect("bus2 -> relay failed");
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    panic!("bus2 channel disconnected unexpectedly");
+                }
+            }
+        }
+
+        // Let relay fan out whatever it has queued (both RX and TX).
+        relay
+            .process_all_queues_with_timeout(0)
+            .expect("relay process_all_queues_with_timeout failed");
+    }
+
+    /// Single-threaded stress test to profile router + relay performance.
     ///
     /// This is intentionally heavy; run it explicitly (e.g. with cargo-flamegraph).
     #[test]
     fn single_threaded_router_stress() {
-        // ---------- 1) Shared bus (no bus thread) ----------
+        // ---------- 1) Two buses + Relay ----------
         type BusMsg = (usize, Vec<u8>);
-        let (bus_tx, bus_rx) = mpsc::channel::<BusMsg>();
+
+        let (bus1_tx, bus1_rx) = mpsc::channel::<BusMsg>();
+        let (bus2_tx, bus2_rx) = mpsc::channel::<BusMsg>();
+
+        // Relay bridges bus1 <-> bus2.
+        let relay = Relay::new(zero_clock());
+
+        // Relay side for bus1: TX from relay -> bus1_rx
+        let relay_bus1_tx = bus1_tx.clone();
+        let bus1_side_id = relay.add_side("bus1", move |bytes: &[u8]| -> TelemetryResult<()> {
+            // from = usize::MAX so we never skip this in bus1 delivery
+            relay_bus1_tx
+                .send((usize::MAX, bytes.to_vec()))
+                .unwrap();
+            Ok(())
+        });
+
+        // Relay side for bus2: TX from relay -> bus2_rx
+        let relay_bus2_tx = bus2_tx.clone();
+        let bus2_side_id = relay.add_side("bus2", move |bytes: &[u8]| -> TelemetryResult<()> {
+            relay_bus2_tx
+                .send((usize::MAX, bytes.to_vec()))
+                .unwrap();
+            Ok(())
+        });
 
         // ---------- 2) Build nodes (same topology as threaded test) ----------
         //
-        // Node 0: "Radio Board" (radio_hits via Radio endpoint)
-        // Node 1: "Flight Controller Board" (sd_hits via SdCard endpoint)
-        // Node 2: "Power Board" (no local endpoints)
+        // Node 0: "Radio Board" (radio_hits via Radio endpoint) on bus1
+        // Node 1: "Flight Controller Board" (sd_hits via SdCard endpoint) on bus1
+        // Node 2: "Power Board" (no local endpoints) on bus2
         let mut nodes: Vec<SimNode> = Vec::new();
 
         for (idx, _name) in ["Radio Board", "Flight Controller Board", "Power Board"]
@@ -98,13 +198,19 @@ mod single_threaded_test {
 
             let clock = zero_clock();
 
-            // tx: push a copy of the wire bytes onto the bus with source id
-            let tx = {
-                let bus_tx = bus_tx.clone();
-                move |bytes: &[u8]| -> TelemetryResult<()> {
-                    bus_tx.send((idx, bytes.to_vec())).unwrap();
-                    Ok(())
-                }
+            // Choose which bus this node uses for TX.
+            let local_bus_tx = if idx <= 1 {
+                // nodes 0 and 1 on bus1
+                bus1_tx.clone()
+            } else {
+                // node 2 on bus2
+                bus2_tx.clone()
+            };
+
+            // tx: push a copy of the wire bytes onto the node's bus with source id
+            let tx = move |bytes: &[u8]| -> TelemetryResult<()> {
+                local_bus_tx.send((idx, bytes.to_vec())).unwrap();
+                Ok(())
             };
 
             let router = if handlers.is_empty() {
@@ -120,7 +226,7 @@ mod single_threaded_test {
             });
         }
 
-        // ---------- 3) Stress loop: single-threaded send + route + process ----------
+        // ---------- 3) Stress loop: single-threaded send + route + relay ----------
         //
         // Each iteration:
         //   A: GPS
@@ -139,7 +245,7 @@ mod single_threaded_test {
         let msg = "hello world!";
 
         for i in 0..ITERS {
-            // --- Sender A (radio board) ---
+            // --- Sender A (radio board, node 0 on bus1) ---
             {
                 let node = &mut nodes[0];
                 make_series(&mut gps_buf[..2], 10.0);
@@ -147,7 +253,7 @@ mod single_threaded_test {
                 node.router.tx(&pkt).unwrap();
             }
 
-            // --- Sender B (flight controller) ---
+            // --- Sender B (flight controller, node 1 on bus1) ---
             {
                 let node = &mut nodes[1];
 
@@ -162,7 +268,7 @@ mod single_threaded_test {
                 node.router.tx(&pkt2).unwrap();
             }
 
-            // --- Sender C (power board) ---
+            // --- Sender C (power board, node 2 on bus2) ---
             {
                 let node = &mut nodes[2];
 
@@ -175,7 +281,7 @@ mod single_threaded_test {
                 );
                 node.router.tx(&pkt1).unwrap();
 
-                // message as bytes
+                // message as string (TelemetryError)
                 let pkt2 = TelemetryPacket::from_str_slice(
                     DataType::TelemetryError,
                     msg,
@@ -186,25 +292,15 @@ mod single_threaded_test {
                 node.router.tx(&pkt2).unwrap();
             }
 
-            // --- Deliver all bus frames for this iteration ---
-            loop {
-                match bus_rx.try_recv() {
-                    Ok((from, frame)) => {
-                        for (idx, node) in nodes.iter_mut().enumerate() {
-                            if idx == from {
-                                continue; // no loopback
-                            }
-                            node.router
-                                .rx_serialized_packet_to_queue(&frame)
-                                .expect("rx_serialized_packet_to_queue failed");
-                        }
-                    }
-                    Err(TryRecvError::Empty) => break,
-                    Err(TryRecvError::Disconnected) => {
-                        panic!("bus channel disconnected unexpectedly");
-                    }
-                }
-            }
+            // --- Deliver all bus frames + relay for this iteration (one pass) ---
+            drain_buses_and_relay_once(
+                &mut nodes,
+                &bus1_rx,
+                &bus2_rx,
+                &relay,
+                bus1_side_id,
+                bus2_side_id,
+            );
 
             // --- Process all routers to completion (timeout = 0) ---
             for node in nodes.iter_mut() {
@@ -214,27 +310,17 @@ mod single_threaded_test {
             }
         }
 
-        // ---------- 4) Final drain just in case ----------
+        // ---------- 4) Final drain: repeat bus + relay + router passes ----------
         for _ in 0..10 {
-            // drain any leftover bus frames
-            loop {
-                match bus_rx.try_recv() {
-                    Ok((from, frame)) => {
-                        for (idx, node) in nodes.iter_mut().enumerate() {
-                            if idx == from {
-                                continue;
-                            }
-                            node.router
-                                .rx_serialized_packet_to_queue(&frame)
-                                .expect("rx_serialized_packet_to_queue failed in final drain");
-                        }
-                    }
-                    Err(TryRecvError::Empty) => break,
-                    Err(TryRecvError::Disconnected) => break,
-                }
-            }
+            drain_buses_and_relay_once(
+                &mut nodes,
+                &bus1_rx,
+                &bus2_rx,
+                &relay,
+                bus1_side_id,
+                bus2_side_id,
+            );
 
-            // and process routers
             for node in nodes.iter_mut() {
                 node.router
                     .process_all_queues_with_timeout(0)
@@ -255,7 +341,7 @@ mod single_threaded_test {
         let c_sd = power_board.sd_hits.load(Ordering::SeqCst);
 
         println!(
-            "single-threaded: A.radio_hits={}, B.sd_hits={}, C.radio_hits={}, C.sd_hits={}",
+            "single-threaded (with relay): A.radio_hits={}, B.sd_hits={}, C.radio_hits={}, C.sd_hits={}",
             a_radio, b_sd, c_radio, c_sd
         );
 
