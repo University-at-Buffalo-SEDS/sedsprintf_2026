@@ -43,7 +43,12 @@ void bus_init(SimBus * bus)
     bus->count = 0;
     bus->cap = 0;
     bus->t0_ms = host_now_ms(NULL); // zero point
+
+    // NEW
+    bus->relay = NULL;
+    bus->relay_side_id = 0;
 }
+
 
 void bus_free(SimBus * bus)
 {
@@ -83,19 +88,33 @@ SedsResult bus_send(SimBus * bus, const SimNode * from, const uint8_t * bytes, s
 {
     if (!bus || !bytes || !len) return SEDS_ERR;
 
-
     // Broadcast to all nodes except sender
     for (size_t i = 0; i < bus->count; ++i)
     {
         SimNode * n = bus->nodes[i];
         if (n == from) continue;
-        // node_rx takes the same recursive lock; safe to reenter
         node_rx(n, bytes, len);
     }
 
+    // NEW: forward into relay if this bus is linked to one
+    if (bus->relay)
+    {
+        // Treat this as "incoming from this side"
+        SedsResult r = seds_relay_rx_serialized_from_side(
+            bus->relay,
+            bus->relay_side_id,
+            bytes,
+            len
+        );
+        if (r != SEDS_OK)
+        {
+            fprintf(stderr, "bus_send: relay RX failed: %d\n", r);
+        }
+    }
 
     return SEDS_OK;
 }
+
 
 /* ===================== NODE ===================== */
 
