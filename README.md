@@ -12,12 +12,13 @@ found [here](https://github.com/University-at-Buffalo-SEDS/sedsprintf).
 After the initial rewrite, many improvements were made to the rust implementation including better safety, easier
 extension, and improved performance.
 This caused the C++ implementation to be rewritten to keep feature parity with the rust version.
-After about of month of this, we decided that we were no longer going to use the C++, and thus the project was archived
-and is no longer being maintained.
+After about of month of this, we decided that we were no longer going to use the C++ version, and thus the project was 
+archived and is no longer being maintained.
 With the Rust version being the sole implementation, we have continued to improve it and add new features like python
 bindings, packet compression, and a bitmap for endpoints to further reduce packet size.
 This library is now being used in multiple projects including embedded code on the rocket and on the rust based ground
-station.
+station. Sedsprintf_rs is now capable of acting as a new network, passing telemetry data to endpoints across hardware 
+and software networks (uart, can ethernet, etc.) and across differing platforms and protocols (tcp, udp, etc.).
 
 ---
 
