@@ -1,6 +1,25 @@
 # SEDSPRINTF_RS
 
-An implementation of the `sedsprintf` library in Rust.
+An implementation of the `sedsprintf` telemetry protocol in Rust.
+
+---
+
+## About
+
+This library started out as a rewrite of the original sedsprintf C library
+found [here](https://github.com/University-at-Buffalo-SEDS/sedsprintf).
+
+After the initial rewrite, many improvements were made to the rust implementation including better safety, easier
+extension, and improved performance.
+This caused the C++ implementation to be rewritten to keep feature parity with the rust version.
+After about of month of this, we decided that we were no longer going to use the C++, and thus the project was archived
+and is no longer being maintained.
+With the Rust version being the sole implementation, we have continued to improve it and add new features like python
+bindings, packet compression, and a bitmap for endpoints to further reduce packet size.
+This library is now being used in multiple projects including embedded code on the rocket and on the rust based ground
+station.
+
+---
 
 ## Overview
 
@@ -17,17 +36,20 @@ The core functions are as follows:
 - A function to handle local data endpoints (e.g. logging to console, writing to file, sending over radio, etc.)
   (Note: each local endpoint needs its own function)
 
-The library also provides helpers to convert the telemetry data into strings for logging purposes. the library also
-handles the serialization and deserialization of the telemetry data.
+Sedsprintf_rs also provides helpers to convert the telemetry data into strings for logging purposes.
+The library also handles the serialization and deserialization of the telemetry data.
 
-The library is platform-agnostic and can be used on any platform that supports Rust. The library is primarily designed
+Sedsprintf_rs is platform-agnostic and can be used on any platform that supports Rust. The library is primarily designed
 to be used in embedded systems and used by a C program, but can also be used in desktop applications and other rust
 codebases.
 
-This library also supports python bindings via pyo3. to use you need maturin installed to build the python package.
+Sedsprintf_rs also supports python bindings via pyo3. to use you need maturin installed to build the python package.
+
 The size of the header in a serialized packet is around 20 bytes (the size will change based on the total number of
 endpoints in your system and the length of the sender string), so a packet containing three floats is 32 bytes total.
 This small size makes it ideal for use in low bandwidth environments.
+
+---
 
 ## Building
 
@@ -76,7 +98,6 @@ target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE sedsprintf_rs::sedsprintf_rs
   NOTE: (ON EVERY SYSTEM THIS LIBRARY IS USED, THE CONFIG ENUMS MUST BE THE SAME OR UNDEFINED BEHAVIOR MAY OCCUR). So
   for most
   applications I would recommend making a fork and setting the config values you need for your application.
-
 
 ---
 
@@ -130,6 +151,7 @@ set(SEDSPRINTF_RS_DEVICE_IDENTIFIER "GS26" CACHE STRING "" FORCE)
 ```
 
 ### Manually via build.py
+
 ```bash
 # Host build
 ./build.py release device_id=GROUND_STATION
@@ -190,8 +212,6 @@ git submodule update --init --recursive
 ```
 
 Update using helper scripts:
-
-```
 
 The scripts:
 
