@@ -6,8 +6,7 @@
 //! - supports pretty printing (header + decoded values) for debugging/logging,
 //! - uses [`SmallPayload`] internally to keep small messages on the stack.
 
-use crate::config::{DEVICE_IDENTIFIER, MAX_PRECISION_IN_STRINGS};
-use crate::small_payload::SmallPayload;
+use crate::config::{StandardSmallPayload, DEVICE_IDENTIFIER, STRING_PRECISION};
 pub(crate) use crate::{
     config::{DataEndpoint, DataType}, data_type_size, get_data_type, get_info_type, message_meta,
     router::LeBytes,
@@ -18,6 +17,7 @@ use crate::{impl_data_as_prim, impl_from_prim_slices, impl_ledecode_auto};
 use alloc::{string::String, string::ToString, sync::Arc, vec::Vec};
 use core::any::TypeId;
 use core::fmt::{Formatter, Write};
+
 // ============================================================================
 // Constants
 // ============================================================================
@@ -31,10 +31,6 @@ const EPOCH_MS_THRESHOLD: u64 = 1_000_000_000_000; // clearly not an uptime coun
 
 /// Default starting capacity for human-readable strings.
 const DEFAULT_STRING_CAPACITY: usize = 96;
-
-// ---------------------------------------------------------------------------
-// Helper macros
-// --------------------------------------------------------------------------
 
 // ============================================================================
 // TelemetryPacket
@@ -70,7 +66,7 @@ pub struct TelemetryPacket {
     timestamp: u64,
 
     /// Raw payload bytes, stored via [`SmallPayload`] for small/large optimization.
-    payload: SmallPayload,
+    payload: StandardSmallPayload,
 }
 
 // ============================================================================
@@ -112,6 +108,7 @@ pub fn hash_bytes_u64(mut h: u64, bytes: &[u8]) -> u64 {
     }
     h
 }
+
 /// Validate the payload of a dynamic-length message.
 ///
 /// - For `String`: trims trailing NULs for validation and ensures UTF-8 (if non-empty).
@@ -155,6 +152,7 @@ fn validate_dynamic_len_and_content(ty: DataType, bytes: &[u8]) -> TelemetryResu
 // ============================================================================
 // Decode bytes trait
 // ============================================================================
+
 trait LeDecode: Sized {
     const WIDTH: usize;
     fn from_le(slice: &[u8]) -> Self;
@@ -239,7 +237,7 @@ impl TelemetryPacket {
             sender: sender.into(),
             endpoints: Arc::<[DataEndpoint]>::from(endpoints),
             timestamp,
-            payload: SmallPayload::new(&payload),
+            payload: StandardSmallPayload::new(&payload),
         })
     }
 
@@ -358,17 +356,20 @@ impl TelemetryPacket {
     pub fn data_type(&self) -> DataType {
         self.ty
     }
+
     /// Get the sender identifier.
     /// This is typically a device or subsystem name.
     #[inline]
     pub fn sender(&self) -> &str {
         &self.sender
     }
+
     /// Get the destination endpoints for this message.
     #[inline]
     pub fn endpoints(&self) -> &[DataEndpoint] {
         &self.endpoints
     }
+
     /// Get the timestamp in milliseconds.
     #[inline]
     pub fn timestamp(&self) -> u64 {
@@ -380,6 +381,7 @@ impl TelemetryPacket {
     pub fn data_size(&self) -> usize {
         self.data_size
     }
+
     /// Get the raw payload bytes.
     #[inline]
     pub fn payload(&self) -> &[u8] {
@@ -438,7 +440,7 @@ impl TelemetryPacket {
     ///
     /// - Uses `LeBytes::from_le_slice` with fixed-width chunks.
     /// - Floats (`f32`/`f64`) are formatted with a fixed precision
-    ///   [`MAX_PRECISION_IN_STRINGS`].
+    ///   [`STRING_PRECISION`].
     #[inline]
     fn data_to_string<T>(&self, s: &mut String)
     where
@@ -459,7 +461,7 @@ impl TelemetryPacket {
             if TypeId::of::<T>() == TypeId::of::<f32>() || TypeId::of::<T>() == TypeId::of::<f64>()
             {
                 // `{:.*}` = "use this precision argument"
-                let _ = write!(s, "{:.*}", MAX_PRECISION_IN_STRINGS, v);
+                let _ = write!(s, "{:.*}", STRING_PRECISION, v);
             } else {
                 let _ = write!(s, "{v}");
             }
