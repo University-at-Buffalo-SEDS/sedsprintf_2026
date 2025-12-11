@@ -416,7 +416,7 @@ pub fn peek_envelope(buf: &[u8]) -> TelemetryResult<TelemetryEnvelope> {
     let eps: Arc<[DataEndpoint]> = Arc::from(&ep_buf[..ep_len]);
 
     let sender_wire_bytes = r.read_bytes(sender_wire_len)?;
-    let sender_str: alloc::string::String = if sender_is_compressed {
+    let sender_str: String = if sender_is_compressed {
         let decompressed = payload_compression::decompress(sender_wire_bytes, slen)?;
         core::str::from_utf8(&decompressed)
             .map_err(|_| TelemetryError::Deserialize("sender not UTF-8 after decompress"))?

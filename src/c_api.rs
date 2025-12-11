@@ -629,7 +629,7 @@ pub extern "C" fn seds_relay_add_side_serialized(
         match from_utf8(bytes) {
             Ok(s) => {
                 // Leak into 'static so we can store &str in Relay without copying.
-                let owned = alloc::string::String::from(s);
+                let owned = String::from(s);
                 Box::leak(owned.into_boxed_str())
             }
             Err(_) => "",
@@ -684,7 +684,7 @@ pub extern "C" fn seds_relay_add_side_packet(
         let bytes = unsafe { slice::from_raw_parts(name as *const u8, name_len) };
         match from_utf8(bytes) {
             Ok(s) => {
-                let owned = alloc::string::String::from(s);
+                let owned = String::from(s);
                 Box::leak(owned.into_boxed_str())
             }
             Err(_) => "",
