@@ -1,32 +1,30 @@
-//! Small, inline-optimized payload storage.
+//! Small, inline-optimized payload storage with configurable inline capacity.
 //!
-//! This module provides [`SmallPayload`], a tiny enum that stores short
+//! This module provides [`GenericSmallPayload`], a tiny enum that stores short
 //! payloads inline on the stack and transparently spills to the heap when
-//! they exceed [`MAX_STACK_PAYLOAD_SIZE`].
+//! they exceed the inline capacity `INLINE`.
 //!
 //! It derefs to `&[u8]`, so you can pass it anywhere a byte slice is expected.
 
-use crate::config::MAX_STACK_PAYLOAD_SIZE;
 use alloc::sync::Arc;
-use core::{fmt, ops::Deref};
+use core::{fmt, mem::MaybeUninit, ops::Deref, ptr};
 
 /// Compact payload container with inline storage for small byte buffers.
 ///
-/// - If `len <= MAX_STACK_PAYLOAD_SIZE`, the data is stored directly in the
-///   `Inline` variant.
+/// - If `len <= INLINE`, the data is stored directly in the `Inline` variant.
 /// - Otherwise, the data is stored in an `Arc<[u8]>` in the `Heap` variant.
 ///
-/// Use [`SmallPayload::new`] to construct instances; prefer [`SmallPayload::as_slice`]
-/// or `Deref` to treat it as `&[u8]`.
+/// Use [`SmallPayload::new`] to construct instances; prefer
+/// [`SmallPayload::as_slice`] or `Deref` to treat it as `&[u8]`.
 #[derive(Clone)]
-pub enum SmallPayload {
+pub enum SmallPayload<const INLINE: usize> {
     /// Inline storage for small payloads.
     ///
     /// - `len` is the number of valid bytes stored in `buf`.
-    /// - `buf` is always `MAX_STACK_PAYLOAD_SIZE` bytes long.
+    /// - `buf` has capacity `INLINE` bytes, but we only initialize the first `len`.
     Inline {
         len: u8,
-        buf: [u8; MAX_STACK_PAYLOAD_SIZE],
+        buf: InlineBuf<INLINE>,
     },
 
     /// Heap-backed payload for larger data.
@@ -35,25 +33,85 @@ pub enum SmallPayload {
     Heap(Arc<[u8]>),
 }
 
+/// Helper type wrapping the uninitialized inline buffer.
+#[derive(Clone)]
+pub struct InlineBuf<const N: usize> {
+    buf: [MaybeUninit<u8>; N],
+}
+
+impl<const N: usize> InlineBuf<N> {
+    /// Create an inline buffer from a slice.
+    ///
+    /// # Panics
+    /// Panics if `data.len() > N` or `data.len() > u8::MAX`.
+    #[inline]
+    pub fn from_slice(data: &[u8]) -> (Self, u8) {
+        assert!(
+            data.len() <= N,
+            "InlineBuf capacity exceeded: data.len()={}, capacity={}",
+            data.len(),
+            N
+        );
+        assert!(
+            data.len() <= u8::MAX as usize,
+            "InlineBuf len does not fit in u8: {}",
+            data.len()
+        );
+
+        // SAFETY: `[MaybeUninit<u8>; N]` is allowed to be left uninitialized.
+        let mut buf: [MaybeUninit<u8>; N] =
+            unsafe { MaybeUninit::uninit().assume_init() };
+
+        if data.len() != 0 {
+            // SAFETY:
+            // - `data.as_ptr()` is valid for `data.len()` reads.
+            // - `buf.as_mut_ptr()` is valid for `N` writes, and we only
+            //   write `data.len()` bytes (≤ N).
+            // - The regions do not overlap.
+            unsafe {
+                ptr::copy_nonoverlapping(
+                    data.as_ptr(),
+                    buf.as_mut_ptr() as *mut u8,
+                    data.len(),
+                );
+            }
+        }
+
+        (InlineBuf { buf }, data.len() as u8)
+    }
+
+    /// View the first `len` bytes as an initialized slice.
+    ///
+    /// # Safety
+    /// This relies on the invariant that the first `len` bytes were
+    /// initialized by `from_slice`.
+    #[inline]
+    pub fn as_slice(&self, len: u8) -> &[u8] {
+        let len = len as usize;
+        // SAFETY:
+        // - `self.buf.as_ptr()` points to `N` contiguous `MaybeUninit<u8>`.
+        // - We guarantee the first `len` elements have been fully initialized.
+        unsafe {
+            core::slice::from_raw_parts(self.buf.as_ptr() as *const u8, len)
+        }
+    }
+}
+
 // ===========================================================================
 // Core API
 // ===========================================================================
 
-impl SmallPayload {
+impl<const INLINE: usize> SmallPayload<INLINE> {
     /// Construct a new [`SmallPayload`] from a byte slice.
     ///
-    /// - If `data.len() <= MAX_STACK_PAYLOAD_SIZE`, the bytes are copied into
-    ///   inline storage.
+    /// - If `data.len() <= INLINE`, the bytes are copied into inline storage
+    ///   without zeroing the entire buffer.
     /// - Otherwise, the bytes are stored in an `Arc<[u8]>`.
     #[inline]
     pub fn new(data: &[u8]) -> Self {
-        if data.len() <= MAX_STACK_PAYLOAD_SIZE {
-            let mut buf = [0u8; MAX_STACK_PAYLOAD_SIZE];
-            buf[..data.len()].copy_from_slice(data);
-            Self::Inline {
-                len: data.len() as u8,
-                buf,
-            }
+        if data.len() <= INLINE {
+            let (buf, len) = InlineBuf::<INLINE>::from_slice(data);
+            Self::Inline { len, buf }
         } else {
             Self::Heap(Arc::from(data))
         }
@@ -63,7 +121,7 @@ impl SmallPayload {
     #[inline]
     pub fn as_slice(&self) -> &[u8] {
         match self {
-            SmallPayload::Inline { len, buf } => &buf[..*len as usize],
+            SmallPayload::Inline { len, buf } => buf.as_slice(*len),
             SmallPayload::Heap(arc) => arc,
         }
     }
@@ -76,7 +134,10 @@ impl SmallPayload {
     #[allow(dead_code)]
     pub fn to_arc(&self) -> Arc<[u8]> {
         match self {
-            SmallPayload::Inline { len, buf } => Arc::from(&buf[..*len as usize]),
+            SmallPayload::Inline { len, buf } => {
+                // We know only the first `len` bytes are initialized.
+                Arc::from(buf.as_slice(*len))
+            }
             SmallPayload::Heap(arc) => arc.clone(),
         }
     }
@@ -102,19 +163,25 @@ impl SmallPayload {
 // Trait impls
 // ===========================================================================
 
-impl fmt::Debug for SmallPayload {
+impl<const INLINE: usize> fmt::Debug for SmallPayload<INLINE> {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Inline { len, .. } => write!(f, "SmallPayload::Inline({} bytes)", len),
-            Self::Heap(a) => write!(f, "SmallPayload::Heap({} bytes)", a.len()),
+            Self::Inline { len, .. } => {
+                write!(f, "SmallPayload::Inline({} bytes)", len)
+            }
+            Self::Heap(a) => {
+                write!(f, "SmallPayload::Heap({} bytes)", a.len())
+            }
         }
     }
 }
 
-impl Deref for SmallPayload {
+impl<const INLINE: usize> Deref for SmallPayload<INLINE> {
     type Target = [u8];
 
     /// Deref to the underlying payload slice.
+    #[inline]
     fn deref(&self) -> &[u8] {
         self.as_slice()
     }

@@ -1,4 +1,4 @@
-use crate::config::{get_message_meta, MAX_STATIC_HEX_LENGTH, MAX_STATIC_STRING_LENGTH};
+use crate::config::{get_message_meta, STATIC_HEX_LENGTH, STATIC_STRING_LENGTH};
 use crate::get_needed_message_size;
 use crate::router::{Clock, EndpointHandler};
 use crate::telemetry_packet::{DataEndpoint, DataType, TelemetryPacket};
@@ -31,8 +31,8 @@ fn test_payload_len_for(ty: DataType) -> usize {
         crate::MessageElementCount::Dynamic => {
             // Pick reasonable defaults per data kind
             match get_data_type(ty) {
-                MessageDataType::String => MAX_STATIC_STRING_LENGTH, // router error-path expects this
-                MessageDataType::Binary => MAX_STATIC_HEX_LENGTH,    // any bytes; size-bounded
+                MessageDataType::String => STATIC_STRING_LENGTH, // router error-path expects this
+                MessageDataType::Binary => STATIC_HEX_LENGTH,    // any bytes; size-bounded
                 // numeric/bool: must be multiple of element width → use “schema element count”
                 other => {
                     let w = match other {
@@ -1133,7 +1133,7 @@ mod tests_extra {
             &[DataEndpoint::SdCard, DataEndpoint::Radio],
             &*sender,
             ts,
-            std::sync::Arc::<[u8]>::from(payload),
+            Arc::<[u8]>::from(payload),
         )
         .unwrap();
 

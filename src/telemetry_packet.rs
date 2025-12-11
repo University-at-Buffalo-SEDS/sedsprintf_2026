@@ -6,8 +6,7 @@
 //! - supports pretty printing (header + decoded values) for debugging/logging,
 //! - uses [`SmallPayload`] internally to keep small messages on the stack.
 
-use crate::config::{DEVICE_IDENTIFIER, MAX_PRECISION_IN_STRINGS};
-use crate::small_payload::SmallPayload;
+use crate::config::{StandardSmallPayload, DEVICE_IDENTIFIER, STRING_PRECISION};
 pub(crate) use crate::{
     config::{DataEndpoint, DataType}, data_type_size, get_data_type, get_info_type, message_meta,
     router::LeBytes,
@@ -67,7 +66,7 @@ pub struct TelemetryPacket {
     timestamp: u64,
 
     /// Raw payload bytes, stored via [`SmallPayload`] for small/large optimization.
-    payload: SmallPayload,
+    payload: StandardSmallPayload,
 }
 
 // ============================================================================
@@ -238,7 +237,7 @@ impl TelemetryPacket {
             sender: sender.into(),
             endpoints: Arc::<[DataEndpoint]>::from(endpoints),
             timestamp,
-            payload: SmallPayload::new(&payload),
+            payload: StandardSmallPayload::new(&payload),
         })
     }
 
@@ -441,7 +440,7 @@ impl TelemetryPacket {
     ///
     /// - Uses `LeBytes::from_le_slice` with fixed-width chunks.
     /// - Floats (`f32`/`f64`) are formatted with a fixed precision
-    ///   [`MAX_PRECISION_IN_STRINGS`].
+    ///   [`STRING_PRECISION`].
     #[inline]
     fn data_to_string<T>(&self, s: &mut String)
     where
@@ -462,7 +461,7 @@ impl TelemetryPacket {
             if TypeId::of::<T>() == TypeId::of::<f32>() || TypeId::of::<T>() == TypeId::of::<f64>()
             {
                 // `{:.*}` = "use this precision argument"
-                let _ = write!(s, "{:.*}", MAX_PRECISION_IN_STRINGS, v);
+                let _ = write!(s, "{:.*}", STRING_PRECISION, v);
             } else {
                 let _ = write!(s, "{v}");
             }

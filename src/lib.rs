@@ -34,7 +34,7 @@ use std::io::Error;
 
 use crate::config::{
     get_message_data_type, get_message_info_types, get_message_meta, DataEndpoint, DataType,
-    MAX_STATIC_HEX_LENGTH, MAX_STATIC_STRING_LENGTH,
+    STATIC_HEX_LENGTH, STATIC_STRING_LENGTH,
 };
 use crate::macros::{ReprI32Enum, ReprU32Enum};
 use alloc::string::ToString;
@@ -310,8 +310,8 @@ pub const fn data_type_size(dt: MessageDataType) -> usize {
         MessageDataType::Int64 => size_of::<i64>(),
         MessageDataType::Int128 => size_of::<i128>(),
         MessageDataType::Bool => size_of::<bool>(),
-        MessageDataType::String => MAX_STATIC_STRING_LENGTH,
-        MessageDataType::Binary => MAX_STATIC_HEX_LENGTH,
+        MessageDataType::String => STATIC_STRING_LENGTH,
+        MessageDataType::Binary => STATIC_HEX_LENGTH,
         MessageDataType::NoData => 0,
     }
 }
