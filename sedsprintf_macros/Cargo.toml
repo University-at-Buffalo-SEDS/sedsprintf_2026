@@ -1,6 +1,6 @@
 [package]
 name = "sedsprintf_macros"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 
 [lib]
@@ -9,4 +9,4 @@ proc-macro = true
 [dependencies]
 syn = "2"
 quote = "1"
-proc-macro2 = "1.0.103"
+proc-macro2 = "1"
