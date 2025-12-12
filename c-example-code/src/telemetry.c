@@ -85,6 +85,7 @@ SedsResult init_telemetry_router(void)
     };
 
     SedsRouter * r = seds_router_new(
+        Seds_RM_Sink,
         tx_send,
         NULL, /* tx_user */
         host_now_ms, /* clock */

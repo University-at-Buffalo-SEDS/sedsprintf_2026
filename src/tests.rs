@@ -114,6 +114,7 @@ mod tests {
     //! Basic smoke tests for packet roundtrip, string formatting, and simple
     //! router send/receive paths.
 
+    use crate::router::RouterMode;
     use crate::tests::get_sd_card_handler;
     use crate::tests::timeout_tests::StepClock;
     use crate::{
@@ -188,7 +189,7 @@ mod tests {
     /// local handler decoding f32 payload.
     #[test]
     fn router_sends_and_receives() {
-        use crate::router::{BoardConfig, Router};
+        use crate::router::{Router, RouterConfig};
 
         // capture spaces
         let tx_seen: Arc<Mutex<Option<TelemetryPacket>>> = Arc::new(Mutex::new(None));
@@ -209,7 +210,8 @@ mod tests {
 
         let router = Router::new(
             Some(transmit),
-            BoardConfig::new(vec![sd_handler]),
+            RouterMode::Sink,
+            RouterConfig::new(vec![sd_handler]),
             box_clock,
         );
 
@@ -276,7 +278,12 @@ mod tests {
         let box_clock_tx = StepClock::new_default_box();
         let box_clock_rx = StepClock::new_default_box();
 
-        let tx_router = Router::new(Some(tx_fn), Default::default(), box_clock_tx);
+        let tx_router = Router::new(
+            Some(tx_fn),
+            RouterMode::Sink,
+            Default::default(),
+            box_clock_tx,
+        );
 
         // --- Set up an RX router with a local SD handler that decodes f32 payloads ---
         let seen: Arc<Mutex<Option<(DataType, Vec<f32>)>>> = Arc::new(Mutex::new(None));
@@ -289,7 +296,8 @@ mod tests {
 
         let rx_router = Router::new(
             Some(tx_handler),
-            crate::router::BoardConfig::new(vec![sd_handler]),
+            RouterMode::Sink,
+            crate::router::RouterConfig::new(vec![sd_handler]),
             box_clock_rx,
         );
 
@@ -325,7 +333,7 @@ mod tests {
         let (bus, tx_fn) = TestBus::new();
         let box_clock = StepClock::new_default_box();
 
-        let router = Router::new(Some(tx_fn), Default::default(), box_clock);
+        let router = Router::new(Some(tx_fn), RouterMode::Sink, Default::default(), box_clock);
 
         // Enqueue for transmit
         let data = [10.0_f32, 10.25, 10.5];
@@ -334,7 +342,7 @@ mod tests {
         let data = [10.0_f32, 10.25];
         router.log_queue(DataType::BatteryStatus, &data).unwrap();
 
-        let data = [10.0_f32, 10.25, 10.5];
+        let data = [10.0_f32, 10.25, 10.2];
         router.log_queue(DataType::GpsData, &data).unwrap();
         // Flush -> frame appears on the "bus"
         router.process_tx_queue().unwrap();
@@ -464,8 +472,8 @@ mod handler_failure_tests {
 
     use super::*;
     use crate::config::DEVICE_IDENTIFIER;
-    use crate::router::EndpointHandler;
-    use crate::router::{BoardConfig, Router};
+    use crate::router::{EndpointHandler, RouterMode};
+    use crate::router::{Router, RouterConfig};
     use crate::telemetry_packet::DataType;
     use crate::tests::timeout_tests::StepClock;
     use crate::{TelemetryError, MAX_VALUE_DATA_TYPE};
@@ -528,7 +536,8 @@ mod handler_failure_tests {
 
         let router = Router::new::<fn(&[u8]) -> crate::TelemetryResult<()>>(
             None,
-            BoardConfig::new(vec![failing, capturing]),
+            RouterMode::Sink,
+            RouterConfig::new(vec![failing, capturing]),
             box_clock,
         );
 
@@ -541,7 +550,7 @@ mod handler_failure_tests {
         )
         .unwrap();
 
-        handle_errors(router.tx(&pkt));
+        handle_errors(router.tx(pkt));
 
         // The capturing handler should have seen the original packet and then the error packet.
         assert!(
@@ -592,7 +601,12 @@ mod handler_failure_tests {
             |_bytes: &[u8]| -> crate::TelemetryResult<()> { Err(TelemetryError::Io("boom")) };
         let box_clock = StepClock::new_default_box();
 
-        let router = Router::new(Some(tx_fail), BoardConfig::new(vec![capturing]), box_clock);
+        let router = Router::new(
+            Some(tx_fail),
+            RouterMode::Sink,
+            RouterConfig::new(vec![capturing]),
+            box_clock,
+        );
 
         let pkt = TelemetryPacket::new(
             ty,
@@ -604,7 +618,7 @@ mod handler_failure_tests {
         )
         .unwrap();
 
-        handle_errors(router.tx(&pkt));
+        handle_errors(router.tx(pkt));
 
         assert!(
             saw_error.load(Ordering::SeqCst) >= 1,
@@ -632,10 +646,10 @@ mod timeout_tests {
     //! including u64 wraparound handling.
 
     use crate::config::DataEndpoint;
-    use crate::router::EndpointHandler;
+    use crate::router::{EndpointHandler, RouterMode};
     use crate::tests::{get_handler, UnixClock};
     use crate::{
-        router::BoardConfig, router::Clock, router::Router, telemetry_packet::DataType,
+        router::Clock, router::Router, router::RouterConfig, telemetry_packet::DataType,
         telemetry_packet::TelemetryPacket, TelemetryResult,
     };
     use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -716,7 +730,12 @@ mod timeout_tests {
 
         let box_clock = StepClock::new_default_box();
 
-        let r = Router::new(Some(tx), BoardConfig::new(vec![handler]), box_clock);
+        let r = Router::new(
+            Some(tx),
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
+            box_clock,
+        );
 
         // Enqueue TX (3) – make each payload slightly different to avoid dedup.
         for i in 0..3usize {
@@ -761,7 +780,8 @@ mod timeout_tests {
         // iteration in a single call depending on timing.
         let r = Router::new(
             Some(tx),
-            BoardConfig::new(vec![handler]),
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
             Box::new(|| UnixClock.now_ms()),
         );
 
@@ -820,7 +840,12 @@ mod timeout_tests {
         let handler = get_handler(rx_count_c);
         let clock = StepClock::new_box(0, 5);
 
-        let r = Router::new(Some(tx), BoardConfig::new(vec![handler]), clock);
+        let r = Router::new(
+            Some(tx),
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
+            clock,
+        );
 
         // Seed work in both queues – make each item unique to avoid dedup.
         for i in 0..5u64 {
@@ -872,7 +897,12 @@ mod timeout_tests {
         let handler = get_handler(rx_count_c);
         let start = u64::MAX - 1;
         let clock = StepClock::new_box(start, 2);
-        let r = Router::new(Some(tx), BoardConfig::new(vec![handler]), clock);
+        let r = Router::new(
+            Some(tx),
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
+            clock,
+        );
 
         // One TX and one RX (RX is only-local to avoid creating extra TX on receive)
         r.log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0])
@@ -908,9 +938,10 @@ mod tests_extra {
     #![cfg(test)]
 
     use crate::config::DataEndpoint;
+    use crate::router::RouterMode;
     use crate::tests::test_payload_len_for;
     use crate::{
-        config::DataType, router::{BoardConfig, Clock, EndpointHandler, Router}, serialize,
+        config::DataType, router::{Clock, EndpointHandler, Router, RouterConfig}, serialize,
         telemetry_packet::TelemetryPacket,
         TelemetryError,
         TelemetryErrorCode,
@@ -1285,7 +1316,12 @@ mod tests_extra {
             },
         );
 
-        let r = Router::new(Some(tx), BoardConfig::new(vec![handler]), zero_clock());
+        let r = Router::new(
+            Some(tx),
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
+            zero_clock(),
+        );
 
         // Enqueue one TX and one RX
         let pkt_tx = TelemetryPacket::from_f32_slice(
@@ -1347,7 +1383,8 @@ mod tests_extra {
         // Router with no TX (we only care about local handler invocation count).
         let r = Router::new::<fn(&[u8]) -> TelemetryResult<()>>(
             None,
-            BoardConfig::new(vec![failing]),
+            RouterMode::Sink,
+            RouterConfig::new(vec![failing]),
             zero_clock(),
         );
 
@@ -1361,7 +1398,7 @@ mod tests_extra {
         .unwrap();
 
         // Sending should surface a HandlerError after all retries.
-        let res = r.tx(&pkt);
+        let res = r.tx(pkt);
         match res {
             Err(TelemetryError::HandlerError(_)) => {}
             other => panic!("expected HandlerError after retries, got {other:?}"),
@@ -1468,7 +1505,8 @@ mod tests_extra {
 
         let r = Router::new(
             Some(failing_tx),
-            BoardConfig::new(vec![capturing]),
+            RouterMode::Sink,
+            RouterConfig::new(vec![capturing]),
             zero_clock(),
         );
 
@@ -1481,7 +1519,7 @@ mod tests_extra {
         )
         .unwrap();
 
-        let res = r.tx(&pkt);
+        let res = r.tx(pkt);
         match res {
             Err(TelemetryError::HandlerError(_)) => {} // TX path wraps as HandlerError
             other => panic!("expected HandlerError from TX failure, got {other:?}"),
@@ -1508,10 +1546,11 @@ mod tests_more {
     #![cfg(test)]
 
     use crate::config::get_message_meta;
+    use crate::router::RouterMode;
     use crate::tests::UnixClock;
     use crate::{
         config::{DataEndpoint, DataType}, get_data_type, get_needed_message_size, message_meta,
-        router::{BoardConfig, Clock, EndpointHandler, Router}, serialize, telemetry_packet::TelemetryPacket,
+        router::{Clock, EndpointHandler, Router, RouterConfig}, serialize, telemetry_packet::TelemetryPacket,
         MessageDataType,
         MessageElementCount, TelemetryError, TelemetryErrorCode,
         TelemetryResult,
@@ -1651,7 +1690,8 @@ mod tests_more {
 
         let r = Router::new::<fn(&[u8]) -> TelemetryResult<()>>(
             None,
-            BoardConfig::new(vec![handler]),
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
             zero_clock(),
         );
         r.rx_serialized(&wire).unwrap();
@@ -1688,7 +1728,8 @@ mod tests_more {
 
         let r = Router::new::<fn(&[u8]) -> TelemetryResult<()>>(
             None,
-            BoardConfig::new(vec![packet_h, serialized_h]),
+            RouterMode::Sink,
+            RouterConfig::new(vec![packet_h, serialized_h]),
             zero_clock(),
         );
 
@@ -1719,7 +1760,12 @@ mod tests_more {
             },
         );
 
-        let r = Router::new(Some(tx), BoardConfig::new(vec![handler]), zero_clock());
+        let r = Router::new(
+            Some(tx),
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
+            zero_clock(),
+        );
         let pkt = TelemetryPacket::from_f32_slice(
             DataType::GpsData,
             &[1.0, 2.0, 3.0],
@@ -1727,7 +1773,7 @@ mod tests_more {
             0,
         )
         .unwrap();
-        r.tx(&pkt).unwrap();
+        r.tx(pkt).unwrap();
 
         assert_eq!(tx_called.load(Ordering::SeqCst), 0);
         assert_eq!(hits.load(Ordering::SeqCst), 1);
@@ -1746,7 +1792,8 @@ mod tests_more {
 
         let r = Router::new::<fn(&[u8]) -> TelemetryResult<()>>(
             None,
-            BoardConfig::new(vec![handler]),
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
             zero_clock(),
         );
         let pkt = TelemetryPacket::from_f32_slice(
@@ -1782,7 +1829,8 @@ mod tests_more {
 
         let r = Router::new(
             Some(failing_tx),
-            BoardConfig::new(vec![handler]),
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
             zero_clock(),
         );
         let pkt = TelemetryPacket::from_f32_slice(
@@ -1792,7 +1840,7 @@ mod tests_more {
             1,
         )
         .unwrap();
-        let _ = r.tx(&pkt);
+        let _ = r.tx(pkt);
 
         let s = captured.lock().unwrap().clone();
         assert!(!s.is_empty());
@@ -1909,7 +1957,7 @@ mod tests_more {
     #[test]
     fn process_all_queues_timeout_zero_handles_large_queues() {
         use crate::config::{DataEndpoint, DataType};
-        use crate::router::{BoardConfig, Router};
+        use crate::router::{Router, RouterConfig};
         use crate::telemetry_packet::TelemetryPacket;
         use std::sync::Arc;
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1930,7 +1978,8 @@ mod tests_more {
 
         let router = Router::new(
             Some(tx),
-            BoardConfig::new(vec![handler]),
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
             Box::new(|| UnixClock.now_ms()),
         );
 
@@ -1971,9 +2020,10 @@ mod concurrency_tests {
     //! Concurrency-focused tests that exercise Router’s thread-safety
     //! guarantees for logging, receiving, and processing.
 
+    use crate::router::RouterMode;
     use crate::{
         config::{DataEndpoint, DataType},
-        router::{BoardConfig, Clock, EndpointHandler, Router},
+        router::{Clock, EndpointHandler, Router, RouterConfig},
         serialize,
         telemetry_packet::TelemetryPacket,
         TelemetryResult,
@@ -2023,7 +2073,8 @@ mod concurrency_tests {
 
         let router = Router::new::<fn(&[u8]) -> TelemetryResult<()>>(
             None,
-            BoardConfig::new(vec![handler]),
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
             zero_clock(),
         );
         let r = Arc::new(router);
@@ -2086,7 +2137,8 @@ mod concurrency_tests {
 
         let router = Router::new::<fn(&[u8]) -> TelemetryResult<()>>(
             None,
-            BoardConfig::new(vec![handler]),
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
             zero_clock(),
         );
         let r = Arc::new(router);
@@ -2158,7 +2210,12 @@ mod concurrency_tests {
         );
 
         // Shared router: TX + one local endpoint.
-        let router = Router::new(Some(tx), BoardConfig::new(vec![handler]), zero_clock());
+        let router = Router::new(
+            Some(tx),
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
+            zero_clock(),
+        );
         let r = Arc::new(router);
 
         // ---------------- Logger thread ----------------
@@ -2224,7 +2281,12 @@ mod concurrency_tests {
             },
         );
 
-        let router = Router::new(Some(tx), BoardConfig::new(vec![handler]), zero_clock());
+        let router = Router::new(
+            Some(tx),
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
+            zero_clock(),
+        );
         let r = Arc::new(router);
 
         // ---------- Logger thread ----------
@@ -2614,7 +2676,7 @@ mod dedupe_tests {
 
     use crate::config::{DataEndpoint, DataType};
     use crate::relay::Relay;
-    use crate::router::{BoardConfig, Clock, EndpointHandler, Router};
+    use crate::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
     use crate::tests::timeout_tests::StepClock;
     use crate::{serialize, telemetry_packet::TelemetryPacket, TelemetryResult};
 
@@ -2648,7 +2710,8 @@ mod dedupe_tests {
         // Router with no TX; only RX + local fan-out.
         let r = Router::new::<fn(&[u8]) -> TelemetryResult<()>>(
             None,
-            BoardConfig::new(vec![handler]),
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
             zero_clock(),
         );
 
@@ -2693,7 +2756,8 @@ mod dedupe_tests {
         let clock = StepClock::new_box(0, 1_000);
         let r = Router::new::<fn(&[u8]) -> TelemetryResult<()>>(
             None,
-            BoardConfig::new(vec![handler]),
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
             clock,
         );
 
@@ -2735,7 +2799,8 @@ mod dedupe_tests {
 
         let r = Router::new::<fn(&[u8]) -> TelemetryResult<()>>(
             None,
-            BoardConfig::new(vec![handler]),
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
             zero_clock(),
         );
 
@@ -2900,4 +2965,157 @@ mod dedupe_tests {
             "relay must not dedupe different frames from the same side"
         );
     }
+}
+
+
+#[cfg(test)]
+mod router_tests{
+    // -------------------------------------------------------------------------
+// New router functionality tests
+// -------------------------------------------------------------------------
+
+    use std::sync::{Arc, Mutex};
+    use crate::config::{DataEndpoint, DataType};
+    use crate::router::{EndpointHandler, Router, RouterMode};
+    use crate::telemetry_packet::TelemetryPacket;
+    use crate::{serialize, TelemetryResult};
+    use crate::tests::timeout_tests::StepClock;
+
+    /// In `Relay` mode, receiving a packet that includes at least one
+/// non-local endpoint should cause the router to re-transmit (re-broadcast)
+/// the packet.
+#[test]
+fn relay_mode_retransmits_when_remote_endpoint_present() {
+    use crate::router::RouterConfig;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let tx_calls = Arc::new(AtomicUsize::new(0));
+    let tx_calls_c = tx_calls.clone();
+    let transmit = move |_bytes: &[u8]| -> TelemetryResult<()> {
+        tx_calls_c.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    };
+
+    // Local handler on SD_CARD so the router considers SD_CARD "local".
+    let local_calls = Arc::new(AtomicUsize::new(0));
+    let local_calls_c = local_calls.clone();
+    let sd_handler = EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt| {
+        local_calls_c.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    });
+
+    let router = Router::new(
+        Some(transmit),
+        RouterMode::Relay,
+        RouterConfig::new(vec![sd_handler]),
+        StepClock::new_default_box(),
+    );
+
+    // Include one local + one remote endpoint.
+    let endpoints = &[DataEndpoint::SdCard, DataEndpoint::Radio];
+    let pkt =
+        TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], endpoints, 0).unwrap();
+
+    router.rx(&pkt).unwrap();
+
+    // Local handler should fire once.
+    assert_eq!(local_calls.load(Ordering::SeqCst), 1);
+    // Relay should transmit at least once.
+    assert_eq!(tx_calls.load(Ordering::SeqCst), 1);
+}
+
+/// In `Sink` mode, receiving a packet should never re-transmit.
+#[test]
+fn sink_mode_never_retransmits_on_receive() {
+    use crate::router::RouterConfig;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let tx_calls = Arc::new(AtomicUsize::new(0));
+    let tx_calls_c = tx_calls.clone();
+    let transmit = move |_bytes: &[u8]| -> TelemetryResult<()> {
+        tx_calls_c.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    };
+
+    let router = Router::new(
+        Some(transmit),
+        RouterMode::Sink,
+        RouterConfig::new(vec![EndpointHandler::new_packet_handler(
+            DataEndpoint::SdCard,
+            |_pkt| Ok(()),
+        )]),
+        StepClock::new_default_box(),
+    );
+
+    let endpoints = &[DataEndpoint::SdCard, DataEndpoint::Radio];
+    let pkt =
+        TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], endpoints, 0).unwrap();
+
+    router.rx(&pkt).unwrap();
+
+    assert_eq!(tx_calls.load(Ordering::SeqCst), 0);
+}
+
+/// Receiving the exact same serialized packet twice should be deduped
+/// and only delivered to local handlers once.
+#[test]
+fn receive_dedupes_identical_serialized_frames() {
+    use crate::router::RouterConfig;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let hits = Arc::new(AtomicUsize::new(0));
+    let hits_c = hits.clone();
+    let sd_handler = EndpointHandler::new_serialized_handler(DataEndpoint::SdCard, move |_b| {
+        hits_c.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    });
+
+    let router = Router::new(
+        None::<fn(&[u8]) -> TelemetryResult<()>>,
+        RouterMode::Sink,
+        RouterConfig::new(vec![sd_handler]),
+        StepClock::new_default_box(),
+    );
+
+    let endpoints = &[DataEndpoint::SdCard];
+    let pkt =
+        TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], endpoints, 0).unwrap();
+    let bytes = serialize::serialize_packet(&pkt);
+
+    router.rx_serialized(&bytes).unwrap();
+    router.rx_serialized(&bytes).unwrap();
+
+    assert_eq!(hits.load(Ordering::SeqCst), 1);
+}
+
+/// When only a serialized handler exists for an endpoint, `rx_serialized`
+/// should still deliver the raw bytes.
+#[test]
+fn rx_serialized_delivers_to_serialized_handlers() {
+    use crate::router::RouterConfig;
+
+    let seen: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(None));
+    let seen_c = seen.clone();
+    let sd_handler = EndpointHandler::new_serialized_handler(DataEndpoint::SdCard, move |b| {
+        *seen_c.lock().unwrap() = Some(b.to_vec());
+        Ok(())
+    });
+
+    let router = Router::new(
+        None::<fn(&[u8]) -> TelemetryResult<()>>,
+        RouterMode::Sink,
+        RouterConfig::new(vec![sd_handler]),
+        StepClock::new_default_box(),
+    );
+
+    let endpoints = &[DataEndpoint::SdCard];
+    let pkt =
+        TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], endpoints, 0).unwrap();
+    let bytes = serialize::serialize_packet(&pkt);
+
+    router.rx_serialized(&bytes).unwrap();
+    let got = seen.lock().unwrap().clone().expect("no bytes delivered");
+    assert_eq!(*got, *bytes);
+}
+
 }

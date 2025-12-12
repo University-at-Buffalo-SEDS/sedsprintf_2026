@@ -11,6 +11,7 @@ import sedsprintf_rs as seds
 DT = seds.DataType
 EP = seds.DataEndpoint
 EK = seds.ElemKind
+RM = seds.RouterMode
 
 
 # ---------------- Enum helpers ----------------
@@ -66,7 +67,7 @@ def router_server(cmd_q: mp.Queue, _done_evt_unused: mp.Event,
         (int(EP.SD_CARD), _on_packet, None),
         (int(EP.RADIO), None, _on_serialized),
     ]
-    router = seds.Router(tx=_tx, now_ms=_now_ms, handlers=handlers)
+    router = seds.Router(tx=_tx, now_ms=_now_ms, handlers=handlers, mode=RM.Sink)
     print(f"[SERVER] Router up. PID={os.getpid()}")
 
     shutting_down = False
