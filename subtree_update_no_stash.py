@@ -4,18 +4,17 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 
-def run(cmd: List[str], *, capture: bool = False) -> str | None:
+def run(cmd: List[str], *, capture: bool = False) -> Optional[str]:
     """Run a command. Optionally capture stdout."""
     print("Running:", " ".join(cmd))
     if capture:
         result = subprocess.run(cmd, check=True, text=True, capture_output=True)
         return result.stdout.strip()
-    else:
-        subprocess.run(cmd, check=True)
-        return None
+    subprocess.run(cmd, check=True)
+    return None
 
 
 def get_config(key: str) -> str:
@@ -29,59 +28,75 @@ def get_config(key: str) -> str:
     return value
 
 
-def main() -> None:
-    # Script is located inside the submodule working tree:
-    #   <super_repo_root>/sedsprintf_rs/update_subtree.py (renamed use)
-    submodule_root = Path(__file__).parent.resolve()
-    super_repo_root = submodule_root.parent
-    submodule_name = submodule_root.name  # "sedsprintf_rs"
-
-    # Determine which branch the submodule should track.
-    # Prefer submodule.<name>.branch from the superproject, else default to "main".
-    os.chdir(super_repo_root)
+def get_config_default(key: str, default: str) -> str:
     try:
-        branch = get_config(f"submodule.{submodule_name}.branch")
+        return get_config(key)
     except SystemExit:
-        branch = "main"
-        print(f"submodule.{submodule_name}.branch not set; defaulting to '{branch}'")
+        return default
 
-    print(f"Updating submodule '{submodule_name}' to latest '{branch}'")
 
-    # Step 1: Update the submodule itself.
-    os.chdir(submodule_root)
+def is_git_repo(path: Path) -> bool:
+    return (path / ".git").exists()
 
-    # Ensure we have the latest from the remote.
-    run(["git", "fetch", "origin"])
 
-    # Check out the desired branch (creating local branch if necessary),
-    # then fast-forward to origin/<branch>.
-    try:
-        # Try to check out existing local branch
-        run(["git", "checkout", branch])
-    except subprocess.CalledProcessError:
-        # If it doesn't exist locally, create it to track origin/<branch>
-        print(f"Local branch '{branch}' not found; creating to track origin/{branch}")
-        run(["git", "checkout", "-b", branch, f"origin/{branch}"])
+def main() -> None:
+    # Script should live in: <super_repo_root>/sedsprintf_rs/update_subtree.py
+    subtree_prefix = Path(__file__).parent.resolve()
+    super_repo_root = subtree_prefix.parent
+    subtree_name = subtree_prefix.name  # "sedsprintf_rs"
 
-    # Fast-forward to the latest remote commit
-    run(["git", "pull", "--ff-only", "origin", branch])
+    if is_git_repo(subtree_prefix):
+        raise SystemExit(
+            f"'{subtree_name}' looks like its own git repo (has .git). "
+            "That is a submodule/standalone clone, not a subtree. "
+            "Remove the nested .git directory and recommit, or fix your layout."
+        )
 
-    # Step 2: Record the new submodule commit in the superproject.
     os.chdir(super_repo_root)
 
-    run(["git", "add", submodule_name])
+    url = get_config(f"subtree.{subtree_name}.url")
+    branch = get_config_default(f"subtree.{subtree_name}.branch", "main")
+    squash_raw = get_config_default(f"subtree.{subtree_name}.squash", "false").strip().lower()
+    squash = squash_raw in {"1", "true", "yes", "on"}
+
+    print(f"Updating subtree '{subtree_name}' (prefix '{subtree_name}') from {url} branch '{branch}'")
+    print(f"Squash: {squash}")
+
+    # Use a stable local remote name per subtree
+    remote_name = f"subtree-{subtree_name}"
+
+    # Ensure remote exists and points to the right URL
+    remotes = run(["git", "remote"], capture=True) or ""
+    if remote_name not in remotes.splitlines():
+        run(["git", "remote", "add", remote_name, url])
+    else:
+        run(["git", "remote", "set-url", remote_name, url])
+
+    # Fetch latest
+    run(["git", "fetch", "--prune", remote_name])
+
+    # Perform the subtree pull (this creates the merge commit in the superproject)
+    cmd = [
+        "git",
+        "subtree",
+        "pull",
+        "--prefix",
+        subtree_name,
+        remote_name,
+        branch,
+    ]
+    if squash:
+        cmd.append("--squash")
 
     try:
-        run(
-            [
-                "git",
-                "commit",
-                "-m",
-                f"Update {submodule_name} submodule to latest {branch}",
-            ]
-        )
+        run(cmd)
     except subprocess.CalledProcessError:
-        print("No changes to commit; submodule already up to date.")
+        # If already up to date, git subtree can still return non-zero in some cases depending on state.
+        # We'll just report and exit cleanly.
+        print("Subtree pull did not apply changes (already up to date or no matching commits).")
+        return
+
+    print("Subtree updated successfully.")
 
 
 if __name__ == "__main__":
