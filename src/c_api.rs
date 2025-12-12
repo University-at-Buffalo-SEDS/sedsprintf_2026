@@ -741,8 +741,6 @@ pub extern "C" fn seds_relay_add_side_packet(
         }
     };
 
-    // This assumes your Relay now has an `add_side_packet` method that
-    // registers a packet-style TX handler (similar to Router's packet handlers).
     let side_id: RelaySideId = relay.add_side_packet(side_name, tx_closure);
     side_id as i32
 }

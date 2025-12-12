@@ -125,6 +125,7 @@ pub mod serialize;
 mod small_payload;
 pub mod telemetry_packet;
 pub mod relay;
+mod queue;
 // ============================================================================
 //  Schema-derived global constants
 // ============================================================================

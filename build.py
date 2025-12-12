@@ -14,6 +14,48 @@ PYI_IGNORE_LINE = "python-files/sedsprintf_rs/sedsprintf_rs.pyi"
 PYI_IGNORE_REGEX = re.compile(rf"^{re.escape(PYI_IGNORE_LINE)}$")
 
 
+def print_help(error: str | None = None) -> None:
+    """
+    Print usage/help text. If `error` is provided, print it first to stderr
+    and exit with status 1. Otherwise, print to stdout and exit with status 0.
+    """
+    out = sys.stderr if error else sys.stdout
+
+    if error:
+        print(f"error: {error}\n", file=out)
+
+    print(
+        """Usage:
+  build.py [OPTIONS]
+
+Options (can be combined where it makes sense):
+  release             Build in release mode.
+  test                Run `cargo test` instead of `cargo build`.
+  embedded            Build for the embedded target (enables `embedded` feature).
+  python              Build with Python bindings (enables `python` feature).
+  maturin-build       Run `maturin build` with the .pyi .gitignore hack.
+  maturin-develop     Run `maturin develop` with the .pyi .gitignore hack.
+  maturin-install     Build wheel and install it with `uv pip install`.
+  target=<triple>     Set Rust compilation target (e.g. target=thumbv7em-none-eabihf).
+  device_id=<id>      Set DEVICE_IDENTIFIER env var for the build.
+
+Special:
+  -h, --help, help    Show this help message and exit.
+
+Examples:
+  build.py release
+  build.py embedded release target=thumbv7em-none-eabihf
+  build.py python
+  build.py maturin-build
+  build.py maturin-install
+""",
+        file=out,
+        end="",
+    )
+
+    sys.exit(1 if error else 0)
+
+
 def ensure_rust_target_installed(target: str) -> None:
     """Ensure the given Rust target is installed via rustup."""
     if not target:
@@ -140,7 +182,9 @@ def main(argv: list[str]) -> None:
 
     # Parse args in any order
     for arg in argv:
-        if arg == "release":
+        if arg in ("-h", "--help", "help"):
+            print_help()
+        elif arg == "release":
             print("Building release version.")
             release_build = True
         elif arg == "test":
@@ -168,8 +212,7 @@ def main(argv: list[str]) -> None:
             device_id = arg.split("=", 1)[1]
             print(f"Device identifier set to: {device_id}")
         else:
-            print(f"Unknown option: {arg}")
-            exit(1)
+            print_help(f"Unknown option: {arg}")
 
     # Build environment (inject DEVICE_IDENTIFIER if provided)
     env = os.environ.copy()
