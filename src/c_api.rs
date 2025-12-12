@@ -12,8 +12,8 @@ use crate::config::get_message_data_type;
 use crate::MessageDataType::NoData;
 use crate::{
     config::DataEndpoint, do_vec_log_typed, get_needed_message_size, message_meta,
-    router::{BoardConfig, EndpointHandler, Router},
-    router::{Clock, LeBytes}, serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet}, telemetry_packet::{DataType, TelemetryPacket},
+    router::{Clock, LeBytes},
+    router::{EndpointHandler, Router, RouterConfig}, serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet}, telemetry_packet::{DataType, TelemetryPacket},
     MessageElementCount,
     TelemetryError,
     TelemetryErrorCode,
@@ -402,6 +402,7 @@ pub extern "C" fn seds_error_to_string(error_code: i32, buf: *mut c_char, buf_le
 /// Returns a non-null pointer on success or NULL on failure.
 #[unsafe(no_mangle)]
 pub extern "C" fn seds_router_new(
+    mode: u8,
     tx: CTransmit,
     tx_user: *mut c_void,
     now_ms_cb: CNowMs,
@@ -522,8 +523,15 @@ pub extern "C" fn seds_router_new(
     };
 
     let box_clock = Box::new(clock);
-    let cfg = BoardConfig::new(v);
-    let router = Router::new(transmit, cfg, box_clock);
+    let cfg = RouterConfig::new(v);
+    let mode = match mode {
+        0 => crate::router::RouterMode::Sink,
+        1 => crate::router::RouterMode::Relay,
+        _ => {
+            panic!("invalid mode")
+        }
+    };
+    let router = Router::new(transmit, mode, cfg, box_clock);
     Box::into_raw(Box::new(SedsRouter {
         inner: Arc::from(router),
     }))
@@ -659,7 +667,6 @@ pub extern "C" fn seds_relay_add_side_serialized(
     side_id as i32
 }
 
-
 /// Add a new side whose TX callback receives packet views instead of raw bytes.
 ///
 /// This is analogous to router packet handlers:
@@ -745,7 +752,6 @@ pub extern "C" fn seds_relay_add_side_packet(
     side_id as i32
 }
 
-
 // ============================================================================
 //  FFI: Relay RX / TX queueing
 // ============================================================================
@@ -797,7 +803,6 @@ pub extern "C" fn seds_relay_rx_packet_from_side(
 
     ok_or_status(relay.rx_from_side(side_id as usize, pkt))
 }
-
 
 /// Process all pending RX in the relay RX queue (expand to TX).
 #[unsafe(no_mangle)]
@@ -1270,7 +1275,7 @@ pub extern "C" fn seds_router_receive(r: *mut SedsRouter, view: *const SedsPacke
     ok_or_status(router.rx(&pkt))
 }
 
-/// Transmit a packet view via the router’s TX queue immediately.
+/// Transmit a packet view via the router’s TX queue
 #[unsafe(no_mangle)]
 pub extern "C" fn seds_router_transmit_message_queue(
     r: *mut SedsRouter,
@@ -1285,6 +1290,52 @@ pub extern "C" fn seds_router_transmit_message_queue(
         Err(_) => return status_from_err(TelemetryError::InvalidType),
     };
     ok_or_status(router.tx_queue(pkt))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_transmit_message(
+    r: *mut SedsRouter,
+    view: *const SedsPacketView,
+) -> i32 {
+    if r.is_null() || view.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let router = unsafe { &(*r).inner }; // shared borrow
+    let pkt = match view_to_packet(unsafe { &*view }) {
+        Ok(p) => p,
+        Err(_) => return status_from_err(TelemetryError::InvalidType),
+    };
+    ok_or_status(router.tx(pkt))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_transmit_serialized_message_queue(
+    r: *mut SedsRouter,
+    bytes: *const u8,
+    len: usize,
+) -> i32 {
+    if r.is_null() || bytes.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let router = unsafe { &(*r).inner }; // shared borrow
+    let slice = unsafe { slice::from_raw_parts(bytes, len) };
+    let data = Arc::from(slice);
+    ok_or_status(router.tx_serialized_queue(data))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_transmit_serialized_message(
+    r: *mut SedsRouter,
+    bytes: *const u8,
+    len: usize,
+) -> i32 {
+    if r.is_null() || bytes.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let router = unsafe { &(*r).inner }; // shared borrow
+    let slice = unsafe { slice::from_raw_parts(bytes, len) };
+    let data = Arc::from(slice);
+    ok_or_status(router.tx_serialized(data))
 }
 
 // ----- Queue processing (no time budget) -----

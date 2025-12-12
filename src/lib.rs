@@ -159,10 +159,15 @@ pub enum MessageElementCount {
     Dynamic,
 }
 
+/// Broadcast mode for endpoints
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub enum EndpointsBroadcastMode {
+    
+    /// Always transmit the message, even if we have and endpoint for it.
     Always,
+    /// Never transmit the packet, even if we don't have an endpoint for it.
     Never,
+    /// Transmit only if we don't have an endpoint for it. Otherwise, use the endpoint handler and don't broadcast.
     Default,
 }
 /// Static metadata for a message type: element count and valid endpoints.

@@ -30,7 +30,7 @@ use std::sync::{Arc as SArc, Mutex, OnceLock};
 
 use crate::{
     config::DataEndpoint, get_needed_message_size, message_meta, relay::Relay,
-    router::{BoardConfig, Clock, EndpointHandler, LeBytes, Router},
+    router::{Clock, EndpointHandler, LeBytes, Router, RouterConfig, RouterMode},
     serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet},
     telemetry_packet::{DataType, TelemetryPacket}, try_enum_from_u32,
     MessageElementCount,
@@ -285,12 +285,13 @@ impl PyRouter {
     /// If you pass a non-None `tx` after the singleton is already created,
     /// an error is raised (the TX callback cannot be changed once set).
     #[staticmethod]
-    #[pyo3(signature = (tx=None, now_ms=None, handlers=None))]
+    #[pyo3(signature = (tx=None, now_ms=None, handlers=None, mode = 0))]
     fn new_singleton(
         py: Python<'_>,
         tx: Option<Py<PyAny>>,
         now_ms: Option<Py<PyAny>>,
         handlers: Option<&Bound<'_, PyAny>>,
+        mode: u32,
     ) -> PyResult<Self> {
         // ----------------------------------------------------------
         // 1. If the singleton already exists, return a new wrapper
@@ -413,8 +414,16 @@ impl PyRouter {
         };
 
         // Build router
-        let cfg = BoardConfig::new(handlers_vec);
-        let router = Router::new(transmit, cfg, Box::new(clock));
+        let cfg = RouterConfig::new(handlers_vec);
+
+        let mode = match mode {
+            0 => crate::router::RouterMode::Sink,
+            1 => crate::router::RouterMode::Relay,
+            _ => {
+                return Err(PyValueError::new_err("mode must be 0 (Sink) or 1 (Relay)"));
+            }
+        };
+        let router = Router::new(transmit, mode, cfg, Box::new(clock));
 
         let arc = SArc::new(Mutex::new(router));
 
@@ -445,12 +454,13 @@ impl PyRouter {
     ///     - `packet_handler(pkt: Packet)` is called with a `Packet`.
     ///     - `serialized_handler(bytes: bytes)` is called with raw bytes.
     #[new]
-    #[pyo3(signature = (tx=None, now_ms=None, handlers=None))]
+    #[pyo3(signature = (tx=None, now_ms=None, handlers=None, mode=RouterMode::Relay as u32))]
     fn new(
         py: Python<'_>,
         tx: Option<Py<PyAny>>,
         now_ms: Option<Py<PyAny>>,
         handlers: Option<&Bound<'_, PyAny>>,
+        mode: u32,
     ) -> PyResult<Self> {
         let tx_keep = tx.as_ref().map(|p| p.clone_ref(py));
         let now_keep = now_ms.as_ref().map(|p| p.clone_ref(py));
@@ -543,8 +553,17 @@ impl PyRouter {
         let clock = PyClock {
             cb: now_keep.as_ref().map(|p| p.clone_ref(py)),
         };
-        let cfg = BoardConfig::new(handlers_vec);
-        let router = Router::new(transmit, cfg, Box::new(clock));
+        let cfg = RouterConfig::new(handlers_vec);
+
+         let mode = match mode {
+            0 => crate::router::RouterMode::Sink,
+            1 => crate::router::RouterMode::Relay,
+            _ => {
+                return Err(PyValueError::new_err("mode must be 0 (Sink) or 1 (Relay)"));
+            }
+        };
+
+        let router = Router::new(transmit, mode, cfg, Box::new(clock));
 
         Ok(Self {
             inner: SArc::new(Mutex::new(router)),
@@ -552,6 +571,59 @@ impl PyRouter {
             _pkt_cbs: keep_pkt,
             _ser_cbs: keep_ser,
         })
+    }
+
+
+    fn transmit_message(&self, _py: Python<'_>, packet: &Bound<'_, PyAny>) -> PyResult<()> {
+        let pkt_ref: PyRef<PyPacket> = packet.extract()?;
+
+        let rtr = self
+            .inner
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
+
+        rtr.tx(pkt_ref.inner.clone()).map_err(py_err_from)
+    }
+
+    fn transmit_message_queue(&self, _py: Python<'_>, packet: &Bound<'_, PyAny>) -> PyResult<()> {
+        let pkt_ref: PyRef<PyPacket> = packet.extract()?;
+
+        let rtr = self
+            .inner
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
+
+        rtr.tx_queue(pkt_ref.inner.clone()).map_err(py_err_from)
+    }
+
+    /// Transmit serialized bytes immediately (C: seds_router_transmit_serialized_message).
+    fn transmit_serialized_message(&self, _py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResult<()> {
+        let bytes: &[u8] = data.extract()?;
+        let arc: AArc<[u8]> = AArc::from(bytes);
+
+        let rtr = self
+            .inner
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
+
+        rtr.tx_serialized(arc).map_err(py_err_from)
+    }
+
+    /// Queue serialized bytes for later TX (C: seds_router_transmit_serialized_message_queue).
+    fn transmit_serialized_message_queue(
+        &self,
+        _py: Python<'_>,
+        data: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        let bytes: &[u8] = data.extract()?;
+        let arc: AArc<[u8]> = AArc::from(bytes);
+
+        let rtr = self
+            .inner
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
+
+        rtr.tx_serialized_queue(arc).map_err(py_err_from)
     }
 
     // ------------------------------------------------------------------------
@@ -1260,6 +1332,17 @@ pub fn sedsprintf_rs(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         ek_dict.set_item("FLOAT", EK_FLOAT)?;
         let ek_enum = int_enum.call1(("ElemKind", ek_dict))?;
         m.add("ElemKind", ek_enum)?;
+    }
+
+    // ------------------ RouterMode ------------------
+    {
+        let rm_dict = PyDict::new(py);
+        rm_dict.set_item("__module__", &mod_name)?;
+        rm_dict.set_item("Relay", 1 as u32)?;
+        rm_dict.set_item("Sink", 0 as u32)?;
+
+        let rm_enum = int_enum.call1(("RouterMode", rm_dict))?;
+        m.add("RouterMode", rm_enum)?;
     }
 
     Ok(())

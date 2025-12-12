@@ -1,8 +1,9 @@
 use crate::config::{MAX_QUEUE_SIZE, MAX_RECENT_RX_IDS, STARTING_QUEUE_SIZE};
+use crate::queue::{BoundedDeque, ByteCost};
 #[cfg(all(not(feature = "std"), target_os = "none"))]
 use crate::seds_error_msg;
 use crate::telemetry_packet::hash_bytes_u64;
-use crate::{
+pub use crate::{
     config::{DataEndpoint, DataType, DEVICE_IDENTIFIER, MAX_HANDLER_RETRIES}, get_needed_message_size, impl_letype_num, lock::RouterMutex,
     message_meta,
     serialize, telemetry_packet::TelemetryPacket,
@@ -13,29 +14,45 @@ use crate::{
 use alloc::{boxed::Box, format, sync::Arc, vec, vec::Vec};
 use core::fmt;
 use core::fmt::{Debug, Formatter};
-use crate::queue::{BoundedDeque, ByteCost};
 
+/// The mode the router is operating in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub enum RouterMode {
+    /// When a packet is received the router will call all applicable endpoint handlers, but if
+    /// there is at least one endpoint is not
+    /// satisfied, the router will rebroadcast to its tx function
+    /// this relies on dedupe to prevent packets from looping forever between routers.
+    Relay,
+    /// The default behavior, when a packet is received, only the applicable local handlers are
+    /// called, and no rebroadcasting is done.
+    Sink,
+}
+
+/// Queue item enum for the router queues.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum RxItem {
+pub enum QueueItem {
+    /// A fully deserialized telemetry packet.
     Packet(TelemetryPacket),
+    /// A serialized telemetry packet as a byte slice.
     Serialized(Arc<[u8]>),
 }
 
-
-impl ByteCost for RxItem{
+/// ByteCost implementation for QueueItem.
+impl ByteCost for QueueItem {
     #[inline]
     fn byte_cost(&self) -> usize {
         match self {
-            RxItem::Packet(pkt) => pkt.byte_cost(),
-            RxItem::Serialized(bytes) => size_of::<Arc<[u8]>>() + bytes.len(),
+            QueueItem::Packet(pkt) => pkt.byte_cost(),
+            QueueItem::Serialized(bytes) => size_of::<Arc<[u8]>>() + bytes.len(),
         }
     }
 }
 
+/// ByteCost implementation for TelemetryPacket.
 impl ByteCost for u64 {
-        fn byte_cost(&self) -> usize {
-            size_of::<u64>()
-        }
+    fn byte_cost(&self) -> usize {
+        size_of::<u64>()
+    }
 }
 
 // -------------------- endpoint + board config --------------------
@@ -45,20 +62,25 @@ pub enum EndpointHandlerFn {
     Serialized(Arc<dyn Fn(&[u8]) -> TelemetryResult<()> + Send + Sync>),
 }
 
+/// Endpoint handler for a specific data endpoint.
 pub struct EndpointHandler {
     endpoint: DataEndpoint,
     handler: EndpointHandlerFn,
 }
 
+/// Debug implementation for EndpointHandlerFn.
 impl Debug for EndpointHandlerFn {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             EndpointHandlerFn::Packet(_) => f.write_str("EndpointHandlerFn::Packet(<handler>)"),
-            EndpointHandlerFn::Serialized(_) => f.write_str("EndpointHandlerFn::Serialized(<handler>)"),
+            EndpointHandlerFn::Serialized(_) => {
+                f.write_str("EndpointHandlerFn::Serialized(<handler>)")
+            }
         }
     }
 }
 
+/// Debug implementation for EndpointHandler.
 impl Debug for EndpointHandler {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("EndpointHandler")
@@ -120,12 +142,12 @@ impl<T: Fn() -> u64> Clock for T {
 }
 
 #[derive(Default, Debug, Clone)]
-pub struct BoardConfig {
+pub struct RouterConfig {
     /// Handlers for local endpoints.
     handlers: Arc<[EndpointHandler]>,
 }
 
-impl BoardConfig {
+impl RouterConfig {
     /// Create a new board configuration with the specified endpoint handlers.
     pub fn new<H>(handlers: H) -> Self
     where
@@ -194,6 +216,7 @@ fn make_error_payload(msg: &str) -> Arc<[u8]> {
         MessageElementCount::Dynamic => Arc::from(msg.as_bytes()),
     }
 }
+
 /// Generic raw logger function used by Router::log and Router::log_queue.
 /// Builds a TelemetryPacket from the provided data slice and passes it to the
 /// provided transmission function.
@@ -274,10 +297,10 @@ fn fallback_stdout(msg: &str) {
 /// Holds the RX and TX queues.
 /// Used to allow safe concurrent access from multiple tasks.
 /// This struct is private to the Router implementation.
-#[derive(Debug, Clone, )]
+#[derive(Debug, Clone)]
 struct RouterInner {
-    received_queue: BoundedDeque<RxItem>,
-    transmit_queue: BoundedDeque<TelemetryPacket>,
+    received_queue: BoundedDeque<QueueItem>,
+    transmit_queue: BoundedDeque<QueueItem>,
     recent_rx: BoundedDeque<u64>,
 }
 
@@ -288,7 +311,8 @@ pub struct Router {
     sender: &'static str,
     // make TX usable across tasks
     transmit: Option<Box<dyn Fn(&[u8]) -> TelemetryResult<()> + Send + Sync>>,
-    cfg: BoardConfig,
+    mode: RouterMode,
+    cfg: RouterConfig,
     state: RouterMutex<RouterInner>,
     clock: Box<dyn Clock + Send + Sync>,
 }
@@ -301,10 +325,10 @@ impl Debug for Router {
             .field("state", &"<mutex>")
             .field("transmit", &self.transmit.is_some())
             .field("clock", &"Clock")
+            .field("mode", &self.mode)
             .finish()
     }
 }
-
 
 impl Router {
     /// Create a new Router with the specified transmit function, board configuration, and clock.
@@ -340,7 +364,8 @@ impl Router {
     /// ```
     pub fn new<Tx>(
         transmit: Option<Tx>,
-        cfg: BoardConfig,
+        mode: RouterMode,
+        cfg: RouterConfig,
         clock: Box<dyn Clock + Send + Sync>,
     ) -> Self
     where
@@ -349,23 +374,27 @@ impl Router {
         Self {
             sender: DEVICE_IDENTIFIER,
             transmit: transmit.map(|t| Box::new(t) as _),
+            mode,
             cfg,
             state: RouterMutex::new(RouterInner {
                 received_queue: BoundedDeque::new(MAX_QUEUE_SIZE, STARTING_QUEUE_SIZE),
                 transmit_queue: BoundedDeque::new(MAX_QUEUE_SIZE, STARTING_QUEUE_SIZE),
-                recent_rx: BoundedDeque::new(MAX_RECENT_RX_IDS * size_of::<u64>(), MAX_RECENT_RX_IDS),
+                recent_rx: BoundedDeque::new(
+                    MAX_RECENT_RX_IDS * size_of::<u64>(),
+                    MAX_RECENT_RX_IDS,
+                ),
             }),
             clock,
         }
     }
 
-    /// Compute a dedupe ID for an RxItem and record it.
+    /// Compute a dedupe ID for a QueueItem and record it.
     /// Returns true if this item was seen recently (and should be skipped).
-    fn is_duplicate_rx(&self, item: &RxItem) -> bool {
+    fn is_duplicate_pkt(&self, item: &QueueItem) -> bool {
         // Derive ID from packet or from raw bytes.
         let id = match item {
-            RxItem::Packet(pkt) => pkt.packet_id(),
-            RxItem::Serialized(bytes) => {
+            QueueItem::Packet(pkt) => pkt.packet_id(),
+            QueueItem::Serialized(bytes) => {
                 // Hash raw serialized bytes; duplicates over the network
                 // will be identical at the byte level.
                 let mut h: u64 = 0x9E37_79B9_7F4A_7C15;
@@ -386,6 +415,7 @@ impl Router {
             false
         }
     }
+    
     /// Error helper when we have a full TelemetryPacket.
     /// Sends a TelemetryError packet to all local endpoints except the failed one (if any).
     /// If no local endpoints remain, falls back to stdout printing.
@@ -442,7 +472,7 @@ impl Router {
             payload,
         )?;
 
-        self.tx(&error_pkt)
+        self.tx_item(QueueItem::Packet(error_pkt))
     }
 
     // ---------- PUBLIC API: now all &self (thread-safe via internal locking) ----------
@@ -506,7 +536,7 @@ impl Router {
                 st.transmit_queue.pop_front()
             };
             let Some(pkt) = pkt_opt else { break };
-            self.tx(&pkt)?;
+            self.tx_item(pkt)?;
             if timeout_ms != 0 && self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
                 break;
             }
@@ -519,8 +549,8 @@ impl Router {
     /// * `item` - The RxItem to process.
     /// # Returns
     /// A TelemetryResult indicating success or failure.
-    fn process_rx_queue_item(&self, item: RxItem) -> TelemetryResult<()> {
-        self.rx_item(&item)
+    fn process_rx_queue_item(&self, item: QueueItem) -> TelemetryResult<()> {
+        self.rx_item(&item, true)
     }
 
     /// Process packets in the receive queue for up to `timeout_ms` milliseconds.
@@ -567,7 +597,7 @@ impl Router {
                 let mut st = self.state.lock();
                 st.transmit_queue.pop_front()
             } {
-                self.tx(&pkt)?;
+                self.tx_item(pkt)?;
                 did_any = true;
             }
             if !drain_fully && self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
@@ -601,13 +631,18 @@ impl Router {
     /// * `pkt` - The TelemetryPacket to enqueue.
     /// # Returns
     /// A TelemetryResult indicating success or failure.
-    pub fn tx_queue(&self, pkt: TelemetryPacket) -> TelemetryResult<()> {
-        pkt.validate()?;
+    fn tx_queue_item(&self, pkt: QueueItem) -> TelemetryResult<()> {
         let mut st = self.state.lock();
         st.transmit_queue.push_back(pkt);
         Ok(())
     }
 
+    pub fn tx_queue(&self, pkt: TelemetryPacket) -> TelemetryResult<()> {
+        self.tx_queue_item(QueueItem::Packet(pkt))
+    }
+    pub fn tx_serialized_queue(&self, data: Arc<[u8]>) -> TelemetryResult<()> {
+        self.tx_queue_item(QueueItem::Serialized(data.clone()))
+    }
     /// Process all packets in the receive queue.
     /// This function will dequeue and process all packets in the receive queue
     /// until the queue is empty.
@@ -627,7 +662,7 @@ impl Router {
     pub fn rx_serialized_packet_to_queue(&self, bytes: &[u8]) -> TelemetryResult<()> {
         let arc = Arc::from(bytes);
         let mut st = self.state.lock();
-        st.received_queue.push_back(RxItem::Serialized(arc));
+        st.received_queue.push_back(QueueItem::Serialized(arc));
         Ok(())
     }
 
@@ -640,7 +675,7 @@ impl Router {
     pub fn rx_packet_to_queue(&self, pkt: TelemetryPacket) -> TelemetryResult<()> {
         pkt.validate()?;
         let mut st = self.state.lock();
-        st.received_queue.push_back(RxItem::Packet(pkt));
+        st.received_queue.push_back(QueueItem::Packet(pkt));
         Ok(())
     }
 
@@ -703,7 +738,7 @@ impl Router {
         &self,
         dest: DataEndpoint,
         handler: &EndpointHandler,
-        data: Option<&RxItem>, // may be None for Packet handlers in send()
+        data: Option<&QueueItem>, // may be None for Packet handlers in send()
         pkt_for_ctx: Option<&TelemetryPacket>, // may be None if we didn’t deserialize
         env_for_ctx: Option<&serialize::TelemetryEnvelope>, // header-only context
     ) -> TelemetryResult<()> {
@@ -735,11 +770,11 @@ impl Router {
                 with_retries(self, dest, pkt_for_ctx, env_for_ctx, || f(pkt))
             }
 
-            (EndpointHandlerFn::Serialized(f), Some(RxItem::Serialized(bytes))) => {
+            (EndpointHandlerFn::Serialized(f), Some(QueueItem::Serialized(bytes))) => {
                 with_retries(self, dest, pkt_for_ctx, env_for_ctx, || f(bytes))
             }
 
-            (EndpointHandlerFn::Serialized(f), Some(RxItem::Packet(pkt))) => {
+            (EndpointHandlerFn::Serialized(f), Some(QueueItem::Packet(pkt))) => {
                 with_retries(self, dest, pkt_for_ctx, env_for_ctx, || {
                     let owned = serialize::serialize_packet(pkt);
                     f(&owned)
@@ -805,32 +840,49 @@ impl Router {
             env.timestamp_ms,
             payload,
         )?;
-        self.tx(&error_pkt)
+        self.tx_item(QueueItem::Packet(error_pkt))
     }
 
-    /// Core receive function handling both Packet and Serialized RxItems.
+    /// Core receive function handling both Packet and Serialized QueueItems.
     /// Routes to appropriate local handlers with retries and error handling.
     /// # Arguments
-    /// * `item` - The RxItem to process (either Packet or Serialized).
+    /// * `item` - The QueueItem to process (either Packet or Serialized).
     /// # Returns
     /// A TelemetryResult indicating success or failure.
-    pub fn rx_item(&self, item: &RxItem) -> TelemetryResult<()> {
-        if self.is_duplicate_rx(item) {
+    fn rx_item(&self, item: &QueueItem, called_from_queue: bool) -> TelemetryResult<()> {
+        if self.is_duplicate_pkt(item) {
             // Already processed an identical packet recently; ignore.
             return Ok(());
         }
         match item {
-            RxItem::Packet(pkt) => {
+            QueueItem::Packet(pkt) => {
                 pkt.validate()?;
                 // No pre-serialization; serialize only if a Serialized handler exists.
                 for dest in pkt.endpoints().iter().copied() {
                     for h in self.cfg.handlers.iter().filter(|h| h.endpoint == dest) {
                         self.call_handler_with_retries(dest, h, Some(item), Some(pkt), None)?;
                     }
+                    if self.mode == RouterMode::Relay {
+                        // In Relay mode, re-transmit the packet to remote endpoints.
+                        if let Some(_tx) = &self.transmit {
+                            match called_from_queue {
+                                true => {
+                                    // We are called from the RX queue processing; avoid cloning.
+                                    self.tx_queue_item(QueueItem::Packet(pkt.clone()))
+                                        .expect("Failed to queue message");
+                                }
+                                false => {
+                                    // Not called from the RX queue; clone bytes to avoid issues.
+                                    self.tx_item(QueueItem::Packet(pkt.clone()))
+                                        .expect("Failed to transmit relayed message");
+                                }
+                            }
+                        }
+                    }
                 }
                 Ok(())
             }
-            RxItem::Serialized(bytes) => {
+            QueueItem::Serialized(bytes) => {
                 // 1) Peek envelope to know endpoints (cheap, no payload copy).
                 let env = serialize::peek_envelope(bytes)?;
 
@@ -888,6 +940,28 @@ impl Router {
                             }
                         }
                     }
+
+                    if self.mode == RouterMode::Relay {
+                        let pkt = match pkt_opt {
+                            Some(ref p) => QueueItem::Packet(p.clone()),
+                            None => QueueItem::Serialized(bytes.clone()),
+                        };
+                        // In Relay mode, re-transmit the packet to remote endpoints.
+                        if let Some(_tx) = &self.transmit {
+                            match called_from_queue {
+                                true => {
+                                    // We are called from the RX queue processing; avoid cloning.
+
+                                    self.tx_queue_item(pkt).expect("Failed to queue message");
+                                }
+                                false => {
+                                    // Not called from the RX queue; clone bytes to avoid issues.
+                                    self.tx_item(pkt)
+                                        .expect("Failed to transmit relayed message");
+                                }
+                            }
+                        }
+                    }
                 }
                 Ok(())
             }
@@ -905,81 +979,168 @@ impl Router {
     /// * `pkt` - The TelemetryPacket to transmit.
     /// # Returns
     /// A TelemetryResult indicating success or failure.
-    pub fn tx(&self, pkt: &TelemetryPacket) -> TelemetryResult<()> {
-        pkt.validate()?;
+    fn tx_item(&self, pkt: QueueItem) -> TelemetryResult<()> {
+        match pkt {
+            QueueItem::Packet(pkt) => {
+                let pkt = &pkt;
+                pkt.validate()?;
 
-        let has_serialized_local = pkt
-            .endpoints()
-            .iter()
-            .copied()
-            .any(|ep| self.endpoint_has_serialized_handler(ep));
-        let send_remote = pkt.endpoints().iter().any(|e| {
-            (!self.cfg.is_local_endpoint(*e)
-                && e.get_broadast_mode() != EndpointsBroadcastMode::Never)
-                || e.get_broadast_mode() == EndpointsBroadcastMode::Always
-        });
+                let has_serialized_local = pkt
+                    .endpoints()
+                    .iter()
+                    .copied()
+                    .any(|ep| self.endpoint_has_serialized_handler(ep));
 
-        // Only serialize if needed.
-        let bytes_opt = if has_serialized_local || send_remote {
-            Some(serialize::serialize_packet(pkt))
-        } else {
-            None
-        };
+                let send_remote = pkt.endpoints().iter().any(|e| {
+                    (!self.cfg.is_local_endpoint(*e)
+                        && e.get_broadast_mode() != EndpointsBroadcastMode::Never)
+                        || e.get_broadast_mode() == EndpointsBroadcastMode::Always
+                });
 
-        if send_remote {
-            if let (Some(tx), Some(bytes)) = (&self.transmit, &bytes_opt) {
-                if let Err(e) = self.retry(MAX_HANDLER_RETRIES, || tx(bytes)) {
-                    let _ = self.handle_callback_error(pkt, None, e);
-                    return Err(TelemetryError::HandlerError("TX failed"));
+                // Only serialize if needed.
+                let bytes_opt = if has_serialized_local || send_remote {
+                    Some(serialize::serialize_packet(pkt))
+                } else {
+                    None
+                };
+
+                if send_remote {
+                    if let (Some(tx), Some(bytes)) = (&self.transmit, &bytes_opt) {
+                        if let Err(e) = self.retry(MAX_HANDLER_RETRIES, || tx(bytes)) {
+                            let _ = self.handle_callback_error(pkt, None, e);
+                            return Err(TelemetryError::HandlerError("TX failed"));
+                        }
+                    }
+                }
+
+                // Local dispatch using the best available representation.
+                for dest in pkt.endpoints().iter().copied() {
+                    for h in self.cfg.handlers.iter().filter(|h| h.endpoint == dest) {
+                        match (&h.handler, &bytes_opt) {
+                            (EndpointHandlerFn::Serialized(_), Some(bytes)) => {
+                                let item = QueueItem::Serialized(bytes.clone());
+                                self.call_handler_with_retries(
+                                    dest,
+                                    h,
+                                    Some(&item),
+                                    Some(pkt),
+                                    None,
+                                )?;
+                            }
+                            (EndpointHandlerFn::Serialized(_), None) => {
+                                // Serialize only for this handler (rare path).
+                                let bytes = serialize::serialize_packet(pkt);
+                                let item = QueueItem::Serialized(Arc::from(bytes));
+                                self.call_handler_with_retries(
+                                    dest,
+                                    h,
+                                    Some(&item),
+                                    Some(pkt),
+                                    None,
+                                )?;
+                            }
+                            (EndpointHandlerFn::Packet(_), _) => {
+                                self.call_handler_with_retries(dest, h, None, Some(pkt), None)?;
+                            }
+                        }
+                    }
+                }
+            }
+
+            QueueItem::Serialized(bytes_arc) => {
+                // Peek header-only so we can route without deserializing unless needed.
+                let env = serialize::peek_envelope(bytes_arc.as_ref())?;
+
+                // Decide whether to send remote based on the *packet's endpoints*.
+                let send_remote = env.endpoints.iter().copied().any(|e| {
+                    (!self.cfg.is_local_endpoint(e)
+                        && e.get_broadast_mode() != EndpointsBroadcastMode::Never)
+                        || e.get_broadast_mode() == EndpointsBroadcastMode::Always
+                });
+
+                // Remote transmit: bytes are already serialized.
+                if send_remote {
+                    if let Some(tx) = &self.transmit {
+                        if let Err(e) = self.retry(MAX_HANDLER_RETRIES, || tx(bytes_arc.as_ref())) {
+                            // We only have an envelope here; use the envelope-aware error path.
+                            let _ = self.handle_callback_error_from_env(&env, None, e);
+                            return Err(TelemetryError::HandlerError("TX failed"));
+                        }
+                    }
+                }
+
+                // Lazy deserialize only if we actually have any Packet handlers to call.
+                let mut pkt_cache: Option<TelemetryPacket> = None;
+
+                for dest in env.endpoints.iter().copied() {
+                    for h in self.cfg.handlers.iter().filter(|h| h.endpoint == dest) {
+                        match &h.handler {
+                            EndpointHandlerFn::Serialized(_) => {
+                                // Fast path: deliver bytes directly.
+                                let item = QueueItem::Serialized(bytes_arc.clone());
+                                self.call_handler_with_retries(
+                                    dest,
+                                    h,
+                                    Some(&item),
+                                    None,
+                                    Some(&env),
+                                )?;
+                            }
+                            EndpointHandlerFn::Packet(_) => {
+                                // Need a decoded packet: deserialize once, then reuse.
+                                if pkt_cache.is_none() {
+                                    let pkt = serialize::deserialize_packet(bytes_arc.as_ref())?;
+                                    // Optional, but usually good to keep invariant:
+                                    // pkt.validate()?;
+                                    pkt_cache = Some(pkt);
+                                }
+                                let pkt_ref = pkt_cache.as_ref().expect("just set");
+                                self.call_handler_with_retries(
+                                    dest,
+                                    h,
+                                    None,
+                                    Some(pkt_ref),
+                                    Some(&env),
+                                )?;
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        // Local dispatch using the best available representation.
-        for dest in pkt.endpoints().iter().copied() {
-            for h in self.cfg.handlers.iter().filter(|h| h.endpoint == dest) {
-                match (&h.handler, &bytes_opt) {
-                    (EndpointHandlerFn::Serialized(_), Some(bytes)) => {
-                        let item = RxItem::Serialized(bytes.clone());
-                        self.call_handler_with_retries(dest, h, Some(&item), Some(pkt), None)?;
-                    }
-                    (EndpointHandlerFn::Serialized(_), None) => {
-                        // Serialize only for this handler (rare path).
-                        let bytes = serialize::serialize_packet(pkt);
-                        let item = RxItem::Serialized(Arc::from(bytes));
-                        self.call_handler_with_retries(dest, h, Some(&item), Some(pkt), None)?;
-                    }
-                    (EndpointHandlerFn::Packet(_), _) => {
-                        // No need to clone the packet; the handler uses `pkt_for_ctx`.
-                        self.call_handler_with_retries(dest, h, None, Some(pkt), None)?;
-                    }
-                }
-            }
-        }
         Ok(())
     }
 
     // receive_serialized / receive can stay as thin wrappers:
     /// Enqueue and process a serialized telemetry packet (byte slice).
-    /// This function will create an RxItem from the byte slice and process it.
+    /// This function will create a QueueItem from the byte slice and process it.
     /// # Arguments
     /// * `bytes` - The serialized telemetry packet as a byte slice.
     /// # Returns
     /// A TelemetryResult indicating success or failure.
     pub fn rx_serialized(&self, bytes: &[u8]) -> TelemetryResult<()> {
-        let item = RxItem::Serialized(Arc::from(bytes));
-        self.rx_item(&item)
+        let item = QueueItem::Serialized(Arc::from(bytes));
+        self.rx_item(&item, false)
     }
 
     /// Enqueue and process a telemetry packet.
-    /// This function will create an RxItem from the packet and process it.
+    /// This function will create a QueueItem from the packet and process it.
     /// # Arguments
     /// * `pkt` - The TelemetryPacket to process.
     /// # Returns
     /// A TelemetryResult indicating success or failure.
     pub fn rx(&self, pkt: &TelemetryPacket) -> TelemetryResult<()> {
-        let item = RxItem::Packet(pkt.clone());
-        self.rx_item(&item)
+        let item = QueueItem::Packet(pkt.clone());
+        self.rx_item(&item, false)
+    }
+
+    pub fn tx(&self, pkt: TelemetryPacket) -> TelemetryResult<()> {
+        self.tx_item(QueueItem::Packet(pkt))
+    }
+
+    pub fn tx_serialized(&self, pkt: Arc<[u8]>) -> TelemetryResult<()> {
+        self.tx_item(QueueItem::Serialized(pkt))
     }
 
     /// Build a packet then send immediately.
@@ -990,7 +1151,7 @@ impl Router {
     /// A TelemetryResult indicating success or failure.
     pub fn log<T: LeBytes>(&self, ty: DataType, data: &[T]) -> TelemetryResult<()> {
         log_raw(self.sender, ty, data, self.clock.now_ms(), |pkt| {
-            self.tx(&pkt)
+            self.tx_item(QueueItem::Packet(pkt))
         })
     }
 
@@ -1002,7 +1163,7 @@ impl Router {
     /// A TelemetryResult indicating success or failure.
     pub fn log_queue<T: LeBytes>(&self, ty: DataType, data: &[T]) -> TelemetryResult<()> {
         log_raw(self.sender, ty, data, self.clock.now_ms(), |pkt| {
-            self.tx_queue(pkt)
+            self.tx_queue_item(QueueItem::Packet(pkt))
         })
     }
 
@@ -1019,7 +1180,9 @@ impl Router {
         timestamp: u64,
         data: &[T],
     ) -> TelemetryResult<()> {
-        log_raw(self.sender, ty, data, timestamp, |pkt| self.tx(&pkt))
+        log_raw(self.sender, ty, data, timestamp, |pkt| {
+            self.tx_item(QueueItem::Packet(pkt))
+        })
     }
 
     /// Build a packet with a specific timestamp and queue it for later TX.
@@ -1035,6 +1198,8 @@ impl Router {
         timestamp: u64,
         data: &[T],
     ) -> TelemetryResult<()> {
-        log_raw(self.sender, ty, data, timestamp, |pkt| self.tx_queue(pkt))
+        log_raw(self.sender, ty, data, timestamp, |pkt| {
+            self.tx_queue_item(QueueItem::Packet(pkt))
+        })
     }
 }

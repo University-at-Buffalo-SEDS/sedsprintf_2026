@@ -48,6 +48,13 @@ typedef enum SedsElemKind
     SEDS_EK_FLOAT = 2
 } SedsElemKind;
 
+
+typedef enum SedsRouterMode
+{
+    Seds_RM_Sink = 0,
+    Seds_RM_Relay = 1,
+} SedsRouterMode;
+
 typedef SedsResult (* SedsTransmitFn)(const uint8_t * bytes, size_t len, void * user);
 
 typedef SedsResult (* SedsEndpointHandlerFn)(const SedsPacketView * pkt, void * user);
@@ -82,7 +89,9 @@ SedsResult seds_error_to_string(int32_t error_code, char * buf, size_t buf_len);
    Router lifecycle
    ============================== */
 
-SedsRouter * seds_router_new(SedsTransmitFn tx,
+SedsRouter * seds_router_new(
+                             SedsRouterMode mode,
+                             SedsTransmitFn tx,
                              void * tx_user,
                              SedsNowMsFn now_ms_cb,
                              const SedsLocalEndpointDesc * handlers,
@@ -150,6 +159,14 @@ SedsResult seds_router_receive(SedsRouter * r, const SedsPacketView * view);
 SedsResult seds_router_process_tx_queue(SedsRouter * r);
 
 SedsResult seds_router_transmit_message_queue(SedsRouter * r, const SedsPacketView * view);
+
+SedsResult seds_router_transmit_serialized_message_queue(SedsRouter * r, const SedsPacketView * view);
+
+SedsResult seds_router_transmit_serialized_message(SedsRouter * r, const uint8_t * bytes, size_t len);
+
+SedsResult seds_router_transmit_message(SedsRouter * r, const uint8_t * bytes, size_t len);
+
+seds_router_transmit_message
 
 SedsResult seds_router_process_rx_queue(SedsRouter * r);
 

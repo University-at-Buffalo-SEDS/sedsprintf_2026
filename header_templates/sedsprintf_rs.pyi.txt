@@ -26,6 +26,11 @@ class ElemKind(IntEnum):
     FLOAT: int     #: Floating-point (f32/f64).
 
 
+class RouterMode(IntEnum):
+    Relay: int
+    Sink: int
+
+
 # ==============================
 # Callback protocols (informal)
 # ==============================
@@ -122,8 +127,9 @@ class Router:
         handlers: Optional[
             Sequence[Tuple[int, Optional[PacketHandler], Optional[SerializedHandler]]]
         ] = ...,
-    ) -> "Router":
-        """
+        mode: RouterMode = RouterMode.Relay,
+    ) -> "Router": ...
+    """
         Create or retrieve a per-process singleton Router.
 
         The first call creates the singleton with the given `tx` callback
@@ -142,7 +148,9 @@ class Router:
         handlers: Optional[
             Sequence[Tuple[int, Optional[PacketHandler], Optional[SerializedHandler]]]
         ] = ...,
+        mode: RouterMode = RouterMode.Relay,
     ) -> None: ...
+
 
     def log_bytes(
         self,
@@ -170,6 +178,14 @@ class Router:
         queue: bool = ...,
     ) -> None: ...
 
+    def transmit_message_queue(self, packet: "Packet") -> None: ...
+    def transmit_message(self, packet: "Packet") -> None: ...
+    def transmit_serialized_message(
+        self, data: Buffer | bytes | bytearray | memoryview
+    ) -> None: ...
+    def transmit_serialized_message_queue(
+        self, data: Buffer | bytes | bytearray | memoryview
+    ) -> None: ...
     def receive_serialized(self, data: Buffer | bytes | bytearray | memoryview) -> None: ...
     def process_send_queue(self) -> None: ...
     def process_received_queue(self) -> None: ...
