@@ -1,8 +1,8 @@
 use proc_macro::TokenStream;
 use proc_macro2::Span;
 use quote::quote;
-use syn::{parse_macro_input, LitInt};
 use syn::parse::{Parse, ParseStream};
+use syn::{parse_macro_input, LitInt};
 
 /// define_stack_payload!(128);
 ///
@@ -105,9 +105,6 @@ pub fn define_stack_payload(input: TokenStream) -> TokenStream {
         }
 
         impl StandardSmallPayload {
-            /// Construct a new standard payload.
-            ///
-            /// Chooses the smallest inline bucket that can hold `data.len()`.
             #[inline]
             pub fn new(data: &[u8]) -> Self {
                 let len = data.len();
@@ -145,6 +142,35 @@ pub fn define_stack_payload(input: TokenStream) -> TokenStream {
                     #(#is_inline_arms)*
                     StandardSmallPayload::Heap(_) => false,
                 }
+            }
+        }
+
+        impl core::cmp::PartialEq for StandardSmallPayload {
+            #[inline]
+            fn eq(&self, other: &Self) -> bool {
+                self.as_slice() == other.as_slice()
+            }
+        }
+        impl core::cmp::Eq for StandardSmallPayload {}
+
+        impl core::cmp::PartialEq<[u8]> for StandardSmallPayload {
+            #[inline]
+            fn eq(&self, other: &[u8]) -> bool {
+                self.as_slice() == other
+            }
+        }
+
+        impl core::cmp::PartialEq<StandardSmallPayload> for [u8] {
+            #[inline]
+            fn eq(&self, other: &StandardSmallPayload) -> bool {
+                self == other.as_slice()
+            }
+        }
+
+        impl core::cmp::PartialEq<alloc::sync::Arc<[u8]>> for StandardSmallPayload {
+            #[inline]
+            fn eq(&self, other: &alloc::sync::Arc<[u8]>) -> bool {
+                self.as_slice() == other.as_ref()
             }
         }
 

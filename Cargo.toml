@@ -43,6 +43,7 @@ required-features = ["std"]
 sedsprintf_macros = { path = "sedsprintf_macros" }
 strum_macros = { version = "0.27", default-features = false }
 strum = { version = "0.27", default-features = false }
+
 # Optional dependencies enabled by features
 spin = { version = "0.10", optional = true }
 pyo3 = { version = "0.27", optional = true, features = ["auto-initialize", "extension-module", "multiple-pymethods"] }

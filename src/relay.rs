@@ -1,4 +1,4 @@
-use crate::config::{MAX_RECENT_RX_IDS, STARTING_QUEUE_SIZE};
+use crate::config::{MAX_QUEUE_SIZE, MAX_RECENT_RX_IDS, STARTING_QUEUE_SIZE};
 use crate::serialize;
 use crate::telemetry_packet::{hash_bytes_u64, TelemetryPacket};
 use crate::{
@@ -6,7 +6,8 @@ use crate::{
     {lock::RouterMutex, TelemetryError, TelemetryResult},
 };
 use alloc::boxed::Box;
-use alloc::{collections::VecDeque, sync::Arc, vec::Vec};
+use alloc::{sync::Arc, vec::Vec};
+use crate::queue::{BoundedDeque, ByteCost};
 
 /// Logical side index (CAN, UART, RADIO, etc.)
 pub type RelaySideId = usize;
@@ -24,32 +25,50 @@ pub struct RelaySide {
     pub tx_handler: RelayTxHandlerFn,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RelayItem {
     Serialized(Arc<[u8]>),
     Packet(Arc<TelemetryPacket>),
 }
 
 /// Item that was received by the relay from some side.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct RelayRxItem {
     src: RelaySideId,
     data: RelayItem,
 }
 
+impl ByteCost for RelayRxItem {
+    fn byte_cost(&self) -> usize {
+        match &self.data {
+            RelayItem::Serialized(bytes) => bytes.len(),
+            RelayItem::Packet(pkt) => pkt.byte_cost(),
+        }
+    }
+}
+
 /// Item that is ready to be transmitted out a destination side.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct RelayTxItem {
     dst: RelaySideId,
     data: RelayItem,
 }
 
+impl ByteCost for RelayTxItem {
+    fn byte_cost(&self) -> usize {
+        match &self.data {
+            RelayItem::Serialized(bytes) => bytes.len(),
+            RelayItem::Packet(pkt) => pkt.byte_cost(),
+        }
+    }
+}
+
 /// Internal state, protected by RouterMutex so all public methods can take &self.
 struct RelayInner {
     sides: Vec<RelaySide>,
-    rx_queue: VecDeque<RelayRxItem>,
-    tx_queue: VecDeque<RelayTxItem>,
-    recent_rx: VecDeque<u64>,
+    rx_queue: BoundedDeque<RelayRxItem>,
+    tx_queue: BoundedDeque<RelayTxItem>,
+    recent_rx: BoundedDeque<u64>,
 }
 
 /// Relay that fans out packets from one side to all others.
@@ -67,9 +86,9 @@ impl Relay {
         Self {
             state: RouterMutex::new(RelayInner {
                 sides: Vec::new(),
-                rx_queue: VecDeque::with_capacity(STARTING_QUEUE_SIZE),
-                tx_queue: VecDeque::with_capacity(STARTING_QUEUE_SIZE),
-                recent_rx: VecDeque::with_capacity(MAX_RECENT_RX_IDS),
+                rx_queue: BoundedDeque::new(MAX_QUEUE_SIZE, STARTING_QUEUE_SIZE),
+                tx_queue: BoundedDeque::new(MAX_QUEUE_SIZE, STARTING_QUEUE_SIZE),
+                recent_rx: BoundedDeque::new(MAX_RECENT_RX_IDS * size_of::<u64>() ,MAX_RECENT_RX_IDS),
             }),
             clock,
         }
