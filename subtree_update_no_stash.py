@@ -62,7 +62,7 @@ def main() -> None:
     print(f"Squash: {squash}")
 
     # Use a stable local remote name per subtree
-    remote_name = f"subtree-{subtree_name}"
+    remote_name = f"sedsprintf-upstream"
 
     # Fetch latest
     run(["git", "fetch", "--prune", remote_name])
