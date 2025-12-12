@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod threaded_system_tests {
     use sedsprintf_rs_2026::config::{DataEndpoint, DataType};
-    use sedsprintf_rs_2026::router::{BoardConfig, Clock, EndpointHandler, Router};
+    use sedsprintf_rs_2026::router::{ Clock, EndpointHandler, Router, RouterConfig, RouterMode};
     use sedsprintf_rs_2026::telemetry_packet::TelemetryPacket;
     use sedsprintf_rs_2026::TelemetryResult;
     use sedsprintf_rs_2026::relay::Relay;
@@ -136,9 +136,9 @@ mod threaded_system_tests {
             };
 
             let router = if handlers.is_empty() {
-                Router::new::<_>(Some(tx), BoardConfig::default(), clock)
+                Router::new::<_>(Some(tx), RouterMode::Sink, RouterConfig::default(), clock)
             } else {
-                Router::new(Some(tx), BoardConfig::new(handlers), clock)
+                Router::new(Some(tx), RouterMode::Sink, RouterConfig::new(handlers), clock)
             };
 
             nodes.push(SimNode {
@@ -293,7 +293,7 @@ mod threaded_system_tests {
             for i in 0..5 {
                 make_series(&mut buf[..2], 10.0);
                 let pkt = make_packet(DataType::GpsData, &buf[..2], i);
-                radio_router.tx(&pkt).unwrap();
+                radio_router.tx(pkt).unwrap();
                 thread::sleep(Duration::from_millis(5));
             }
         });
@@ -305,13 +305,13 @@ mod threaded_system_tests {
                 // IMU-like data
                 make_series(&mut buf[..2], 0.5);
                 let pkt1 = make_packet(DataType::GpsData, &buf[..2], i);
-                flight_router.tx(&pkt1).unwrap();
+                flight_router.tx(pkt1).unwrap();
                 thread::sleep(Duration::from_millis(5));
 
                 // BARO-like data
                 make_series(&mut buf[..2], 101.3);
                 let pkt2 = make_packet(DataType::GpsData, &buf[..2], i + 100);
-                flight_router.tx(&pkt2).unwrap();
+                flight_router.tx(pkt2).unwrap();
                 thread::sleep(Duration::from_millis(5));
             }
         });
@@ -322,7 +322,7 @@ mod threaded_system_tests {
             for i in 0..5 {
                 make_series(&mut buf[..1], 3.7);
                 let pkt1 = make_packet(DataType::BatteryVoltage, &buf[..1], i + 200);
-                power_router.tx(&pkt1).unwrap();
+                power_router.tx(pkt1).unwrap();
                 thread::sleep(Duration::from_millis(5));
 
                 let msg = "hello world!";
@@ -333,7 +333,7 @@ mod threaded_system_tests {
                     i + 300,
                 )
                 .unwrap();
-                power_router.tx(&pkt2).unwrap();
+                power_router.tx(pkt2).unwrap();
                 thread::sleep(Duration::from_millis(5));
             }
         });

@@ -2,7 +2,7 @@
 #[cfg(test)]
 mod single_threaded_test {
     use sedsprintf_rs_2026::config::{DataEndpoint, DataType};
-    use sedsprintf_rs_2026::router::{BoardConfig, Clock, EndpointHandler, Router};
+    use sedsprintf_rs_2026::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
     use sedsprintf_rs_2026::telemetry_packet::TelemetryPacket;
     use sedsprintf_rs_2026::TelemetryResult;
     use sedsprintf_rs_2026::relay::Relay;
@@ -214,9 +214,9 @@ mod single_threaded_test {
             };
 
             let router = if handlers.is_empty() {
-                Router::new::<_>(Some(tx), BoardConfig::default(), clock)
+                Router::new::<_>(Some(tx), RouterMode::Sink, RouterConfig::default(), clock)
             } else {
-                Router::new(Some(tx), BoardConfig::new(handlers), clock)
+                Router::new(Some(tx), RouterMode::Sink, RouterConfig::new(handlers), clock)
             };
 
             nodes.push(SimNode {
@@ -250,7 +250,7 @@ mod single_threaded_test {
                 let node = &mut nodes[0];
                 make_series(&mut gps_buf[..2], 10.0);
                 let pkt = make_packet(DataType::GpsData, &gps_buf[..2], i as u64);
-                node.router.tx(&pkt).unwrap();
+                node.router.tx(pkt).unwrap();
             }
 
             // --- Sender B (flight controller, node 1 on bus1) ---
@@ -260,12 +260,12 @@ mod single_threaded_test {
                 // "gyro"
                 make_series(&mut gyro_buf[..2], 0.5);
                 let pkt1 = make_packet(DataType::GpsData, &gyro_buf[..2], (i + 10_000) as u64);
-                node.router.tx(&pkt1).unwrap();
+                node.router.tx(pkt1).unwrap();
 
                 // "barometer"
                 make_series(&mut baro_buf[..2], 101.3);
                 let pkt2 = make_packet(DataType::GpsData, &baro_buf[..2], (i + 20_000) as u64);
-                node.router.tx(&pkt2).unwrap();
+                node.router.tx(pkt2).unwrap();
             }
 
             // --- Sender C (power board, node 2 on bus2) ---
@@ -279,7 +279,7 @@ mod single_threaded_test {
                     &batt_buf[..1],
                     (i + 30_000) as u64,
                 );
-                node.router.tx(&pkt1).unwrap();
+                node.router.tx(pkt1).unwrap();
 
                 // message as string (TelemetryError)
                 let pkt2 = TelemetryPacket::from_str_slice(
@@ -289,7 +289,7 @@ mod single_threaded_test {
                     (i + 40_000) as u64,
                 )
                 .unwrap();
-                node.router.tx(&pkt2).unwrap();
+                node.router.tx(pkt2).unwrap();
             }
 
             // --- Deliver all bus frames + relay for this iteration (one pass) ---
