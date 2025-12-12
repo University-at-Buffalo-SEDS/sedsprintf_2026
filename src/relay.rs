@@ -1,4 +1,5 @@
 use crate::config::{MAX_QUEUE_SIZE, MAX_RECENT_RX_IDS, STARTING_QUEUE_SIZE};
+use crate::queue::{BoundedDeque, ByteCost};
 use crate::serialize;
 use crate::telemetry_packet::{hash_bytes_u64, TelemetryPacket};
 use crate::{
@@ -7,7 +8,6 @@ use crate::{
 };
 use alloc::boxed::Box;
 use alloc::{sync::Arc, vec::Vec};
-use crate::queue::{BoundedDeque, ByteCost};
 
 /// Logical side index (CAN, UART, RADIO, etc.)
 pub type RelaySideId = usize;
@@ -88,7 +88,10 @@ impl Relay {
                 sides: Vec::new(),
                 rx_queue: BoundedDeque::new(MAX_QUEUE_SIZE, STARTING_QUEUE_SIZE),
                 tx_queue: BoundedDeque::new(MAX_QUEUE_SIZE, STARTING_QUEUE_SIZE),
-                recent_rx: BoundedDeque::new(MAX_RECENT_RX_IDS * size_of::<u64>() ,MAX_RECENT_RX_IDS),
+                recent_rx: BoundedDeque::new(
+                    MAX_RECENT_RX_IDS * size_of::<u64>(),
+                    MAX_RECENT_RX_IDS,
+                ),
             }),
             clock,
         }
@@ -150,7 +153,10 @@ impl Relay {
     }
 
     /// Enqueue serialized bytes that originated from `src` into the relay RX queue.
-    /// Cheap & ISR-friendly: just clones into an Arc and pushes into a VecDeque.
+    ///
+    /// Note: `Arc::from(bytes)` allocates and copies `len` bytes into a new `Arc<[u8]>`.
+    /// This is still “fast enough” for many cases, but it is not allocation-free / ISR-safe.
+
     pub fn rx_serialized_from_side(&self, src: RelaySideId, bytes: &[u8]) -> TelemetryResult<()> {
         let mut st = self.state.lock();
 
@@ -166,6 +172,9 @@ impl Relay {
     }
 
     /// Enqueue a full TelemetryPacket that originated from `src` into the relay RX queue.
+    ///
+    /// The packet is wrapped in `Arc<TelemetryPacket>` so fanout can clone the pointer cheaply.
+
     pub fn rx_from_side(&self, src: RelaySideId, packet: TelemetryPacket) -> TelemetryResult<()> {
         let mut st = self.state.lock();
 
@@ -200,6 +209,8 @@ impl Relay {
     }
 
     /// Internal: expand one RX item into TX items for all other sides.
+    ///
+    /// Fanout is cheap: the `RelayItem` is cloned (Arc bump) and reused across all destinations.
     fn process_rx_queue_item(&self, item: RelayRxItem) {
         if self.is_duplicate_rx(&item) {
             // Already fanned out this packet recently; skip.
@@ -225,8 +236,9 @@ impl Relay {
     /// Helper: call a TX handler with the best representation we have.
     /// - Packet handler + Packet item: direct.
     /// - Serialized handler + Serialized item: direct.
-    /// - Packet handler + Serialized item: deserialize once for this call.
-    /// - Serialized handler + Packet item: serialize once for this call.
+    /// - Packet handler + Serialized item: deserialize for this call.
+    /// - Serialized handler + Packet item: serialize for this call.
+
     fn call_tx_handler(&self, handler: &RelayTxHandlerFn, data: &RelayItem) -> TelemetryResult<()> {
         match (handler, data) {
             // Fast paths
