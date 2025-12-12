@@ -20,7 +20,6 @@ pub struct BoundedDeque<T> {
 }
 
 impl<T: ByteCost + PartialEq> BoundedDeque<T> {
-
     /// Create new bounded deque with byte budget and starting capacity.
     pub fn new(max_bytes: usize, starting_elems: usize) -> Self {
         // max_elems must be conservative: worst-case per element cost.
@@ -72,18 +71,35 @@ impl<T: ByteCost + PartialEq> BoundedDeque<T> {
     pub fn push_back(&mut self, v: T) {
         let cost = v.byte_cost();
 
-        // If a single item is bigger than the entire budget, return to not overrun the buffer.
+        // If a single item is bigger than the entire budget, drop it.
         if cost > self.max_bytes {
             return;
         }
 
-        // Evict until it fits.
+        // Evict until it fits in the byte budget.
         while !self.q.is_empty() && self.cur_bytes + cost > self.max_bytes {
             self.pop_front();
         }
 
-        // Prevent VecDeque from growing capacity beyond max_elems:
-        // If we're at/over max_elems, evict one more to keep pushes from triggering growth.
+        // Enforce element-capacity policy:
+        // - If we're at the hard cap and "full", evict one so push can't grow.
+        if self.q.capacity() >= self.max_elems && self.q.len() >= self.q.capacity() {
+            self.pop_front();
+        }
+
+        // If we *could* grow but would exceed max_elems, reserve only up to max_elems.
+        // Also avoid VecDeque's exponential growth overshooting the cap.
+        let cap = self.q.capacity();
+        if cap < self.max_elems && self.q.len() == cap {
+            let target = self.max_elems;
+            let add = target.saturating_sub(cap);
+            if add > 0 {
+                // reserve_exact helps avoid overshooting the cap
+                self.q.reserve_exact(add);
+            }
+        }
+
+        // If we're still at/over element cap by length, evict (ring behavior).
         while self.q.len() >= self.max_elems && !self.q.is_empty() {
             self.pop_front();
         }
