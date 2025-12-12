@@ -2031,6 +2031,7 @@ mod concurrency_tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::thread;
+    use rand::random;
 
     /// Simple clock that always returns 0 (blanket impl<Fn() -> u64> for Clock).
     fn zero_clock() -> Box<dyn Clock + Send + Sync> {
@@ -2223,7 +2224,7 @@ mod concurrency_tests {
         let logger = thread::spawn(move || {
             for _ in 0..ITERS {
                 r_logger
-                    .log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0])
+                    .log_queue(DataType::GpsData, &[1.0_f32, random(), 3.0])
                     .expect("log_queue failed");
             }
         });

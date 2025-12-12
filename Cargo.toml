@@ -48,6 +48,7 @@ strum = { version = "0.27", default-features = false }
 spin = { version = "0.10", optional = true }
 pyo3 = { version = "0.27", optional = true, features = ["auto-initialize", "extension-module", "multiple-pymethods"] }
 miniz_oxide = { version = "0.8", default-features = false, features = ["with-alloc"] }
+rand = "0.10.0-rc.5"
 
 [build-dependencies]
 cbindgen = "0.29"

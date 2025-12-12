@@ -928,7 +928,7 @@ impl Router {
     /// - If `ignore_local` is false, also dispatches to matching local handlers.
     /// - If `ignore_local` is true, suppresses local dispatch (remote-only).
     fn tx_item_impl(&self, pkt: QueueItem, ignore_local: bool) -> TelemetryResult<()> {
-        if self.is_duplicate_pkt(&pkt) {
+        if self.is_duplicate_pkt(&pkt) && !ignore_local {
             return Ok(());
         }
 
