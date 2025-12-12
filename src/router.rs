@@ -365,29 +365,44 @@ impl Router {
         }
     }
 
+
+    fn get_hash(item: &QueueItem) -> u64 {
+        match item {
+            QueueItem::Packet(pkt) => pkt.packet_id(),
+            QueueItem::Serialized(bytes) => {
+                match serialize::packet_id_from_wire(bytes.as_ref()) {
+                    Ok(id) => id,
+                    Err(_e) => {
+                        // Fallback: if bytes are malformed (or compression feature mismatch),
+                        // hash raw bytes so we can still dedupe identical network duplicates.
+                        let mut h: u64 = 0x9E37_79B9_7F4A_7C15;
+                        h = hash_bytes_u64(h, bytes.as_ref());
+                        h
+                    }
+                }
+            }
+        }
+    }
+
+    /// Remove a has from the ring buffer of recent RX IDs.
+    fn remove_pkt_id(&self, item: &QueueItem) {
+        let hash = Self::get_hash(item);
+        let mut st = self.state.lock();
+
+        st.recent_rx.remove_value(&hash);
+    }
+
     /// Compute a de-dupe ID for a QueueItem and record it.
     /// Returns true if this item was seen recently (and should be skipped).
     fn is_duplicate_pkt(&self, item: &QueueItem) -> bool {
         // Derive ID from packet or from raw bytes.
-        let id = match item {
-            QueueItem::Packet(pkt) => pkt.packet_id(),
-            QueueItem::Serialized(bytes) => {
-                // Hash raw serialized bytes; duplicates over the network
-                // will be identical at the byte level.
-                let mut h: u64 = 0x9E37_79B9_7F4A_7C15;
-                h = hash_bytes_u64(h, bytes.as_ref());
-                h
-            }
-        };
+        let id = Self::get_hash(item);
 
         let mut st = self.state.lock();
 
         if st.recent_rx.contains(&id) {
             true
         } else {
-            if st.recent_rx.len() >= MAX_RECENT_RX_IDS {
-                st.recent_rx.pop_front();
-            }
             st.recent_rx.push_back(id);
             false
         }
@@ -653,6 +668,7 @@ impl Router {
         fn with_retries<F>(
             this: &Router,
             dest: DataEndpoint,
+            data: &QueueItem,
             pkt_for_ctx: Option<&TelemetryPacket>,
             env_for_ctx: Option<&serialize::TelemetryEnvelope>,
             mut run: F,
@@ -661,6 +677,7 @@ impl Router {
             F: FnMut() -> TelemetryResult<()>,
         {
             this.retry(MAX_HANDLER_RETRIES, || run()).map_err(|e| {
+                this.remove_pkt_id(data);
                 if let Some(pkt) = pkt_for_ctx {
                     let _ = this.handle_callback_error(pkt, Some(dest), e);
                 } else if let Some(env) = env_for_ctx {
@@ -671,18 +688,29 @@ impl Router {
         }
 
         // --- Dispatch based on handler kind ---
+        let queue_item: &QueueItem = match (data, pkt_for_ctx) {
+            (Some(d), _) => d,
+            (None, Some(pkt)) => &QueueItem::Packet(pkt.clone()),
+            (None, None) => {
+                debug_assert!(
+                    false,
+                    "call_handler_with_retries called without data or packet context"
+                );
+                return Ok(());
+            }
+        };
         match (&handler.handler, data) {
             (EndpointHandlerFn::Packet(f), _) => {
                 let pkt = pkt_for_ctx.expect("Packet handler requires TelemetryPacket context");
-                with_retries(self, dest, pkt_for_ctx, env_for_ctx, || f(pkt))
+                with_retries(self, dest, queue_item, pkt_for_ctx, env_for_ctx, || f(pkt))
             }
 
             (EndpointHandlerFn::Serialized(f), Some(QueueItem::Serialized(bytes))) => {
-                with_retries(self, dest, pkt_for_ctx, env_for_ctx, || f(bytes))
+                with_retries(self, dest, queue_item, pkt_for_ctx, env_for_ctx, || f(bytes))
             }
 
             (EndpointHandlerFn::Serialized(f), Some(QueueItem::Packet(pkt))) => {
-                with_retries(self, dest, pkt_for_ctx, env_for_ctx, || {
+                with_retries(self, dest, queue_item, pkt_for_ctx, env_for_ctx, || {
                     let owned = serialize::serialize_packet(pkt);
                     f(&owned)
                 })
@@ -900,10 +928,9 @@ impl Router {
     /// - If `ignore_local` is false, also dispatches to matching local handlers.
     /// - If `ignore_local` is true, suppresses local dispatch (remote-only).
     fn tx_item_impl(&self, pkt: QueueItem, ignore_local: bool) -> TelemetryResult<()> {
-        // NOTE: calling is_duplicate_pkt here is weird; you were calling it but ignoring result.
-        // Keep behavior but make it explicit (and don't early-return: tx() should be allowed
-        // to send duplicates if you want; if you *do* want dedupe here, return early).
-        let _ = self.is_duplicate_pkt(&pkt);
+        if self.is_duplicate_pkt(&pkt) {
+            return Ok(());
+        }
 
         match pkt {
             QueueItem::Packet(pkt) => {
@@ -913,10 +940,10 @@ impl Router {
                 // Local-serialized handlers only matter if we're doing local dispatch.
                 let has_serialized_local = !ignore_local
                     && pkt
-                        .endpoints()
-                        .iter()
-                        .copied()
-                        .any(|ep| self.endpoint_has_serialized_handler(ep));
+                    .endpoints()
+                    .iter()
+                    .copied()
+                    .any(|ep| self.endpoint_has_serialized_handler(ep));
 
                 let send_remote = pkt.endpoints().iter().any(|e| {
                     (!self.cfg.is_local_endpoint(*e)
