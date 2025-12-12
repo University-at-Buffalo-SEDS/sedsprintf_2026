@@ -125,7 +125,7 @@ def main() -> None:
         print("Submodule is already at latest commit; nothing to commit.")
         return
 
-    commit_msg = f"Update submodule {prefix} to latest {branch}"
+    commit_msg = f"chore(submodule): Update submodule {prefix} to latest {branch}"
     run(["git", "commit", "-m", commit_msg])
     print("Done:", commit_msg)
 
