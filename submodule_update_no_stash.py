@@ -19,9 +19,8 @@ def run(cmd: List[str], *, capture: bool = False, cwd: Optional[Path] = None) ->
             cwd=str(cwd) if cwd is not None else None,
         )
         return result.stdout.strip()
-    else:
-        subprocess.run(cmd, check=True, cwd=str(cwd) if cwd is not None else None)
-        return None
+    subprocess.run(cmd, check=True, cwd=str(cwd) if cwd is not None else None)
+    return None
 
 
 def get_config(key: str) -> str:
@@ -35,15 +34,63 @@ def get_config(key: str) -> str:
     return value
 
 
+def is_git_repo(path: Path) -> bool:
+    """
+    Detect whether `path` is a git repository (normal repo, submodule, or worktree).
+    """
+    if (path / ".git").is_dir():
+        return True
+    if (path / ".git").is_file():  # submodules / worktrees
+        return True
+
+    # Fallback: ask git directly
+    try:
+        subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=path,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True,
+        )
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+
 def main() -> None:
-    # ensure we are in the correct directory (repo root, one up from this script)
-    repo_root = Path(__file__).parent.resolve()
-    os.chdir(repo_root / "..")
+    # Script lives in <repo_root>/sedsprintf_rs/update_submodule.py
+    script_dir = Path(__file__).parent.resolve()
+    repo_root = script_dir.parent
+    os.chdir(repo_root)
 
-    # Path of the submodule in the parent repo
     prefix = "sedsprintf_rs"
+    submodule_path = repo_root / prefix
 
-    # Read submodule config (branch preservation)
+    # --- Safety checks -----------------------------------------------------
+
+    # Ensure path exists
+    if not submodule_path.exists():
+        raise SystemExit(f"Path '{prefix}' does not exist")
+
+    # Ensure it is a git repo (i.e., not a subtree)
+    if not is_git_repo(submodule_path):
+        raise SystemExit(
+            f"'{prefix}' is NOT a git repository.\n"
+            "This looks like a subtree or a plain directory.\n"
+            "Refusing to run submodule update logic."
+        )
+
+    # Ensure it is actually registered as a submodule
+    try:
+        get_config(f"submodule.{prefix}.url")
+    except SystemExit:
+        raise SystemExit(
+            f"'{prefix}' is a git repo, but NOT registered as a submodule.\n"
+            "If this is a subtree, use the subtree updater instead."
+        )
+
+    # --- Normal submodule update logic ------------------------------------
+
     url = get_config(f"submodule.{prefix}.url")
     branch = get_config(f"submodule.{prefix}.branch")
 
@@ -51,30 +98,26 @@ def main() -> None:
     print(f"  url:    {url}")
     print(f"  branch: {branch}")
 
-    # Make sure the submodule exists & is initialized
+    # Ensure the submodule is initialized
     run(["git", "submodule", "update", "--init", "--", prefix])
 
-    submodule_path = Path(prefix)
-
-    # Fetch latest from origin for that branch
+    # Fetch latest from origin
     run(["git", "fetch", "origin", branch], cwd=submodule_path)
 
-    # Ensure we are on the right branch in the submodule
+    # Ensure correct branch
     existing = run(["git", "branch", "--list", branch], capture=True, cwd=submodule_path)
     if existing:
-        # Branch exists locally; just check it out
         run(["git", "checkout", branch], cwd=submodule_path)
     else:
-        # Create local branch tracking origin/branch
         run(["git", "checkout", "-b", branch, f"origin/{branch}"], cwd=submodule_path)
 
-    # Fast-forward to origin/<branch> (no merge noise)
+    # Fast-forward only
     run(["git", "merge", "--ff-only", f"origin/{branch}"], cwd=submodule_path)
 
-    # Stage the updated submodule pointer in the parent repo
+    # Stage submodule pointer
     run(["git", "add", prefix])
 
-    # Only commit if there is actually a change in the submodule entry
+    # Commit only if changed
     diff_proc = subprocess.run(
         ["git", "diff", "--cached", "--quiet", "--", prefix]
     )
