@@ -17,7 +17,7 @@ use crate::{impl_data_as_prim, impl_from_prim_slices, impl_ledecode_auto};
 use alloc::{string::String, string::ToString, sync::Arc, vec::Vec};
 use core::any::TypeId;
 use core::fmt::{Formatter, Write};
-
+use crate::queue::ByteCost;
 // ============================================================================
 // Constants
 // ============================================================================
@@ -40,7 +40,7 @@ const DEFAULT_STRING_CAPACITY: usize = 96;
 ///
 /// This is the primary data structure passed around inside the crate and
 /// across FFI boundaries (via views / wrappers).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TelemetryPacket {
     /// Logical message type (schema selector).
     ty: DataType,
@@ -920,5 +920,15 @@ impl core::fmt::Display for TelemetryPacket {
     #[inline]
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         f.write_str(&TelemetryPacket::to_string(self))
+    }
+}
+
+impl ByteCost for TelemetryPacket {
+    #[inline]
+    fn byte_cost(&self) -> usize {
+        size_of::<Self>()
+            + self.sender.len()
+            + self.endpoints.len() * size_of::<DataEndpoint>()
+            + self.payload.len()
     }
 }

@@ -150,7 +150,7 @@ impl<const INLINE: usize> SmallPayload<INLINE> {
             SmallPayload::Heap(a) => a.len(),
         }
     }
-
+    
     /// Returns `true` if the payload is stored inline on the stack.
     #[inline]
     #[allow(dead_code)]
@@ -184,5 +184,35 @@ impl<const INLINE: usize> Deref for SmallPayload<INLINE> {
     #[inline]
     fn deref(&self) -> &[u8] {
         self.as_slice()
+    }
+}
+
+impl<const INLINE: usize> PartialEq for SmallPayload<INLINE> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.as_slice() == other.as_slice()
+    }
+}
+
+impl<const INLINE: usize> Eq for SmallPayload<INLINE> {}
+
+impl<const INLINE: usize> PartialEq<[u8]> for SmallPayload<INLINE> {
+    #[inline]
+    fn eq(&self, other: &[u8]) -> bool {
+        self.as_slice() == other
+    }
+}
+
+impl<const INLINE: usize> PartialEq<SmallPayload<INLINE>> for [u8] {
+    #[inline]
+    fn eq(&self, other: &SmallPayload<INLINE>) -> bool {
+        self == other.as_slice()
+    }
+}
+
+impl<const INLINE: usize> PartialEq<Arc<[u8]>> for SmallPayload<INLINE> {
+    #[inline]
+    fn eq(&self, other: &Arc<[u8]>) -> bool {
+        self.as_slice() == other.as_ref()
     }
 }

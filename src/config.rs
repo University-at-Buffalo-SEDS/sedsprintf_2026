@@ -38,6 +38,10 @@ pub const MAX_RECENT_RX_IDS: usize = 128;
 /// Starting size of the internal router and relay queues.
 pub const STARTING_QUEUE_SIZE: usize = 16;
 
+/// Maximum size of the internal router and relay queues in Bytes.
+/// Higher values increase memory usage but may help prevent packet
+/// drops under high load.
+pub const MAX_QUEUE_SIZE: usize = 1024;
 
 /// Minimum payload size (in bytes) before we consider compression.
 pub const PAYLOAD_COMPRESS_THRESHOLD: usize = 16;

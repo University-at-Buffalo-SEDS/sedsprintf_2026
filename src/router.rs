@@ -1,4 +1,4 @@
-use crate::config::{MAX_RECENT_RX_IDS, STARTING_QUEUE_SIZE};
+use crate::config::{MAX_QUEUE_SIZE, MAX_RECENT_RX_IDS, STARTING_QUEUE_SIZE};
 #[cfg(all(not(feature = "std"), target_os = "none"))]
 use crate::seds_error_msg;
 use crate::telemetry_packet::hash_bytes_u64;
@@ -10,11 +10,30 @@ use crate::{
     MessageElementCount, TelemetryError,
     TelemetryResult,
 };
-use alloc::{boxed::Box, collections::VecDeque, format, sync::Arc, vec, vec::Vec};
+use alloc::{boxed::Box, format, sync::Arc, vec, vec::Vec};
+use crate::queue::{BoundedDeque, ByteCost};
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RxItem {
     Packet(TelemetryPacket),
     Serialized(Arc<[u8]>),
+}
+
+
+impl ByteCost for RxItem{
+    #[inline]
+    fn byte_cost(&self) -> usize {
+        match self {
+            RxItem::Packet(pkt) => pkt.byte_cost(),
+            RxItem::Serialized(bytes) => size_of::<Arc<[u8]>>() + bytes.len(),
+        }
+    }
+}
+
+impl ByteCost for u64 {
+        fn byte_cost(&self) -> usize {
+            size_of::<u64>()
+        }
 }
 
 // -------------------- endpoint + board config --------------------
@@ -124,6 +143,7 @@ impl_letype_num!(i64, 8);
 impl_letype_num!(i128, 16);
 impl_letype_num!(f32, 4);
 impl_letype_num!(f64, 8);
+
 /// Encode a slice of `LeBytes` into a contiguous little-endian byte array.
 pub(crate) fn encode_slice_le<T: LeBytes>(data: &[T]) -> Arc<[u8]> {
     let total = data.len() * T::WIDTH;
@@ -235,9 +255,9 @@ fn fallback_stdout(msg: &str) {
 /// Used to allow safe concurrent access from multiple tasks.
 /// This struct is private to the Router implementation.
 struct RouterInner {
-    received_queue: VecDeque<RxItem>,
-    transmit_queue: VecDeque<TelemetryPacket>,
-    recent_rx: VecDeque<u64>,
+    received_queue: BoundedDeque<RxItem>,
+    transmit_queue: BoundedDeque<TelemetryPacket>,
+    recent_rx: BoundedDeque<u64>,
 }
 
 /// Telemetry Router for handling incoming and outgoing telemetry packets.
@@ -297,9 +317,9 @@ impl Router {
             transmit: transmit.map(|t| Box::new(t) as _),
             cfg,
             state: RouterMutex::new(RouterInner {
-                received_queue: VecDeque::with_capacity(STARTING_QUEUE_SIZE),
-                transmit_queue: VecDeque::with_capacity(STARTING_QUEUE_SIZE),
-                recent_rx: VecDeque::with_capacity(MAX_RECENT_RX_IDS),
+                received_queue: BoundedDeque::new(MAX_QUEUE_SIZE, STARTING_QUEUE_SIZE),
+                transmit_queue: BoundedDeque::new(MAX_QUEUE_SIZE, STARTING_QUEUE_SIZE),
+                recent_rx: BoundedDeque::new(MAX_RECENT_RX_IDS * size_of::<u64>(), MAX_RECENT_RX_IDS),
             }),
             clock,
         }
