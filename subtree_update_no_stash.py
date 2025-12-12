@@ -54,23 +54,15 @@ def main() -> None:
 
     os.chdir(super_repo_root)
 
-    url = get_config(f"subtree.{subtree_name}.url")
     branch = get_config_default(f"subtree.{subtree_name}.branch", "main")
     squash_raw = get_config_default(f"subtree.{subtree_name}.squash", "false").strip().lower()
     squash = squash_raw in {"1", "true", "yes", "on"}
 
-    print(f"Updating subtree '{subtree_name}' (prefix '{subtree_name}') from {url} branch '{branch}'")
+    print(f"Updating subtree '{subtree_name}' (prefix '{subtree_name}') branch '{branch}'")
     print(f"Squash: {squash}")
 
     # Use a stable local remote name per subtree
     remote_name = f"subtree-{subtree_name}"
-
-    # Ensure remote exists and points to the right URL
-    remotes = run(["git", "remote"], capture=True) or ""
-    if remote_name not in remotes.splitlines():
-        run(["git", "remote", "add", remote_name, url])
-    else:
-        run(["git", "remote", "set-url", remote_name, url])
 
     # Fetch latest
     run(["git", "fetch", "--prune", remote_name])
