@@ -4,7 +4,7 @@ version = "2.0.0"
 edition = "2024"
 build = "build.rs"
 authors = ["Rylan Meilutis <rylan@rylanswebsite.com>"]
-description = "A memory safe, no_std-capable telemetry library in Rust with Python and c bindings for use in the UBSEDS student group."
+description = "A memory safe, no_std-capable telemetry library in Rust with Python and C bindings for use in building a telemetry network stack."
 license = "GPL-2"
 repository = "github.com/rylanmeilutis/sedsprintf_rs"
 keywords = ["sprintf", "no_std", "embedded", "python", "pyo3"]
@@ -48,7 +48,6 @@ strum = { version = "0.27", default-features = false }
 spin = { version = "0.10", optional = true }
 pyo3 = { version = "0.27", optional = true, features = ["auto-initialize", "extension-module", "multiple-pymethods"] }
 miniz_oxide = { version = "0.8", default-features = false, features = ["with-alloc"] }
-rand = "0.10.0-rc.5"
 
 [build-dependencies]
 cbindgen = "0.29"
