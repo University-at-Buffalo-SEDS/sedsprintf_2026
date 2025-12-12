@@ -58,16 +58,27 @@ def main() -> None:
     squash_raw = get_config_default(f"subtree.{subtree_name}.squash", "false").strip().lower()
     squash = squash_raw in {"1", "true", "yes", "on"}
 
+    # Commit message template (configurable)
+    msg_default = f"chore(subtree): update {subtree_name} from upstream/{branch}"
+    if squash:
+        msg_default += " (squashed)"
+
+    commit_msg = get_config_default(
+        f"subtree.{subtree_name}.message",
+        msg_default,
+    )
+
     print(f"Updating subtree '{subtree_name}' (prefix '{subtree_name}') branch '{branch}'")
     print(f"Squash: {squash}")
+    print(f"Commit message: {commit_msg}")
 
-    # Use a stable local remote name per subtree
-    remote_name = f"sedsprintf-upstream"
+    # Stable local remote name
+    remote_name = "sedsprintf-upstream"
 
     # Fetch latest
     run(["git", "fetch", "--prune", remote_name])
 
-    # Perform the subtree pull (this creates the merge commit in the superproject)
+    # Perform the subtree pull with commit message
     cmd = [
         "git",
         "subtree",
@@ -76,6 +87,8 @@ def main() -> None:
         subtree_name,
         remote_name,
         branch,
+        "-m",
+        commit_msg,
     ]
     if squash:
         cmd.append("--squash")
@@ -83,8 +96,6 @@ def main() -> None:
     try:
         run(cmd)
     except subprocess.CalledProcessError:
-        # If already up to date, git subtree can still return non-zero in some cases depending on state.
-        # We'll just report and exit cleanly.
         print("Subtree pull did not apply changes (already up to date or no matching commits).")
         return
 
