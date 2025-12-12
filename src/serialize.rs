@@ -17,6 +17,7 @@ use crate::{
 };
 
 use alloc::{sync::Arc, vec::Vec, borrow::ToOwned, string::String};
+use crate::telemetry_packet::hash_bytes_u64;
 
 /// Lightweight header-only view of a serialized [`TelemetryPacket`].
 ///
@@ -490,6 +491,110 @@ pub fn packet_wire_size(pkt: &TelemetryPacket) -> usize {
     let (_payload_compressed, payload_wire) = payload_compression::compress_if_beneficial(payload);
 
     header + EP_BITMAP_BYTES + sender_wire.len() + payload_wire.len()
+}
+
+
+
+#[inline]
+pub fn packet_id_from_wire(buf: &[u8]) -> Result<u64, TelemetryError> {
+    if buf.len() < 2 {
+        return Err(TelemetryError::Deserialize("short prelude"));
+    }
+
+    let mut r = ByteReader::new(buf);
+
+    let flags = r.read_bytes(1)?[0];
+    let payload_is_compressed = (flags & FLAG_COMPRESSED_PAYLOAD) != 0;
+    let sender_is_compressed = (flags & FLAG_COMPRESSED_SENDER) != 0;
+
+    let _nep = r.read_bytes(1)?[0] as usize;
+
+    let ty_v = read_uleb128(&mut r)?;
+    let dsz = read_uleb128(&mut r)? as usize; // logical payload size (uncompressed)
+    let ts_v = read_uleb128(&mut r)?;
+    let slen = read_uleb128(&mut r)? as usize; // logical sender len (uncompressed)
+
+    let sender_wire_len = if sender_is_compressed {
+        read_uleb128(&mut r)? as usize
+    } else {
+        slen
+    };
+
+    if r.remaining() < EP_BITMAP_BYTES + sender_wire_len {
+        return Err(TelemetryError::Deserialize("short buffer"));
+    }
+
+    // ---- endpoints (hash in ASC discriminant order, which matches expand loop) ----
+    let bm = r.read_bytes(EP_BITMAP_BYTES)?;
+
+    // Convert ty discriminant -> DataType (needed for ty.as_str()).
+    let ty_u32 = u32::try_from(ty_v).map_err(|_| TelemetryError::Deserialize("type too large"))?;
+    if ty_u32 > MAX_VALUE_DATA_TYPE {
+        return Err(TelemetryError::InvalidType);
+    }
+    let ty = DataType::try_from_u32(ty_u32).ok_or(TelemetryError::InvalidType)?;
+
+    // ---- sender bytes (must hash *decompressed* bytes if compressed) ----
+    let sender_wire_bytes = r.read_bytes(sender_wire_len)?;
+    let sender_decompressed: Vec<u8>;
+    let sender_bytes: &[u8] = if sender_is_compressed {
+        sender_decompressed = payload_compression::decompress(sender_wire_bytes, slen)?;
+        // packet_id() hashes sender.as_bytes(), not validated UTF-8 specifically for hashing
+        &sender_decompressed
+    } else {
+        sender_wire_bytes
+    };
+
+    // ---- payload bytes (must hash *decompressed* payload if compressed) ----
+    let payload_decompressed: Vec<u8>;
+    let payload_bytes: &[u8] = if !payload_is_compressed {
+        if r.remaining() < dsz {
+            return Err(TelemetryError::Deserialize("short buffer"));
+        }
+        r.read_bytes(dsz)?
+    } else {
+        // Compressed payload consumes the rest of the buffer in your format.
+        let comp_len = r.remaining();
+        if comp_len < 1 {
+            return Err(TelemetryError::Deserialize("short buffer"));
+        }
+        let comp = r.read_bytes(comp_len)?;
+        payload_decompressed = payload_compression::decompress(comp, dsz)?;
+        &payload_decompressed
+    };
+
+    // ---- hash exactly like TelemetryPacket::packet_id() ----
+    let mut h: u64 = 0x9E37_79B9_7F4A_7C15;
+
+    // Sender (string bytes)
+    h = hash_bytes_u64(h, sender_bytes);
+
+    // Logical type as string bytes
+    h = hash_bytes_u64(h, ty.as_str().as_bytes());
+
+    // Endpoints as string bytes, in ascending discriminant order (matches your expand loop)
+    for idx in 0..EP_BITMAP_BITS {
+        let byte = idx / 8;
+        let bit = idx % 8;
+        if ((bm[byte] >> bit) & 1) != 0 {
+            let v = idx as u32;
+            if v > MAX_VALUE_DATA_ENDPOINT {
+                return Err(TelemetryError::Deserialize("bad endpoint bit set"));
+            }
+            let ep = DataEndpoint::try_from_u32(v)
+                .ok_or(TelemetryError::Deserialize("bad endpoint bit set"))?;
+            h = hash_bytes_u64(h, ep.as_str().as_bytes());
+        }
+    }
+
+    // Timestamp + data_size as bytes
+    h = hash_bytes_u64(h, &ts_v.to_le_bytes());
+    h = hash_bytes_u64(h, &(dsz as u64).to_le_bytes());
+
+    // Payload bytes (logical payload)
+    h = hash_bytes_u64(h, payload_bytes);
+
+    Ok(h)
 }
 
 // ===========================================================================
