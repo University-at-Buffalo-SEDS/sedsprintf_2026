@@ -342,7 +342,7 @@ mod tests {
         let data = [10.0_f32, 10.25];
         router.log_queue(DataType::BatteryStatus, &data).unwrap();
 
-        let data = [10.0_f32, 10.25, 10.5];
+        let data = [10.0_f32, 10.25, 10.2];
         router.log_queue(DataType::GpsData, &data).unwrap();
         // Flush -> frame appears on the "bus"
         router.process_tx_queue().unwrap();
@@ -2965,4 +2965,157 @@ mod dedupe_tests {
             "relay must not dedupe different frames from the same side"
         );
     }
+}
+
+
+#[cfg(test)]
+mod router_tests{
+    // -------------------------------------------------------------------------
+// New router functionality tests
+// -------------------------------------------------------------------------
+
+    use std::sync::{Arc, Mutex};
+    use crate::config::{DataEndpoint, DataType};
+    use crate::router::{EndpointHandler, Router, RouterMode};
+    use crate::telemetry_packet::TelemetryPacket;
+    use crate::{serialize, TelemetryResult};
+    use crate::tests::timeout_tests::StepClock;
+
+    /// In `Relay` mode, receiving a packet that includes at least one
+/// non-local endpoint should cause the router to re-transmit (re-broadcast)
+/// the packet.
+#[test]
+fn relay_mode_retransmits_when_remote_endpoint_present() {
+    use crate::router::RouterConfig;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let tx_calls = Arc::new(AtomicUsize::new(0));
+    let tx_calls_c = tx_calls.clone();
+    let transmit = move |_bytes: &[u8]| -> TelemetryResult<()> {
+        tx_calls_c.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    };
+
+    // Local handler on SD_CARD so the router considers SD_CARD "local".
+    let local_calls = Arc::new(AtomicUsize::new(0));
+    let local_calls_c = local_calls.clone();
+    let sd_handler = EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt| {
+        local_calls_c.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    });
+
+    let router = Router::new(
+        Some(transmit),
+        RouterMode::Relay,
+        RouterConfig::new(vec![sd_handler]),
+        StepClock::new_default_box(),
+    );
+
+    // Include one local + one remote endpoint.
+    let endpoints = &[DataEndpoint::SdCard, DataEndpoint::Radio];
+    let pkt =
+        TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], endpoints, 0).unwrap();
+
+    router.rx(&pkt).unwrap();
+
+    // Local handler should fire once.
+    assert_eq!(local_calls.load(Ordering::SeqCst), 1);
+    // Relay should transmit at least once.
+    assert_eq!(tx_calls.load(Ordering::SeqCst), 1);
+}
+
+/// In `Sink` mode, receiving a packet should never re-transmit.
+#[test]
+fn sink_mode_never_retransmits_on_receive() {
+    use crate::router::RouterConfig;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let tx_calls = Arc::new(AtomicUsize::new(0));
+    let tx_calls_c = tx_calls.clone();
+    let transmit = move |_bytes: &[u8]| -> TelemetryResult<()> {
+        tx_calls_c.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    };
+
+    let router = Router::new(
+        Some(transmit),
+        RouterMode::Sink,
+        RouterConfig::new(vec![EndpointHandler::new_packet_handler(
+            DataEndpoint::SdCard,
+            |_pkt| Ok(()),
+        )]),
+        StepClock::new_default_box(),
+    );
+
+    let endpoints = &[DataEndpoint::SdCard, DataEndpoint::Radio];
+    let pkt =
+        TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], endpoints, 0).unwrap();
+
+    router.rx(&pkt).unwrap();
+
+    assert_eq!(tx_calls.load(Ordering::SeqCst), 0);
+}
+
+/// Receiving the exact same serialized packet twice should be deduped
+/// and only delivered to local handlers once.
+#[test]
+fn receive_dedupes_identical_serialized_frames() {
+    use crate::router::RouterConfig;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let hits = Arc::new(AtomicUsize::new(0));
+    let hits_c = hits.clone();
+    let sd_handler = EndpointHandler::new_serialized_handler(DataEndpoint::SdCard, move |_b| {
+        hits_c.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    });
+
+    let router = Router::new(
+        None::<fn(&[u8]) -> TelemetryResult<()>>,
+        RouterMode::Sink,
+        RouterConfig::new(vec![sd_handler]),
+        StepClock::new_default_box(),
+    );
+
+    let endpoints = &[DataEndpoint::SdCard];
+    let pkt =
+        TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], endpoints, 0).unwrap();
+    let bytes = serialize::serialize_packet(&pkt);
+
+    router.rx_serialized(&bytes).unwrap();
+    router.rx_serialized(&bytes).unwrap();
+
+    assert_eq!(hits.load(Ordering::SeqCst), 1);
+}
+
+/// When only a serialized handler exists for an endpoint, `rx_serialized`
+/// should still deliver the raw bytes.
+#[test]
+fn rx_serialized_delivers_to_serialized_handlers() {
+    use crate::router::RouterConfig;
+
+    let seen: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(None));
+    let seen_c = seen.clone();
+    let sd_handler = EndpointHandler::new_serialized_handler(DataEndpoint::SdCard, move |b| {
+        *seen_c.lock().unwrap() = Some(b.to_vec());
+        Ok(())
+    });
+
+    let router = Router::new(
+        None::<fn(&[u8]) -> TelemetryResult<()>>,
+        RouterMode::Sink,
+        RouterConfig::new(vec![sd_handler]),
+        StepClock::new_default_box(),
+    );
+
+    let endpoints = &[DataEndpoint::SdCard];
+    let pkt =
+        TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], endpoints, 0).unwrap();
+    let bytes = serialize::serialize_packet(&pkt);
+
+    router.rx_serialized(&bytes).unwrap();
+    let got = seen.lock().unwrap().clone().expect("no bytes delivered");
+    assert_eq!(*got, *bytes);
+}
+
 }

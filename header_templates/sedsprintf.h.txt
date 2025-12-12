@@ -166,8 +166,6 @@ SedsResult seds_router_transmit_serialized_message(SedsRouter * r, const uint8_t
 
 SedsResult seds_router_transmit_message(SedsRouter * r, const uint8_t * bytes, size_t len);
 
-seds_router_transmit_message
-
 SedsResult seds_router_process_rx_queue(SedsRouter * r);
 
 SedsResult seds_router_rx_serialized_packet_to_queue(SedsRouter * r, const uint8_t * bytes, size_t len);

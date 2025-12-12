@@ -127,7 +127,7 @@ class Router:
         handlers: Optional[
             Sequence[Tuple[int, Optional[PacketHandler], Optional[SerializedHandler]]]
         ] = ...,
-        mode: RouterMode = RouterMode.Relay,
+        mode: RouterMode = Union(RouterMode.Relay, int),
     ) -> "Router": ...
     """
         Create or retrieve a per-process singleton Router.
@@ -139,7 +139,6 @@ class Router:
         Passing a non-None `tx` after the singleton has already been created
         will raise a RuntimeError.
         """
-        ...
 
     def __init__(
         self,
@@ -148,7 +147,7 @@ class Router:
         handlers: Optional[
             Sequence[Tuple[int, Optional[PacketHandler], Optional[SerializedHandler]]]
         ] = ...,
-        mode: RouterMode = RouterMode.Relay,
+        mode: RouterMode = Union(RouterMode.Relay, int),
     ) -> None: ...
 
 
