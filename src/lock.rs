@@ -25,8 +25,19 @@
 // ============================================================================
 
 #[cfg(feature = "std")]
+#[derive(Debug)]
 pub struct RouterMutex<T>(std::sync::Mutex<T>);
 
+
+impl<T> Clone for RouterMutex<T>
+where
+    T: Clone,
+{
+    fn clone(&self) -> Self {
+        RouterMutex::new(self.lock().clone())
+    }
+
+}
 #[cfg(feature = "std")]
 impl<T> RouterMutex<T> {
     /// Create a new `RouterMutex` wrapping the given value.

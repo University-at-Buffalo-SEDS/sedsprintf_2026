@@ -11,6 +11,8 @@ use crate::{
     TelemetryResult,
 };
 use alloc::{boxed::Box, format, sync::Arc, vec, vec::Vec};
+use core::fmt;
+use core::fmt::{Debug, Formatter};
 use crate::queue::{BoundedDeque, ByteCost};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -46,6 +48,24 @@ pub enum EndpointHandlerFn {
 pub struct EndpointHandler {
     endpoint: DataEndpoint,
     handler: EndpointHandlerFn,
+}
+
+impl Debug for EndpointHandlerFn {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            EndpointHandlerFn::Packet(_) => f.write_str("EndpointHandlerFn::Packet(<handler>)"),
+            EndpointHandlerFn::Serialized(_) => f.write_str("EndpointHandlerFn::Serialized(<handler>)"),
+        }
+    }
+}
+
+impl Debug for EndpointHandler {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EndpointHandler")
+            .field("endpoint", &self.endpoint)
+            .field("handler", &self.handler)
+            .finish()
+    }
 }
 
 impl EndpointHandler {
@@ -99,7 +119,7 @@ impl<T: Fn() -> u64> Clock for T {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug, Clone)]
 pub struct BoardConfig {
     /// Handlers for local endpoints.
     handlers: Arc<[EndpointHandler]>,
@@ -254,6 +274,7 @@ fn fallback_stdout(msg: &str) {
 /// Holds the RX and TX queues.
 /// Used to allow safe concurrent access from multiple tasks.
 /// This struct is private to the Router implementation.
+#[derive(Debug, Clone, )]
 struct RouterInner {
     received_queue: BoundedDeque<RxItem>,
     transmit_queue: BoundedDeque<TelemetryPacket>,
@@ -271,6 +292,19 @@ pub struct Router {
     state: RouterMutex<RouterInner>,
     clock: Box<dyn Clock + Send + Sync>,
 }
+
+impl Debug for Router {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Router")
+            .field("sender", &self.sender)
+            .field("cfg", &self.cfg)
+            .field("state", &"<mutex>")
+            .field("transmit", &self.transmit.is_some())
+            .field("clock", &"Clock")
+            .finish()
+    }
+}
+
 
 impl Router {
     /// Create a new Router with the specified transmit function, board configuration, and clock.
