@@ -70,6 +70,14 @@ pub fn define_stack_payload(input: TokenStream) -> TokenStream {
         }
     });
 
+    // match arms for len()
+    let is_empty_arms = caps.iter().map(|c| {
+        let vname = syn::Ident::new(&format!("Inline{}", c), Span::call_site());
+        quote! {
+            StandardSmallPayload::#vname(inner) => inner.is_empty(),
+        }
+    });
+
     // match arms for to_arc()
     let to_arc_arms = caps.iter().map(|c| {
         let vname = syn::Ident::new(&format!("Inline{}", c), Span::call_site());
@@ -125,6 +133,14 @@ pub fn define_stack_payload(input: TokenStream) -> TokenStream {
                 match self {
                     #(#len_arms)*
                     StandardSmallPayload::Heap(arc) => arc.len(),
+                }
+            }
+
+            #[inline]
+            pub fn is_empty(&self) -> bool {
+                match self {
+                    #(#is_empty_arms)*
+                    StandardSmallPayload::Heap(arc) => arc.is_empty(),
                 }
             }
 

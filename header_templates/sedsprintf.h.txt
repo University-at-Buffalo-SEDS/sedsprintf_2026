@@ -95,7 +95,6 @@ typedef struct SedsLocalEndpointDescV2 {
     void *user;
 } SedsLocalEndpointDescV2;
 
-
 typedef SedsResult (* SedsTransmitFn)(const uint8_t * bytes, size_t len, void * user);
 
 typedef SedsResult (* SedsEndpointHandlerFn)(const SedsPacketView * pkt, void * user);
@@ -239,6 +238,19 @@ SedsResult seds_router_clear_queues(SedsRouter * r);
 SedsResult seds_router_clear_rx_queue(SedsRouter * r);
 
 SedsResult seds_router_clear_tx_queue(SedsRouter * r);
+
+SedsResult seds_router_receive_serialized_v2(
+    SedsRouter* r, const SedsLinkId* link, const uint8_t* bytes, size_t len);
+
+SedsResult seds_router_receive_v2(
+    SedsRouter* r, const SedsLinkId* link, const SedsPacketView* view);
+
+SedsResult seds_router_rx_serialized_packet_to_queue_v2(
+    SedsRouter* r, const SedsLinkId* link, const uint8_t* bytes, size_t len);
+
+SedsResult seds_router_rx_packet_to_queue_v2(
+    SedsRouter* r, const SedsLinkId* link, const SedsPacketView* view);
+
 
 /* ==============================
    Payload extraction / serialization helpers

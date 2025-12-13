@@ -156,7 +156,6 @@ impl Relay {
     ///
     /// Note: `Arc::from(bytes)` allocates and copies `len` bytes into a new `Arc<[u8]>`.
     /// This is still “fast enough” for many cases, but it is not allocation-free / ISR-safe.
-
     pub fn rx_serialized_from_side(&self, src: RelaySideId, bytes: &[u8]) -> TelemetryResult<()> {
         let mut st = self.state.lock();
 
@@ -174,7 +173,6 @@ impl Relay {
     /// Enqueue a full TelemetryPacket that originated from `src` into the relay RX queue.
     ///
     /// The packet is wrapped in `Arc<TelemetryPacket>` so fanout can clone the pointer cheaply.
-
     pub fn rx_from_side(&self, src: RelaySideId, packet: TelemetryPacket) -> TelemetryResult<()> {
         let mut st = self.state.lock();
 
@@ -238,7 +236,6 @@ impl Relay {
     /// - Serialized handler + Serialized item: direct.
     /// - Packet handler + Serialized item: deserialize for this call.
     /// - Serialized handler + Packet item: serialize for this call.
-
     fn call_tx_handler(&self, handler: &RelayTxHandlerFn, data: &RelayItem) -> TelemetryResult<()> {
         match (handler, data) {
             // Fast paths

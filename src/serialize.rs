@@ -154,7 +154,7 @@ impl<'a> ByteReader<'a> {
 const EP_BITMAP_BITS: usize = (MAX_VALUE_DATA_ENDPOINT as usize) + 1;
 
 /// Number of bytes required to store [`EP_BITMAP_BITS`] bits.
-const EP_BITMAP_BYTES: usize = (EP_BITMAP_BITS + 7) / 8;
+const EP_BITMAP_BYTES: usize = EP_BITMAP_BITS.div_ceil(8);
 
 /// Build a compact endpoint bitmap from the provided list of endpoints.
 ///
@@ -222,7 +222,7 @@ fn expand_endpoint_bitmap(
 /// # Returns
 /// - `Arc<[u8]>`: Serialized packet in compact v2 wire format.
 pub fn serialize_packet(pkt: &TelemetryPacket) -> Arc<[u8]> {
-    let bm = build_endpoint_bitmap(&pkt.endpoints());
+    let bm = build_endpoint_bitmap(pkt.endpoints());
 
     // Decide whether to compress the sender.
     let sender_bytes = pkt.sender().as_bytes();
@@ -316,10 +316,8 @@ pub fn deserialize_packet(buf: &[u8]) -> Result<TelemetryPacket, TelemetryError>
         if r.remaining() < EP_BITMAP_BYTES + sender_wire_len + dsz {
             return Err(TelemetryError::Deserialize("short buffer"));
         }
-    } else {
-        if r.remaining() < EP_BITMAP_BYTES + sender_wire_len + 1 {
-            return Err(TelemetryError::Deserialize("short buffer"));
-        }
+    } else if r.remaining() < EP_BITMAP_BYTES + sender_wire_len + 1 {
+        return Err(TelemetryError::Deserialize("short buffer"));
     }
 
     let bm = r.read_bytes(EP_BITMAP_BYTES)?;
@@ -437,7 +435,7 @@ pub fn peek_envelope(buf: &[u8]) -> TelemetryResult<TelemetryEnvelope> {
 
     Ok(TelemetryEnvelope {
         ty,
-        endpoints: Arc::<[_]>::from(eps),
+        endpoints: eps,
         sender: Arc::<str>::from(sender_str),
         timestamp_ms: ts_v,
     })

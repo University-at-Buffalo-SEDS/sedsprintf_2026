@@ -62,7 +62,7 @@ impl<const N: usize> InlineBuf<N> {
         let mut buf: [MaybeUninit<u8>; N] =
             unsafe { MaybeUninit::uninit().assume_init() };
 
-        if data.len() != 0 {
+        if data.len() > 0 {
             // SAFETY:
             // - `data.as_ptr()` is valid for `data.len()` reads.
             // - `buf.as_mut_ptr()` is valid for `N` writes, and we only

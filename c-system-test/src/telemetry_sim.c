@@ -168,7 +168,7 @@ SedsResult radio_handler_serial(const uint8_t * bytes, const size_t len, void * 
 
 SedsResult sdcard_handler(const SedsPacketView * pkt, void * user)
 {
-    SimNode * self = (SimNode *) user;
+    SimNode * self = user;
     char buf[seds_pkt_to_string_len(pkt)];
     const SedsResult s = seds_pkt_to_string(pkt, buf, sizeof(buf));
     if (s != SEDS_OK)
