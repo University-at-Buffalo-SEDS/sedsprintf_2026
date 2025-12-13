@@ -352,7 +352,7 @@ fn packet_to_string(pkt: *const SedsPacketView) -> Result<String, i32> {
         Ok(p) => p,
         Err(_) => return Err(status_from_err(TelemetryError::BadArg)),
     };
-    Ok(tpkt.to_string())
+    Ok(tpkt.as_string())
 }
 
 fn error_code_to_string(error_code: i32) -> &'static str {
