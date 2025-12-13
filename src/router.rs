@@ -264,12 +264,13 @@ impl_letype_num!(f64, 8);
 /// Encode a slice of `LeBytes` into a contiguous little-endian byte array.
 pub(crate) fn encode_slice_le<T: LeBytes>(data: &[T]) -> Arc<[u8]> {
     let total = data.len() * T::WIDTH;
-    let mut buf = Vec::with_capacity(total);
-    unsafe { buf.set_len(total) };
+    let mut buf = vec![0u8; total];
+
     for (i, v) in data.iter().copied().enumerate() {
         let start = i * T::WIDTH;
         v.write_le(&mut buf[start..start + T::WIDTH]);
     }
+
     Arc::from(buf)
 }
 

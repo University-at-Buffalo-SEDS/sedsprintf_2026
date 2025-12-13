@@ -182,7 +182,7 @@ mod tests {
             TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.5], endpoints, 0)
                 .unwrap();
 
-        let text = pkt.to_string();
+        let text = pkt.as_string();
         assert!(text.starts_with(
             "{Type: GPS_DATA, Data Size: 8, Sender: TEST_PLATFORM, Endpoints: [SD_CARD, GROUND_STATION], Timestamp: 0 (0s 000ms), Data: "
         ));
@@ -533,7 +533,7 @@ mod handler_failure_tests {
             other_ep,
             move |pkt: &TelemetryPacket, _link_id| {
                 if pkt.data_type() == DataType::TelemetryError {
-                    *last_payload_c.lock().unwrap() = pkt.to_string();
+                    *last_payload_c.lock().unwrap() = pkt.as_string();
                 }
                 recv_count_c.fetch_add(1, Ordering::SeqCst);
                 Ok(())
@@ -600,7 +600,7 @@ mod handler_failure_tests {
             local_ep,
             move |pkt: &TelemetryPacket, _link_id| {
                 if pkt.data_type() == DataType::TelemetryError {
-                    *last_payload_c.lock().unwrap() = pkt.to_string();
+                    *last_payload_c.lock().unwrap() = pkt.as_string();
                     saw_error_c.fetch_add(1, Ordering::SeqCst);
                 }
                 Ok(())
@@ -1513,7 +1513,7 @@ mod tests_extra {
             DataEndpoint::SdCard,
             move |pkt: &TelemetryPacket, _link_id| {
                 if pkt.data_type() == DataType::TelemetryError {
-                    *last_payload_c.lock().unwrap() = pkt.to_string();
+                    *last_payload_c.lock().unwrap() = pkt.as_string();
                 }
                 Ok(())
             },
@@ -1845,7 +1845,7 @@ mod tests_more {
         let handler =
             EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |pkt, _link_id| {
                 if pkt.data_type() == DataType::TelemetryError {
-                    *c.lock().unwrap() = pkt.to_string();
+                    *c.lock().unwrap() = pkt.as_string();
                 }
                 Ok(())
             });

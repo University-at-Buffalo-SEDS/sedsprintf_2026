@@ -7,6 +7,7 @@
 //! - uses [`SmallPayload`] internally to keep small messages on the stack.
 
 use crate::config::{StandardSmallPayload, DEVICE_IDENTIFIER, STRING_PRECISION};
+use crate::queue::ByteCost;
 pub(crate) use crate::{
     config::{DataEndpoint, DataType}, data_type_size, get_data_type, get_info_type, message_meta,
     router::LeBytes,
@@ -17,7 +18,6 @@ use crate::{impl_data_as_prim, impl_from_prim_slices, impl_ledecode_auto};
 use alloc::{string::String, string::ToString, sync::Arc, vec::Vec};
 use core::any::TypeId;
 use core::fmt::{Formatter, Write};
-use crate::queue::ByteCost;
 // ============================================================================
 // Constants
 // ============================================================================
@@ -92,7 +92,6 @@ const fn element_width(dt: MessageDataType) -> usize {
     }
 }
 
-
 // Simple 64-bit hash used for packet IDs (no_std friendly).
 /// Not cryptographic; just a decent mix for deduplication.
 /// Takes an initial hash value and a byte slice, returns the updated hash.
@@ -138,7 +137,7 @@ fn validate_dynamic_len_and_content(ty: DataType, bytes: &[u8]) -> TelemetryResu
         _ => {
             // Numeric / bool: length must be a multiple of the element width.
             let w = element_width(dt);
-            if w == 0 || bytes.len() % w != 0 {
+            if w == 0 || !bytes.len().is_multiple_of(w) {
                 return Err(TelemetryError::SizeMismatch {
                     expected: w,
                     got: bytes.len(),
@@ -241,7 +240,6 @@ impl TelemetryPacket {
         })
     }
 
-
     /// Compute a stable 64-bit identifier for this packet.
     ///
     /// This is *not* serialized – it is derived locally from:
@@ -288,10 +286,10 @@ impl TelemetryPacket {
     {
         self.ensure_kind(expected_kind)?;
 
-        let bytes: &[u8] = &*self.payload();
+        let bytes: &[u8] = self.payload();
         let width = T::WIDTH;
 
-        if bytes.len() % width != 0 {
+        if !bytes.len().is_multiple_of(width) {
             // Packet should already be validated; if not, surface a size error.
             return Err(TelemetryError::SizeMismatch {
                 expected: (bytes.len() / width) * width,
@@ -446,10 +444,10 @@ impl TelemetryPacket {
     where
         T: LeBytes + core::fmt::Display + 'static,
     {
-        let mut it = self.payload.chunks_exact(T::WIDTH);
+        let it = self.payload.chunks_exact(T::WIDTH);
         let mut first = true;
 
-        while let Some(chunk) = it.next() {
+        for chunk in it {
             if !first {
                 s.push_str(", ");
             }
@@ -475,7 +473,7 @@ impl TelemetryPacket {
     /// - Hex payloads are delegated to [`TelemetryPacket::to_hex_string`]
     /// # Returns
     /// - Human-readable string with header and decoded data.
-    pub fn to_string(&self) -> String {
+    pub fn as_string(&self) -> String {
         let mut s = String::from("{");
         s.push_str(&self.header_string());
 
@@ -557,7 +555,7 @@ impl TelemetryPacket {
         s
     }
 
-    /// Hex dump variant of [`TelemetryPacket::to_string`].
+    /// Hex dump variant of [`TelemetryPacket::as_string`].
     ///
     /// Produces:
     ///
@@ -698,7 +696,7 @@ impl TelemetryPacket {
             }
         }
 
-        let mut bytes = Vec::with_capacity(total_bytes);
+        let mut bytes = vec![0u8; total_bytes];
         unsafe { bytes.set_len(total_bytes) };
 
         for (i, v) in values.iter().copied().enumerate() {
@@ -804,13 +802,13 @@ impl TelemetryPacket {
         }
 
         let total_bytes = values.len();
-        if let MessageElementCount::Static(exact) = message_meta(ty).element_count {
-            if total_bytes != exact {
-                return Err(TelemetryError::SizeMismatch {
-                    expected: exact,
-                    got: total_bytes,
-                });
-            }
+        if let MessageElementCount::Static(exact) = message_meta(ty).element_count
+            && total_bytes != exact
+        {
+            return Err(TelemetryError::SizeMismatch {
+                expected: exact,
+                got: total_bytes,
+            });
         }
 
         let mut bytes = Vec::with_capacity(total_bytes);
@@ -919,7 +917,7 @@ fn append_human_time(out: &mut String, total_ms: u64) {
 impl core::fmt::Display for TelemetryPacket {
     #[inline]
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        f.write_str(&TelemetryPacket::to_string(self))
+        f.write_str(&TelemetryPacket::as_string(self))
     }
 }
 
