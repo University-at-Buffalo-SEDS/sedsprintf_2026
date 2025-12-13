@@ -156,8 +156,8 @@ mod tests {
         assert_eq!(rpkt.data_type(), pkt.data_type());
         assert_eq!(rpkt.data_size(), pkt.data_size());
         assert_eq!(rpkt.timestamp(), pkt.timestamp());
-        assert_eq!(&*rpkt.endpoints(), &*pkt.endpoints());
-        assert_eq!(&*rpkt.payload(), &*pkt.payload());
+        assert_eq!(rpkt.endpoints(), pkt.endpoints());
+        assert_eq!(rpkt.payload(), pkt.payload());
     }
 
     /// Verify `header_string()` format for a simple GPS packet.
@@ -240,7 +240,7 @@ mod tests {
         for v in data {
             expected.extend_from_slice(&v.to_le_bytes());
         }
-        assert_eq!(&*tx_pkt.payload(), &*expected);
+        assert_eq!(tx_pkt.payload(), &*expected);
 
         // local SD handler decoded to f32s and recorded (type, values)
         let (seen_ty, seen_vals) = sd_seen_decoded

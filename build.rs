@@ -233,7 +233,7 @@ fn transform_enum_block(
             .map(|line| {
                 if let Some((lead, rest)) = split_leading_ws(line) {
                     if let Some(id) = rest
-                        .split(|c: char| c == ' ' || c == '=' || c == ',')
+                        .split([' ', '=', ','])
                         .next()
                     {
                         if !id.is_empty() && id.chars().all(|c| c.is_ascii_uppercase() || c == '_')
@@ -274,7 +274,7 @@ fn transform_errors_enum_as_seds_result(block: &str) -> String {
         }
         if let Some((lead, rest)) = split_leading_ws(line) {
             if let Some(id) = rest
-                .split(|c: char| c == ' ' || c == '=' || c == ',')
+                .split([' ', '=', ','])
                 .next()
             {
                 if !id.is_empty()
@@ -331,7 +331,7 @@ fn parse_enum_members(block: &str) -> Vec<(String, String)> {
         // Grab "IDENT [= VALUE] ," at start of line
         if let Some((_, rest)) = split_leading_ws(line) {
             let ident = rest
-                .split(|c: char| c == ' ' || c == '=' || c == ',')
+                .split([' ', '=', ','])
                 .next()
                 .unwrap_or("")
                 .trim();

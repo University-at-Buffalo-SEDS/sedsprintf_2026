@@ -183,7 +183,6 @@ pub struct SedsLocalEndpointDesc {
 }
 
 /// -------- v2 callbacks (include LinkId) --------
-
 type CTransmitV2 = Option<
     extern "C" fn(bytes: *const u8, len: usize, link: *const SedsLinkId, user: *mut c_void) -> i32,
 >;
@@ -1039,7 +1038,7 @@ fn finish_with<T: LeBytes + Copy>(
     }
 
     let mut tmp: Vec<T> = Vec::with_capacity(required_elems);
-    if let Err(_) = vectorize_data::<T>(padded.as_ptr(), required_elems, elem_size, &mut tmp) {
+    if vectorize_data::<T>(padded.as_ptr(), required_elems, elem_size, &mut tmp).is_err() {
         return status_from_err(TelemetryError::Io("vectorize_data failed"));
     }
 
@@ -1941,7 +1940,7 @@ pub extern "C" fn seds_pkt_deserialize_owned(bytes: *const u8, len: usize) -> *m
         Ok(p) => p,
         Err(_) => return ptr::null_mut(),
     };
-    if let Err(_) = tpkt.validate() {
+    if tpkt.validate().is_err() {
         return ptr::null_mut();
     }
 
