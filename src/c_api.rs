@@ -16,8 +16,9 @@ use crate::MessageDataType::NoData;
 use crate::{
     config::DataEndpoint, do_vec_log_typed, get_needed_message_size, message_meta,
     router::{Clock, LeBytes, LinkId},
-    router::{EndpointHandler, Router, RouterConfig}, serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet}, telemetry_packet::{DataType, TelemetryPacket},
+    router::{EndpointHandler, Router, RouterConfig}, serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet}, telemetry_packet::TelemetryPacket,
     MessageElementCount,
+    DataType,
     TelemetryError,
     TelemetryErrorCode,
     TelemetryResult,
