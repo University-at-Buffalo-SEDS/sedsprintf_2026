@@ -1,6 +1,6 @@
 [package]
 name = "sedsprintf_rs"
-version = "2.0.0"
+version = "2.1.0"
 edition = "2024"
 build = "build.rs"
 authors = ["Rylan Meilutis <rylan@rylanswebsite.com>"]
@@ -26,18 +26,23 @@ bindings = "pyo3"
 
 [[test]]
 name = "rust-system-test"
-path = "tests/rust-system-test/rust-system-test.rs"
-required-features = ["std"]
+path = "tests/rust-system-test/rust_system_test.rs"
+required-features = ["std", "compression"]
+
+[[test]]
+name = "full_system_test"
+path = "tests/rust-system-test/full_system_test.rs"
+required-features = ["std", "compression"]
 
 [[test]]
 name = "rust_single_threaded_test"
 path = "tests/rust-system-test/single_threaded_test.rs"
-required-features = ["std"]
+required-features = ["std", "compression"]
 
 [[test]]
 name = "c-system-test"
-path = "tests/c-system-test/c-system-test.rs"
-required-features = ["std"]
+path = "tests/c-system-test/c_system_test.rs"
+required-features = ["std", "compression"]
 
 [dependencies]
 sedsprintf_macros = { path = "sedsprintf_macros" }

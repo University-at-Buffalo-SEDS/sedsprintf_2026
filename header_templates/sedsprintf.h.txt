@@ -24,6 +24,14 @@ typedef struct SedsRouter SedsRouter;
 
 typedef struct SedsRelay SedsRelay;
 
+/* ======================================================================
+   LinkId (v2)
+   ====================================================================== */
+
+typedef struct SedsLinkId {
+    uint64_t raw;
+} SedsLinkId;
+
 
 typedef struct SedsPacketView
 {
@@ -54,6 +62,39 @@ typedef enum SedsRouterMode
     Seds_RM_Sink = 0,
     Seds_RM_Relay = 1,
 } SedsRouterMode;
+
+
+/* ======================================================================
+   v2 callbacks (WITH LinkId)
+   ====================================================================== */
+
+typedef SedsResult (*SedsTransmitFnV2)(
+    const uint8_t *bytes,
+    size_t len,
+    const SedsLinkId *link,
+    void *user
+);
+
+typedef SedsResult (*SedsEndpointHandlerFnV2)(
+    const SedsPacketView *pkt,
+    const SedsLinkId *link,
+    void *user
+);
+
+typedef SedsResult (*SedsSerializedHandlerFnV2)(
+    const uint8_t *bytes,
+    size_t len,
+    const SedsLinkId *link,
+    void *user
+);
+
+typedef struct SedsLocalEndpointDescV2 {
+    uint32_t endpoint;
+    SedsEndpointHandlerFnV2 packet_handler;
+    SedsSerializedHandlerFnV2 serialized_handler;
+    void *user;
+} SedsLocalEndpointDescV2;
+
 
 typedef SedsResult (* SedsTransmitFn)(const uint8_t * bytes, size_t len, void * user);
 
@@ -95,7 +136,20 @@ SedsRouter * seds_router_new(
                              void * tx_user,
                              SedsNowMsFn now_ms_cb,
                              const SedsLocalEndpointDesc * handlers,
-                             size_t n_handlers);
+                             size_t n_handlers
+                             );
+
+
+/* v2 constructor (LinkId-aware callbacks) */
+SedsRouter *seds_router_new_v2(
+                               SedsRouterMode mode,
+                               SedsTransmitFnV2 tx,
+                               void *tx_user,
+                               SedsNowMsFn now_ms_cb,
+                               const SedsLocalEndpointDescV2 *handlers,
+                               size_t n_handlers
+                               );
+
 
 void seds_router_free(SedsRouter * r);
 

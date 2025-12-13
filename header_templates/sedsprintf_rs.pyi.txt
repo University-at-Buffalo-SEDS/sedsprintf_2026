@@ -1,12 +1,10 @@
 # sedsprintf_rs.pyi
-
 # =============================
 # Auto-generated Python type stubs for sedsprintf_rs. DO NOT EDIT AS CHANGES WILL BE OVERWRITTEN.
 # =============================
 from __future__ import annotations
 
-from typing import Any, Callable, Iterable, Optional, Sequence, Tuple, List, Dict, overload
-from typing import Literal
+from typing import Any, Callable, Optional, Sequence, Tuple, List, Dict, Literal, Union
 from enum import IntEnum
 from collections.abc import Buffer  # Python 3.12 buffer protocol typing
 
@@ -35,17 +33,26 @@ class RouterMode(IntEnum):
 # Callback protocols (informal)
 # ==============================
 
-TxCallback = Callable[[bytes], None]
-"""Transmit callback. Must raise on failure to signal an I/O error."""
+TxCallback = Union[
+    Callable[[bytes], None],
+    Callable[[bytes, LinkId], None],
+]
+"""Transmit callback. May be called as tx(bytes) or tx(bytes, link_id)."""
 
 NowMsCallback = Callable[[], int]
 """Clock callback returning monotonic milliseconds."""
 
-PacketHandler = Callable[["Packet"], None]
-"""Endpoint handler invoked with a decoded Packet."""
+PacketHandler = Union[
+    Callable[["Packet"], None],
+    Callable[["Packet", LinkId], None],
+]
+"""Endpoint handler invoked with (Packet) or (Packet, link_id)."""
 
-SerializedHandler = Callable[[bytes], None]
-"""Endpoint handler invoked with raw serialized packet bytes."""
+SerializedHandler = Union[
+    Callable[[bytes], None],
+    Callable[[bytes, LinkId], None],
+]
+"""Endpoint handler invoked with (bytes) or (bytes, link_id)."""
 
 SideId = int
 """Logical relay side index (e.g. CAN, UART, RADIO)."""
@@ -102,24 +109,11 @@ class Packet:
     def data_as_bool(self) -> List[bool]: ...
     def data_as_string(self) -> str: ...
 
-
 # ==============================
 # Router (lifecycle, logging, queues)
 # ==============================
 
 class Router:
-    """
-    Packet router.
-
-    __init__(tx=None, now_ms=None, handlers=None)
-        tx:        Optional transmit callback: (bytes) -> None
-        now_ms:    Optional monotonic clock callback: () -> int (ms)
-        handlers:  Optional list of tuples, each:
-                   (endpoint: int,
-                    packet_handler: Optional[Callable[[Packet], None]],
-                    serialized_handler: Optional[Callable[[bytes], None]])
-    """
-
     @staticmethod
     def new_singleton(
         tx: Optional[TxCallback] = ...,
@@ -127,7 +121,7 @@ class Router:
         handlers: Optional[
             Sequence[Tuple[int, Optional[PacketHandler], Optional[SerializedHandler]]]
         ] = ...,
-        mode: RouterMode = Union(RouterMode.Relay, int),
+        mode: Union[RouterMode, int] = ...,
     ) -> "Router": ...
     """
         Create or retrieve a per-process singleton Router.
@@ -147,9 +141,8 @@ class Router:
         handlers: Optional[
             Sequence[Tuple[int, Optional[PacketHandler], Optional[SerializedHandler]]]
         ] = ...,
-        mode: RouterMode = Union(RouterMode.Relay, int),
+        mode: Union[RouterMode, int] = ...,
     ) -> None: ...
-
 
     def log_bytes(
         self,
@@ -177,15 +170,24 @@ class Router:
         queue: bool = ...,
     ) -> None: ...
 
-    def transmit_message_queue(self, packet: "Packet") -> None: ...
-    def transmit_message(self, packet: "Packet") -> None: ...
-    def transmit_serialized_message(
-        self, data: Buffer | bytes | bytearray | memoryview
-    ) -> None: ...
-    def transmit_serialized_message_queue(
-        self, data: Buffer | bytes | bytearray | memoryview
-    ) -> None: ...
+    # Legacy/default-link methods (still supported)
+    def transmit_message_queue(self, packet: Packet) -> None: ...
+    def transmit_message(self, packet: Packet) -> None: ...
+    def transmit_serialized_message(self, data: Buffer | bytes | bytearray | memoryview) -> None: ...
+    def transmit_serialized_message_queue(self, data: Buffer | bytes | bytearray | memoryview) -> None: ...
     def receive_serialized(self, data: Buffer | bytes | bytearray | memoryview) -> None: ...
+
+    # NEW: link-aware methods
+    def transmit_message_from(self, link_id: LinkId, packet: Packet) -> None: ...
+    def transmit_message_queue_from(self, link_id: LinkId, packet: Packet) -> None: ...
+    def transmit_serialized_message_from(self, link_id: LinkId, data: Buffer | bytes | bytearray | memoryview) -> None: ...
+    def transmit_serialized_message_queue_from(self, link_id: LinkId, data: Buffer | bytes | bytearray | memoryview) -> None: ...
+
+    def receive_serialized_from(self, link_id: LinkId, data: Buffer | bytes | bytearray | memoryview) -> None: ...
+    def receive_serialized_queue(self, data: Buffer | bytes | bytearray | memoryview) -> None: ...
+    def receive_serialized_queue_from(self, link_id: LinkId, data: Buffer | bytes | bytearray | memoryview) -> None: ...
+
+    # Queue processing
     def process_send_queue(self) -> None: ...
     def process_received_queue(self) -> None: ...
     def process_all_queues(self) -> None: ...
@@ -196,7 +198,6 @@ class Router:
     def process_tx_queue_with_timeout(self, timeout_ms: int) -> None: ...
     def process_rx_queue_with_timeout(self, timeout_ms: int) -> None: ...
     def process_all_queues_with_timeout(self, timeout_ms: int) -> None: ...
-
 
 # ==============================
 # Relay (fan-out of serialized packets)
@@ -212,9 +213,8 @@ class Relay:
         - supports time-budgeted queue processing
         - uses the same monotonic clock callback style as Router
     """
-
-    def __init__(self, now_ms: Optional[NowMsCallback] = ...) -> None:
-        """
+    def __init__(self, now_ms: Optional[NowMsCallback] = ...) -> None: ...
+    """
         Create a new Relay.
 
         Parameters
@@ -223,10 +223,9 @@ class Relay:
             Optional zero-arg callback returning an integer timestamp in ms.
             If None, timeouts are based on a default clock that returns 0.
         """
-        ...
 
-    def add_side_serialized(self, name: str, tx: TxCallback) -> SideId:
-        """
+    def add_side_serialized(self, name: str, tx: Callable[[bytes], None]) -> SideId: ...
+    """
         Add a new relay side (e.g. 'CAN', 'UART', 'RADIO').
 
         Parameters
@@ -242,10 +241,8 @@ class Relay:
         SideId
             Integer side id to use with ``rx_serialized_from_side``.
         """
-        ...
-
-    def add_side_packet(self, name: str, tx: Callable[[Packet], None]) -> SideId:
-        """
+    def add_side_packet(self, name: str, tx: Callable[[Packet], None]) -> SideId: ...
+    """
         Add a new side with a packet-based TX callback.
 
         Parameters
@@ -261,10 +258,9 @@ class Relay:
         SideId
             Integer side id to use with ``rx_serialized_from_side`` and ``rx_from_side``.
         """
-        ...
 
-    def rx_packet_from_side(self, side_id: SideId, packet: Packet) -> None:
-        """
+    def rx_packet_from_side(self, side_id: SideId, packet: Packet) -> None: ...
+    """
         Enqueue a full Packet that arrived on a given side into the relay RX queue.
 
         Parameters
@@ -274,14 +270,8 @@ class Relay:
         packet:
             A :class:`Packet` instance.
         """
-        ...
-        
-    def rx_serialized_from_side(
-        self,
-        side_id: SideId,
-        data: Buffer | bytes | bytearray | memoryview,
-    ) -> None:
-        """
+    def rx_serialized_from_side(self, side_id: SideId, data: Buffer | bytes | bytearray | memoryview) -> None: ...
+    """
         Enqueue serialized bytes that arrived on a given side into the relay RX queue.
 
         Parameters
@@ -291,65 +281,17 @@ class Relay:
         data:
             Serialized packet bytes.
         """
-        ...
+    def clear_queues(self) -> None: ...
+    def clear_rx_queue(self) -> None: ...
+    def clear_tx_queue(self) -> None: ...
 
-    # Queue clearing
+    def process_rx_queue(self) -> None: ...
+    def process_tx_queue(self) -> None: ...
+    def process_all_queues(self) -> None: ...
 
-    def clear_queues(self) -> None:
-        """Clear both RX and TX queues."""
-        ...
-
-    def clear_rx_queue(self) -> None:
-        """Clear only the RX queue."""
-        ...
-
-    def clear_tx_queue(self) -> None:
-        """Clear only the TX queue."""
-        ...
-
-    # Queue processing (no timeout)
-
-    def process_rx_queue(self) -> None:
-        """Drain the RX queue fully, expanding each item into TX items."""
-        ...
-
-    def process_tx_queue(self) -> None:
-        """Drain the TX queue fully, invoking per-side TX callbacks."""
-        ...
-
-    def process_all_queues(self) -> None:
-        """
-        Process RX then TX queues fully (one pass), until both queues are empty.
-        """
-        ...
-
-    # Time-budgeted queue processing
-
-    def process_rx_queue_with_timeout(self, timeout_ms: int) -> None:
-        """
-        Process the RX queue with a time budget in milliseconds.
-
-        Stops when the queue is empty or the timeout elapses.
-        """
-        ...
-
-    def process_tx_queue_with_timeout(self, timeout_ms: int) -> None:
-        """
-        Process the TX queue with a time budget in milliseconds.
-
-        Stops when the queue is empty or the timeout elapses.
-        """
-        ...
-
-    def process_all_queues_with_timeout(self, timeout_ms: int) -> None:
-        """
-        Process RX and TX queues interleaved with a time budget in ms.
-
-        If ``timeout_ms == 0``, drains fully (no time limit), matching the Rust
-        implementation semantics.
-        """
-        ...
-
+    def process_rx_queue_with_timeout(self, timeout_ms: int) -> None: ...
+    def process_tx_queue_with_timeout(self, timeout_ms: int) -> None: ...
+    def process_all_queues_with_timeout(self, timeout_ms: int) -> None: ...
 
 # ==============================
 # Top-level helpers
