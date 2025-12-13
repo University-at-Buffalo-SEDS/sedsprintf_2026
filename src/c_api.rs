@@ -107,6 +107,19 @@ fn ok_or_status(r: TelemetryResult<()>) -> i32 {
     }
 }
 
+
+#[inline]
+fn link_id_from_ptr(link: *const SedsLinkId) -> LinkId {
+    if link.is_null() {
+        LinkId::DEFAULT
+    } else {
+        // SAFETY: caller promises `link` points to a valid SedsLinkId.
+        let raw = unsafe { (*link).raw };
+        LinkId(raw)
+    }
+}
+
+
 /// Returns the fixed payload size (in bytes) for a static schema, or `None`
 /// if the message type is dynamically sized.
 #[inline]
@@ -183,7 +196,6 @@ pub struct SedsLocalEndpointDesc {
 }
 
 /// -------- v2 callbacks (include LinkId) --------
-
 type CTransmitV2 = Option<
     extern "C" fn(bytes: *const u8, len: usize, link: *const SedsLinkId, user: *mut c_void) -> i32,
 >;
@@ -1039,7 +1051,7 @@ fn finish_with<T: LeBytes + Copy>(
     }
 
     let mut tmp: Vec<T> = Vec::with_capacity(required_elems);
-    if let Err(_) = vectorize_data::<T>(padded.as_ptr(), required_elems, elem_size, &mut tmp) {
+    if vectorize_data::<T>(padded.as_ptr(), required_elems, elem_size, &mut tmp).is_err() {
         return status_from_err(TelemetryError::Io("vectorize_data failed"));
     }
 
@@ -1531,6 +1543,84 @@ pub extern "C" fn seds_router_process_all_queues_with_timeout(
     ok_or_status(router.process_all_queues_with_timeout(timeout_ms))
 }
 
+
+// ============================================================================
+//  FFI: Receive / queue RX (v2: explicit ingress LinkId)
+// ============================================================================
+
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_receive_serialized_v2(
+    r: *mut SedsRouter,
+    link: *const SedsLinkId,
+    bytes: *const u8,
+    len: usize,
+) -> i32 {
+    if r.is_null() || (len > 0 && bytes.is_null()) {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let router = unsafe { &(*r).inner };
+    let slice = unsafe { slice::from_raw_parts(bytes, len) };
+
+    let link_id = link_id_from_ptr(link);
+    ok_or_status(router.rx_serialized_from(slice, link_id))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_receive_v2(
+    r: *mut SedsRouter,
+    link: *const SedsLinkId,
+    view: *const SedsPacketView,
+) -> i32 {
+    if r.is_null() || view.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let router = unsafe { &(*r).inner };
+    let pkt = match view_to_packet(unsafe { &*view }) {
+        Ok(p) => p,
+        Err(_) => return status_from_err(TelemetryError::InvalidType),
+    };
+
+    let link_id = link_id_from_ptr(link);
+    ok_or_status(router.rx_from(&pkt, link_id))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_rx_serialized_packet_to_queue_v2(
+    r: *mut SedsRouter,
+    link: *const SedsLinkId,
+    bytes: *const u8,
+    len: usize,
+) -> i32 {
+    if r.is_null() || (len > 0 && bytes.is_null()) {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let router = unsafe { &(*r).inner };
+    let slice = unsafe { slice::from_raw_parts(bytes, len) };
+
+    let link_id = link_id_from_ptr(link);
+    ok_or_status(router.rx_serialized_queue_from(slice, link_id))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_rx_packet_to_queue_v2(
+    r: *mut SedsRouter,
+    link: *const SedsLinkId,
+    view: *const SedsPacketView,
+) -> i32 {
+    if r.is_null() || view.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let router = unsafe { &(*r).inner };
+    let pkt = match view_to_packet(unsafe { &*view }) {
+        Ok(p) => p,
+        Err(_) => return status_from_err(TelemetryError::InvalidType),
+    };
+
+    let link_id = link_id_from_ptr(link);
+    ok_or_status(router.rx_queue_from(pkt, link_id))
+}
+
+
 // ============================================================================
 //  FFI: Payload pointer & copy helpers
 // ============================================================================
@@ -1941,7 +2031,7 @@ pub extern "C" fn seds_pkt_deserialize_owned(bytes: *const u8, len: usize) -> *m
         Ok(p) => p,
         Err(_) => return ptr::null_mut(),
     };
-    if let Err(_) = tpkt.validate() {
+    if tpkt.validate().is_err() {
         return ptr::null_mut();
     }
 

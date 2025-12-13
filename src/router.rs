@@ -321,7 +321,7 @@ where
         }
         MessageElementCount::Dynamic => {
             // For dynamic numeric payloads, require total byte length to be a multiple of element width.
-            if got % T::WIDTH != 0 {
+            if !got.is_multiple_of(T::WIDTH) {
                 return Err(TelemetryError::SizeMismatch {
                     expected: T::WIDTH,
                     got,
@@ -331,7 +331,7 @@ where
     }
 
     let payload = encode_slice_le(data);
-    let pkt = TelemetryPacket::new(ty, &meta.endpoints, sender, timestamp, payload)?;
+    let pkt = TelemetryPacket::new(ty, meta.endpoints, sender, timestamp, payload)?;
     tx_function(pkt)
 }
 
@@ -870,7 +870,7 @@ impl Router {
             QueueItem::Packet(pkt, link) => {
                 pkt.validate()?;
 
-                let mut eps: Vec<DataEndpoint> = pkt.endpoints().iter().copied().collect();
+                let mut eps: Vec<DataEndpoint> = pkt.endpoints().to_vec();
                 eps.sort_unstable();
                 eps.dedup();
 
@@ -1069,7 +1069,7 @@ impl Router {
                                 }
                                 (EndpointHandlerFn::Serialized(_), None) => {
                                     let bytes = serialize::serialize_packet(pkt_ref);
-                                    let item = QueueItem::serialized(Arc::from(bytes), link);
+                                    let item = QueueItem::serialized(bytes, link);
                                     self.call_handler_with_retries(
                                         dest,
                                         h,

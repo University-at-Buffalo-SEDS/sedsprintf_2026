@@ -333,7 +333,7 @@ mod mega_library_system_tests {
                     r.tx_queue_from(pkt.clone(), link_b).unwrap();
 
                     let wire = serialize_packet(&pkt);
-                    r.tx_serialized_from(Arc::<[u8]>::from(wire), link_b).unwrap();
+                    r.tx_serialized_from(wire, link_b).unwrap();
 
                     thread::sleep(Duration::from_millis(3));
                 }
@@ -354,14 +354,13 @@ mod mega_library_system_tests {
                     .unwrap();
 
                     let wire = serialize_packet(&pkt);
-                    r.tx_serialized_queue_from(Arc::<[u8]>::from(wire), link_c).unwrap();
+                    r.tx_serialized_queue_from(wire, link_c).unwrap();
 
                     thread::sleep(Duration::from_millis(3));
                 }
             })
         };
 
-        // ✅ NEW: force hub TX coverage on all links, using both packet + serialized, queue + immediate.
         let gen_hub = {
             let hub = hub_router.clone();
             thread::spawn(move || {
@@ -376,8 +375,8 @@ mod mega_library_system_tests {
 
                     let pkt_b = make_packet(DataType::BatteryStatus, &buf[..2], 2000 + i);
                     let wire_b = serialize_packet(&pkt_b);
-                    hub.tx_serialized_from(Arc::<[u8]>::from(wire_b.clone()), link_b).unwrap();
-                    hub.tx_serialized_queue_from(Arc::<[u8]>::from(wire_b), link_b).unwrap();
+                    hub.tx_serialized_from(wire_b.clone(), link_b).unwrap();
+                    hub.tx_serialized_queue_from(wire_b, link_b).unwrap();
 
                     let pkt_c = TelemetryPacket::from_str_slice(
                         DataType::TelemetryError,
@@ -387,7 +386,7 @@ mod mega_library_system_tests {
                     )
                     .unwrap();
                     let wire_c = serialize_packet(&pkt_c);
-                    hub.tx_serialized_queue_from(Arc::<[u8]>::from(wire_c), link_c).unwrap();
+                    hub.tx_serialized_queue_from(wire_c, link_c).unwrap();
 
                     thread::sleep(Duration::from_millis(2));
                 }
@@ -477,8 +476,8 @@ mod mega_library_system_tests {
         // Hub TX was exercised across multiple links (forced by gen_hub).
         let tx_links = hub_tx_links.lock().unwrap();
         assert!(!tx_links.is_empty(), "hub router never transmitted (even forced)");
-        assert!(tx_links.iter().any(|&x| x == link_a.0), "hub never transmitted on link_a; got={tx_links:?}");
-        assert!(tx_links.iter().any(|&x| x == link_b.0), "hub never transmitted on link_b; got={tx_links:?}");
-        assert!(tx_links.iter().any(|&x| x == link_c.0), "hub never transmitted on link_c; got={tx_links:?}");
+        assert!(tx_links.contains(&link_a.0), "hub never transmitted on link_a; got={tx_links:?}");
+        assert!(tx_links.contains(&link_b.0), "hub never transmitted on link_b; got={tx_links:?}");
+        assert!(tx_links.contains(&link_c.0), "hub never transmitted on link_c; got={tx_links:?}");
     }
 }
