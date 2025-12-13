@@ -20,7 +20,7 @@ static uint64_t host_now_ms(void * user)
 #else
     struct timeval tv;
     gettimeofday(&tv, NULL);
-    return (uint64_t) tv.tv_sec * 1000ULL + (uint64_t) (tv.tv_usec / 1000ULL);
+    return (uint64_t) tv.tv_sec * 1000ULL + tv.tv_usec / 1000ULL;
 #endif
 }
 

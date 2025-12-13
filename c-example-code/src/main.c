@@ -1,5 +1,6 @@
 #include "telemetry.h"
 #include "sedsprintf.h"
+#include <unistd.h> // for usleep
 
 
 int main(void)
@@ -12,6 +13,7 @@ int main(void)
     {
         print_handle_telemetry_error(result);
     }
+    usleep(1000); //simulate some delay
     //asynchronous code
     //this would be in send routine of the data collector
     result = log_telemetry_asynchronous(SEDS_DT_GPS_DATA, data, 3, sizeof(data[0]));
