@@ -21,7 +21,7 @@ use crate::queue::{BoundedDeque, ByteCost};
 #[cfg(all(not(feature = "std"), target_os = "none"))]
 use crate::seds_error_msg;
 use crate::telemetry_packet::hash_bytes_u64;
-pub use crate::{
+use crate::{
     config::{DataEndpoint, DataType, DEVICE_IDENTIFIER, MAX_HANDLER_RETRIES}, get_needed_message_size, impl_letype_num, lock::RouterMutex,
     message_meta,
     serialize, telemetry_packet::TelemetryPacket,
