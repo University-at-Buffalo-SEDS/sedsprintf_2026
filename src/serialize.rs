@@ -10,7 +10,8 @@
 //! the header fields used by `peek_envelope`.
 
 use crate::{
-    telemetry_packet::{DataEndpoint, TelemetryPacket}, try_enum_from_u32,
+    telemetry_packet::TelemetryPacket, try_enum_from_u32,
+    DataEndpoint,
     TelemetryError,
     TelemetryResult,
     {config::DataType, MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE},

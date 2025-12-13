@@ -1,8 +1,8 @@
 use crate::config::{get_message_meta, STATIC_HEX_LENGTH, STATIC_STRING_LENGTH};
 use crate::get_needed_message_size;
 use crate::router::{Clock, EndpointHandler};
-use crate::telemetry_packet::{DataEndpoint, DataType, TelemetryPacket};
-use crate::{get_data_type, message_meta, MessageDataType, TelemetryError};
+use crate::telemetry_packet::TelemetryPacket;
+use crate::{get_data_type, message_meta, MessageDataType, TelemetryError, DataEndpoint, DataType};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -479,9 +479,8 @@ mod handler_failure_tests {
     use crate::config::DEVICE_IDENTIFIER;
     use crate::router::{EndpointHandler, LinkId, RouterMode};
     use crate::router::{Router, RouterConfig};
-    use crate::telemetry_packet::DataType;
     use crate::tests::timeout_tests::StepClock;
-    use crate::{TelemetryError, MAX_VALUE_DATA_TYPE};
+    use crate::{TelemetryError, DataType, MAX_VALUE_DATA_TYPE};
     use alloc::{sync::Arc, vec, vec::Vec};
     use core::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
@@ -660,7 +659,7 @@ mod timeout_tests {
     use crate::router::{EndpointHandler, LinkId, RouterMode};
     use crate::tests::{get_handler, UnixClock};
     use crate::{
-        router::Clock, router::Router, router::RouterConfig, telemetry_packet::DataType,
+        router::Clock, router::Router, router::RouterConfig, DataType,
         telemetry_packet::TelemetryPacket, TelemetryResult,
     };
     use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};

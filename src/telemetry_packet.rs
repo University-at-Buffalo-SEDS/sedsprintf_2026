@@ -8,7 +8,7 @@
 
 use crate::config::{StandardSmallPayload, DEVICE_IDENTIFIER, STRING_PRECISION};
 use crate::queue::ByteCost;
-pub(crate) use crate::{
+use crate::{
     config::{DataEndpoint, DataType}, data_type_size, get_data_type, get_info_type, message_meta,
     router::LeBytes,
     MessageDataType, MessageElementCount, MessageType, TelemetryError,
