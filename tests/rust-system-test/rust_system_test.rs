@@ -2,7 +2,7 @@
 mod threaded_system_tests {
     use sedsprintf_rs::config::{DataEndpoint, DataType};
     use sedsprintf_rs::relay::Relay;
-    use sedsprintf_rs::router::{RouterConfig, Clock, EndpointHandler, Router, RouterMode};
+    use sedsprintf_rs::router::{RouterConfig, Clock, EndpointHandler, Router, RouterMode, LinkId};
     use sedsprintf_rs::telemetry_packet::TelemetryPacket;
     use sedsprintf_rs::TelemetryResult;
 
@@ -26,7 +26,7 @@ mod threaded_system_tests {
     /// Build a handler that counts packets received on the Radio endpoint
     /// (this plays the role of the "radio" handler in the C test).
     fn make_radio_handler(counter: Arc<AtomicUsize>) -> EndpointHandler {
-        EndpointHandler::new_packet_handler(DataEndpoint::Radio, move |_pkt: &TelemetryPacket| {
+        EndpointHandler::new_packet_handler(DataEndpoint::Radio, move |_pkt: &TelemetryPacket, _link_id: &LinkId| {
             counter.fetch_add(1, Ordering::SeqCst);
             Ok(())
         })
@@ -35,7 +35,7 @@ mod threaded_system_tests {
     /// Build a handler that counts packets received on the SdCard endpoint
     /// (this plays the role of the "SD" handler in the C test).
     fn make_sd_handler(counter: Arc<AtomicUsize>) -> EndpointHandler {
-        EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt: &TelemetryPacket| {
+        EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt: &TelemetryPacket, _link_id: &LinkId| {
             counter.fetch_add(1, Ordering::SeqCst);
             Ok(())
         })
@@ -125,7 +125,7 @@ mod threaded_system_tests {
             };
 
             // TX closure: router -> bus (which then forwards to other nodes and relay)
-            let tx = move |bytes: &[u8]| -> TelemetryResult<()> {
+            let tx = move |bytes: &[u8], _link_id: &LinkId| -> TelemetryResult<()> {
                 local_bus_tx.send((idx, bytes.to_vec())).unwrap();
                 Ok(())
             };
@@ -160,7 +160,7 @@ mod threaded_system_tests {
                             if *idx != from {
                                 bus1_nodes_arc[*idx]
                                     .router
-                                    .rx_serialized_packet_to_queue(&frame)
+                                    .rx_serialized_queue(&frame)
                                     .expect("bus1: rx_serialized_packet_to_queue failed");
                             }
                         }
@@ -183,7 +183,7 @@ mod threaded_system_tests {
                     if *idx != from {
                         bus1_nodes_arc[*idx]
                             .router
-                            .rx_serialized_packet_to_queue(&frame)
+                            .rx_serialized_queue(&frame)
                             .expect("bus1: rx_serialized_packet_to_queue failed (drain)");
                     }
                 }
@@ -206,7 +206,7 @@ mod threaded_system_tests {
                             if *idx != from {
                                 bus2_nodes_arc[*idx]
                                     .router
-                                    .rx_serialized_packet_to_queue(&frame)
+                                    .rx_serialized_queue(&frame)
                                     .expect("bus2: rx_serialized_packet_to_queue failed");
                             }
                         }
@@ -227,7 +227,7 @@ mod threaded_system_tests {
                     if *idx != from {
                         bus2_nodes_arc[*idx]
                             .router
-                            .rx_serialized_packet_to_queue(&frame)
+                            .rx_serialized_queue(&frame)
                             .expect("bus2: rx_serialized_packet_to_queue failed (drain)");
                     }
                 }
