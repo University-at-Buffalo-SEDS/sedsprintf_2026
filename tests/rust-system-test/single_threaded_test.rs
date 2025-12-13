@@ -2,10 +2,10 @@
 #[cfg(test)]
 mod single_threaded_test {
     use sedsprintf_rs_2026::config::{DataEndpoint, DataType};
-    use sedsprintf_rs_2026::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
+    use sedsprintf_rs_2026::relay::Relay;
+    use sedsprintf_rs_2026::router::{RouterConfig, Clock, EndpointHandler, Router, RouterMode, LinkId};
     use sedsprintf_rs_2026::telemetry_packet::TelemetryPacket;
     use sedsprintf_rs_2026::TelemetryResult;
-    use sedsprintf_rs_2026::relay::Relay;
 
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::mpsc::{self, Receiver, TryRecvError};
@@ -25,18 +25,15 @@ mod single_threaded_test {
 
     /// Build a handler that counts packets received on the Radio endpoint.
     fn make_radio_handler(counter: Arc<AtomicUsize>) -> EndpointHandler {
-        EndpointHandler::new_packet_handler(
-            DataEndpoint::GroundStation,
-            move |_pkt: &TelemetryPacket| {
-                counter.fetch_add(1, Ordering::SeqCst);
-                Ok(())
-            },
-        )
+        EndpointHandler::new_packet_handler(DataEndpoint::GroundStation, move |_pkt: &TelemetryPacket, _link_id: &LinkId| {
+            counter.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        })
     }
 
     /// Build a handler that counts packets received on the SdCard endpoint.
     fn make_sd_handler(counter: Arc<AtomicUsize>) -> EndpointHandler {
-        EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt: &TelemetryPacket| {
+        EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt: &TelemetryPacket, _link_id: &LinkId| {
             counter.fetch_add(1, Ordering::SeqCst);
             Ok(())
         })
@@ -84,7 +81,7 @@ mod single_threaded_test {
                             continue; // no loopback to sender on this bus
                         }
                         node.router
-                            .rx_serialized_packet_to_queue(&frame)
+                            .rx_serialized_queue(&frame)
                             .expect("bus1: rx_serialized_packet_to_queue failed");
                     }
 
@@ -113,7 +110,7 @@ mod single_threaded_test {
                             continue;
                         }
                         node.router
-                            .rx_serialized_packet_to_queue(&frame)
+                            .rx_serialized_queue(&frame)
                             .expect("bus2: rx_serialized_packet_to_queue failed");
                     }
 
@@ -208,7 +205,7 @@ mod single_threaded_test {
             };
 
             // tx: push a copy of the wire bytes onto the node's bus with source id
-            let tx = move |bytes: &[u8]| -> TelemetryResult<()> {
+            let tx = move |bytes: &[u8], _link_id: &LinkId| -> TelemetryResult<()> {
                 local_bus_tx.send((idx, bytes.to_vec())).unwrap();
                 Ok(())
             };

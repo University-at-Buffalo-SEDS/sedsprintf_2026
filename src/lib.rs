@@ -48,8 +48,7 @@ use strum::EnumCount;
 //  Test / Python FFI modules (std-only)
 // ============================================================================
 
-#[cfg(feature = "std")]
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests;
 
 #[cfg(feature = "python")]
