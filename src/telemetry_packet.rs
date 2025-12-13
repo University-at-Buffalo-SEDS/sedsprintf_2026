@@ -15,7 +15,7 @@ pub(crate) use crate::{
     TelemetryResult,
 };
 use crate::{impl_data_as_prim, impl_from_prim_slices, impl_ledecode_auto};
-use alloc::{string::String, string::ToString, sync::Arc, vec::Vec};
+use alloc::{string::String, string::ToString, sync::Arc, vec::Vec, vec};
 use core::any::TypeId;
 use core::fmt::{Formatter, Write};
 // ============================================================================
