@@ -29,7 +29,7 @@ use crate::{
     MessageElementCount, TelemetryError,
     TelemetryResult,
 };
-use alloc::{boxed::Box, format, sync::Arc, vec, vec::Vec, borrow::ToOwned};
+use alloc::{borrow::ToOwned, boxed::Box, format, sync::Arc, vec, vec::Vec};
 use core::fmt;
 use core::fmt::{Debug, Formatter};
 use core::mem::size_of;
@@ -104,13 +104,18 @@ impl ByteCost for QueueItem {
     }
 }
 
+/// Transmit queue item with flags.
+/// Holds a QueueItem and a flag to ignore local dispatch.
+/// Used internally by the Router transmit queue.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct TxQueued {
     item: QueueItem,
     ignore_local: bool,
 }
 
+/// ByteCost implementation for TxQueued.
 impl ByteCost for TxQueued {
+    /// Byte cost is the cost of the inner item plus one bool.
     #[inline]
     fn byte_cost(&self) -> usize {
         self.item.byte_cost() + size_of::<bool>()
@@ -119,6 +124,7 @@ impl ByteCost for TxQueued {
 
 /// ByteCost implementation for `u64` (used by `recent_rx`).
 impl ByteCost for u64 {
+    /// Byte cost is size of u64.
     #[inline]
     fn byte_cost(&self) -> usize {
         size_of::<u64>()
@@ -128,7 +134,7 @@ impl ByteCost for u64 {
 // -------------------- endpoint + board config --------------------
 /// Packet Handler function type
 type PacketHandlerFn =
-dyn Fn(&TelemetryPacket, &LinkId) -> TelemetryResult<()> + Send + Sync + 'static;
+    dyn Fn(&TelemetryPacket, &LinkId) -> TelemetryResult<()> + Send + Sync + 'static;
 
 /// Serialized Handler function type
 type SerializedHandlerFn = dyn Fn(&[u8], &LinkId) -> TelemetryResult<()> + Send + Sync + 'static;
@@ -418,6 +424,33 @@ fn has_remote_endpoint(eps: &[DataEndpoint], cfg: &RouterConfig) -> bool {
     })
 }
 
+/// Helper function to call a handler with retries and error handling.
+fn with_retries<F>(
+    this: &Router,
+    dest: DataEndpoint,
+    data: &QueueItem,
+    pkt_for_ctx: Option<&TelemetryPacket>,
+    env_for_ctx: Option<&serialize::TelemetryEnvelope>,
+    link: &LinkId,
+    run: F,
+) -> TelemetryResult<()>
+where
+    F: Fn() -> TelemetryResult<()>,
+{
+    this.retry(MAX_HANDLER_RETRIES, run).map_err(|e| {
+        // If handler fails, remove from dedupe so it can be retried later if resent.
+        this.remove_pkt_id(data);
+
+        // Emit error packet (to local endpoints).
+        if let Some(pkt) = pkt_for_ctx {
+            let _ = this.handle_callback_error(pkt, Some(dest), e, link);
+        } else if let Some(env) = env_for_ctx {
+            let _ = this.handle_callback_error_from_env(env, Some(dest), e, link);
+        }
+
+        TelemetryError::HandlerError("local handler failed")
+    })
+}
 /// Router implementation
 impl Router {
     ///Helper function for relay_send
@@ -579,6 +612,7 @@ impl Router {
     }
 
     /// Clear both the transmit and receive queues without processing.
+    #[inline]
     pub fn clear_queues(&self) {
         let mut st = self.state.lock();
         st.transmit_queue.clear();
@@ -586,12 +620,14 @@ impl Router {
     }
 
     /// Clear only the receive queue without processing.
+    #[inline]
     pub fn clear_rx_queue(&self) {
         let mut st = self.state.lock();
         st.received_queue.clear();
     }
 
     /// Clear only the transmit queue without processing.
+    #[inline]
     pub fn clear_tx_queue(&self) {
         let mut st = self.state.lock();
         st.transmit_queue.clear();
@@ -616,6 +652,7 @@ impl Router {
     }
 
     /// Process a single queued receive item.
+    #[inline]
     fn process_rx_queue_item(&self, item: QueueItem) -> TelemetryResult<()> {
         self.rx_item(&item, true)
     }
@@ -680,6 +717,8 @@ impl Router {
         Ok(())
     }
 
+    /// Enqueue an item for later transmission with flags.
+    #[inline]
     fn tx_queue_item_with_flags(&self, item: QueueItem, ignore_local: bool) -> TelemetryResult<()> {
         let mut st = self.state.lock();
         st.transmit_queue.push_back(TxQueued { item, ignore_local });
@@ -687,6 +726,7 @@ impl Router {
     }
 
     /// Enqueue an item for later transmission (default: local dispatch enabled).
+    #[inline]
     fn tx_queue_item(&self, item: QueueItem) -> TelemetryResult<()> {
         self.tx_queue_item_with_flags(item, false)
     }
@@ -712,6 +752,7 @@ impl Router {
     }
 
     /// Enqueue a packet for RX processing with explicit link.
+    #[inline]
     pub fn rx_queue_from(&self, pkt: TelemetryPacket, link: LinkId) -> TelemetryResult<()> {
         pkt.validate()?;
         let mut st = self.state.lock();
@@ -720,6 +761,7 @@ impl Router {
     }
 
     /// Enqueue serialized bytes for RX processing with explicit link.
+    #[inline]
     pub fn rx_serialized_queue_from(&self, bytes: &[u8], link: LinkId) -> TelemetryResult<()> {
         let mut st = self.state.lock();
         st.received_queue
@@ -728,9 +770,9 @@ impl Router {
     }
 
     /// Retry helper function to attempt a closure multiple times.
-    fn retry<F, T, E>(&self, times: usize, mut f: F) -> Result<T, E>
+    fn retry<F, T, E>(&self, times: usize, f: F) -> Result<T, E>
     where
-        F: FnMut() -> Result<T, E>,
+        F: Fn() -> Result<T, E>,
     {
         let mut last_err = None;
         for _ in 0..times {
@@ -743,6 +785,7 @@ impl Router {
     }
 
     /// Check if the specified endpoint has a packet handler registered.
+    #[inline]
     fn endpoint_has_packet_handler(&self, ep: DataEndpoint) -> bool {
         self.cfg
             .handlers
@@ -751,6 +794,7 @@ impl Router {
     }
 
     /// Check if the specified endpoint has a serialized handler registered.
+    #[inline]
     fn endpoint_has_serialized_handler(&self, ep: DataEndpoint) -> bool {
         self.cfg
             .handlers
@@ -772,34 +816,6 @@ impl Router {
         env_for_ctx: Option<&serialize::TelemetryEnvelope>,
         link_id: &LinkId,
     ) -> TelemetryResult<()> {
-        // Helper: retry + error emission.
-        fn with_retries<F>(
-            this: &Router,
-            dest: DataEndpoint,
-            data: &QueueItem,
-            pkt_for_ctx: Option<&TelemetryPacket>,
-            env_for_ctx: Option<&serialize::TelemetryEnvelope>,
-            link: &LinkId,
-            run: F,
-        ) -> TelemetryResult<()>
-        where
-            F: FnMut() -> TelemetryResult<()>,
-        {
-            this.retry(MAX_HANDLER_RETRIES, run).map_err(|e| {
-                // If handler fails, remove from dedupe so it can be retried later if resent.
-                this.remove_pkt_id(data);
-
-                // Emit error packet (to local endpoints).
-                if let Some(pkt) = pkt_for_ctx {
-                    let _ = this.handle_callback_error(pkt, Some(dest), e, link);
-                } else if let Some(env) = env_for_ctx {
-                    let _ = this.handle_callback_error_from_env(env, Some(dest), e, link);
-                }
-
-                TelemetryError::HandlerError("local handler failed")
-            })
-        }
-
         // IMPORTANT: we cannot return `&QueueItem::...` for a temporary.
         // If we need a QueueItem just for error context, store it here.
         let owned_tmp: Option<QueueItem>;
@@ -942,7 +958,6 @@ impl Router {
 
                         self.relay_send(relay_item, called_from_queue)?;
 
-
                         has_sent_relay = true;
                     }
                 }
@@ -1056,10 +1071,10 @@ impl Router {
 
                 let has_serialized_local = !ignore_local
                     && pkt_ref
-                    .endpoints()
-                    .iter()
-                    .copied()
-                    .any(|ep| self.endpoint_has_serialized_handler(ep));
+                        .endpoints()
+                        .iter()
+                        .copied()
+                        .any(|ep| self.endpoint_has_serialized_handler(ep));
 
                 let send_remote = pkt_ref.endpoints().iter().any(|e| {
                     (!self.cfg.is_local_endpoint(*e)
@@ -1141,7 +1156,7 @@ impl Router {
                 if send_remote
                     && let Some(tx) = &self.transmit
                     && let Err(e) =
-                    self.retry(MAX_HANDLER_RETRIES, || tx(bytes_arc.as_ref(), &link))
+                        self.retry(MAX_HANDLER_RETRIES, || tx(bytes_arc.as_ref(), &link))
                 {
                     let _ = self.handle_callback_error_from_env(&env, None, e, &link);
                     return Err(TelemetryError::HandlerError("TX failed"));
@@ -1192,6 +1207,7 @@ impl Router {
     }
 
     /// Transmit a telemetry item immediately (remote + local).
+    #[inline]
     fn tx_item(&self, pkt: QueueItem) -> TelemetryResult<()> {
         self.tx_item_impl(pkt, false)
     }
@@ -1279,6 +1295,7 @@ impl Router {
     // ---------- PUBLIC API: logging (legacy: DEFAULT link) ----------
 
     /// Build a packet then send immediately (DEFAULT link).
+    #[inline]
     pub fn log<T: LeBytes>(&self, ty: DataType, data: &[T]) -> TelemetryResult<()> {
         log_raw(self.sender, ty, data, self.clock.now_ms(), |pkt| {
             self.tx_item(QueueItem::packet(pkt, LinkId::DEFAULT))
@@ -1286,6 +1303,7 @@ impl Router {
     }
 
     /// Build a packet and queue it for later TX (DEFAULT link).
+    #[inline]
     pub fn log_queue<T: LeBytes>(&self, ty: DataType, data: &[T]) -> TelemetryResult<()> {
         log_raw(self.sender, ty, data, self.clock.now_ms(), |pkt| {
             self.tx_queue_item(QueueItem::packet(pkt, LinkId::DEFAULT))
@@ -1293,6 +1311,7 @@ impl Router {
     }
 
     /// Build a packet with a specific timestamp then send immediately (DEFAULT link).
+    #[inline]
     pub fn log_ts<T: LeBytes>(
         &self,
         ty: DataType,
@@ -1305,6 +1324,7 @@ impl Router {
     }
 
     /// Build a packet with a specific timestamp and queue it for later TX (DEFAULT link).
+    #[inline]
     pub fn log_queue_ts<T: LeBytes>(
         &self,
         ty: DataType,
