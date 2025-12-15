@@ -381,6 +381,9 @@ pub enum TelemetryError {
 
     /// Payload type size mismatch.
     TypeMismatch { expected: usize, got: usize },
+    
+    /// Invalid link ID provided.
+    InvalidLinkId (&'static str),
 }
 
 impl TelemetryError {
@@ -402,6 +405,7 @@ impl TelemetryError {
             TelemetryError::Io(_) => TelemetryErrorCode::Io,
             TelemetryError::InvalidUtf8 => TelemetryErrorCode::InvalidUtf8,
             TelemetryError::TypeMismatch { .. } => TelemetryErrorCode::TypeMismatch,
+            TelemetryError::InvalidLinkId (_) => TelemetryErrorCode::InvalidLinkId,
         }
     }
 }
@@ -461,6 +465,7 @@ pub enum TelemetryErrorCode {
     Io = -13,
     InvalidUtf8 = -14,
     TypeMismatch = -15,
+    InvalidLinkId = -16,
 }
 
 // Generate ReprI32Enum helpers for TelemetryErrorCode
@@ -497,6 +502,7 @@ impl TelemetryErrorCode {
             TelemetryErrorCode::Io => "{IO Error}",
             TelemetryErrorCode::InvalidUtf8 => "{Invalid UTF-8}",
             TelemetryErrorCode::TypeMismatch => "{Type Mismatch}",
+            TelemetryErrorCode::InvalidLinkId => "{Invalid Link ID}",
         }
     }
 

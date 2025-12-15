@@ -29,7 +29,7 @@ mod mega_library_system_tests {
 
     fn mk_seen_link_handler(endpoint: DataEndpoint, seen: Arc<Mutex<HashSet<u64>>>) -> EndpointHandler {
         EndpointHandler::new_packet_handler(endpoint, move |_pkt: &TelemetryPacket, link_id: &LinkId| {
-            seen.lock().unwrap().insert(link_id.0);
+            seen.lock().unwrap().insert(link_id.id());
             Ok(())
         })
     }
@@ -50,9 +50,9 @@ mod mega_library_system_tests {
         // -------------------------------
         // 0) Define link IDs per bus
         // -------------------------------
-        let link_a = LinkId(10);
-        let link_b = LinkId(20);
-        let link_c = LinkId(30);
+        let link_a = LinkId::new(10).expect("LinkId::new failed");
+        let link_b = LinkId::new(20).expect("LinkId::new failed");
+        let link_c = LinkId::new(30).expect("LinkId::new failed");
 
         // -------------------------------
         // 1) Create the 3 buses
@@ -179,17 +179,17 @@ mod mega_library_system_tests {
 
             let tx_map: Arc<Mutex<HashMap<u64, mpsc::Sender<BusMsg>>>> = Arc::new(Mutex::new({
                 let mut m = HashMap::new();
-                m.insert(link_a.0, bus_a_tx.clone());
-                m.insert(link_b.0, bus_b_tx.clone());
-                m.insert(link_c.0, bus_c_tx.clone());
+                m.insert(link_a.id(), bus_a_tx.clone());
+                m.insert(link_b.id(), bus_b_tx.clone());
+                m.insert(link_c.id(), bus_c_tx.clone());
                 m
             }));
 
             let tx = move |bytes: &[u8], link: &LinkId| -> TelemetryResult<()> {
-                tx_links.lock().unwrap().push(link.0);
+                tx_links.lock().unwrap().push(link.id());
 
                 let map = tx_map.lock().unwrap();
-                let out = map.get(&link.0).ok_or(TelemetryError::BadArg)?;
+                let out = map.get(&link.id()).ok_or(TelemetryError::BadArg)?;
                 out.send(("hub_router", *link, bytes.to_vec())).unwrap();
                 Ok(())
             };
@@ -468,7 +468,7 @@ mod mega_library_system_tests {
         // Link IDs reached BOTH endpoint handlers (proves link propagation all the way to handlers).
         let seen_r = seen_links_radio.lock().unwrap().clone();
         let seen_s = seen_links_sd.lock().unwrap().clone();
-        for l in [link_a.0, link_b.0, link_c.0] {
+        for l in [link_a.id(), link_b.id(), link_c.id()] {
             assert!(seen_r.contains(&l), "Radio handlers never saw link {l}; seen={seen_r:?}");
             assert!(seen_s.contains(&l), "SdCard handlers never saw link {l}; seen={seen_s:?}");
         }
@@ -476,8 +476,8 @@ mod mega_library_system_tests {
         // Hub TX was exercised across multiple links (forced by gen_hub).
         let tx_links = hub_tx_links.lock().unwrap();
         assert!(!tx_links.is_empty(), "hub router never transmitted (even forced)");
-        assert!(tx_links.contains(&link_a.0), "hub never transmitted on link_a; got={tx_links:?}");
-        assert!(tx_links.contains(&link_b.0), "hub never transmitted on link_b; got={tx_links:?}");
-        assert!(tx_links.contains(&link_c.0), "hub never transmitted on link_c; got={tx_links:?}");
+        assert!(tx_links.contains(&link_a.id()), "hub never transmitted on link_a; got={tx_links:?}");
+        assert!(tx_links.contains(&link_b.id()), "hub never transmitted on link_b; got={tx_links:?}");
+        assert!(tx_links.contains(&link_c.id()), "hub never transmitted on link_c; got={tx_links:?}");
     }
 }

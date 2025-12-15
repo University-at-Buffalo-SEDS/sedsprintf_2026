@@ -52,11 +52,31 @@ pub enum RouterMode {
 
 /// Identifies which ingress/egress link a packet belongs to (CAN bus, TCP socket, radio, etc.).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct LinkId(pub u64);
+pub struct LinkId {
+    id: u64,
+}
+
+/// Default link used by legacy APIs (back-compat).
+pub const DEFAULT_LINK_ID:LinkId = LinkId { id: 0 };
+
+/// Local link ID used for packets generated locally.
+const LOCAL_LINK_ID:LinkId = LinkId { id: 1 };
 
 impl LinkId {
-    /// Default link used by legacy APIs (back-compat).
-    pub const DEFAULT: LinkId = LinkId(0);
+    /// Create a new LinkId.
+    #[inline]
+    pub const fn new(id: u64) -> TelemetryResult<LinkId> {
+        match id {
+            0 => Err(TelemetryError::InvalidLinkId("Default link ID is reserved")),
+            1 => Err(TelemetryError::InvalidLinkId("Local link ID is reserved")),
+            _ => Ok(LinkId { id }),
+        }
+    }
+    
+    #[inline]
+    pub const fn id(self) -> u64 {
+        self.id
+    }
 }
 
 /// Queue item enum for the router queues.
@@ -742,13 +762,13 @@ impl Router {
     /// Enqueue serialized bytes for RX processing (legacy: DEFAULT link).
     #[inline]
     pub fn rx_serialized_queue(&self, bytes: &[u8]) -> TelemetryResult<()> {
-        self.rx_serialized_queue_from(bytes, LinkId::DEFAULT)
+        self.rx_serialized_queue_from(bytes, DEFAULT_LINK_ID)
     }
 
     /// Enqueue a packet for RX processing (legacy: DEFAULT link).
     #[inline]
     pub fn rx_queue(&self, pkt: TelemetryPacket) -> TelemetryResult<()> {
-        self.rx_queue_from(pkt, LinkId::DEFAULT)
+        self.rx_queue_from(pkt, DEFAULT_LINK_ID)
     }
 
     /// Enqueue a packet for RX processing with explicit link.
@@ -1217,13 +1237,13 @@ impl Router {
     /// Receive serialized bytes (legacy: DEFAULT link).
     #[inline]
     pub fn rx_serialized(&self, bytes: &[u8]) -> TelemetryResult<()> {
-        self.rx_serialized_from(bytes, LinkId::DEFAULT)
+        self.rx_serialized_from(bytes, DEFAULT_LINK_ID)
     }
 
     /// Receive a packet (legacy: DEFAULT link).
     #[inline]
     pub fn rx(&self, pkt: &TelemetryPacket) -> TelemetryResult<()> {
-        self.rx_from(pkt, LinkId::DEFAULT)
+        self.rx_from(pkt, DEFAULT_LINK_ID)
     }
 
     /// Receive a packet with explicit ingress link.
@@ -1245,13 +1265,13 @@ impl Router {
     /// Transmit a packet immediately (legacy: DEFAULT link).
     #[inline]
     pub fn tx(&self, pkt: TelemetryPacket) -> TelemetryResult<()> {
-        self.tx_from(pkt, LinkId::DEFAULT)
+        self.tx_from(pkt, DEFAULT_LINK_ID)
     }
 
     /// Transmit serialized bytes immediately (legacy: DEFAULT link).
     #[inline]
     pub fn tx_serialized(&self, pkt: Arc<[u8]>) -> TelemetryResult<()> {
-        self.tx_serialized_from(pkt, LinkId::DEFAULT)
+        self.tx_serialized_from(pkt, DEFAULT_LINK_ID)
     }
 
     /// Transmit a packet immediately with explicit link context.
@@ -1271,13 +1291,13 @@ impl Router {
     /// Queue a packet for later TX (legacy: DEFAULT link).
     #[inline]
     pub fn tx_queue(&self, pkt: TelemetryPacket) -> TelemetryResult<()> {
-        self.tx_queue_from(pkt, LinkId::DEFAULT)
+        self.tx_queue_from(pkt, LOCAL_LINK_ID)
     }
 
     /// Queue serialized bytes for later TX (legacy: DEFAULT link).
     #[inline]
     pub fn tx_serialized_queue(&self, data: Arc<[u8]>) -> TelemetryResult<()> {
-        self.tx_serialized_queue_from(data, LinkId::DEFAULT)
+        self.tx_serialized_queue_from(data, LOCAL_LINK_ID)
     }
 
     /// Queue a packet for later TX with explicit link context.
@@ -1298,7 +1318,7 @@ impl Router {
     #[inline]
     pub fn log<T: LeBytes>(&self, ty: DataType, data: &[T]) -> TelemetryResult<()> {
         log_raw(self.sender, ty, data, self.clock.now_ms(), |pkt| {
-            self.tx_item(QueueItem::packet(pkt, LinkId::DEFAULT))
+            self.tx_item(QueueItem::packet(pkt, LOCAL_LINK_ID))
         })
     }
 
@@ -1306,7 +1326,7 @@ impl Router {
     #[inline]
     pub fn log_queue<T: LeBytes>(&self, ty: DataType, data: &[T]) -> TelemetryResult<()> {
         log_raw(self.sender, ty, data, self.clock.now_ms(), |pkt| {
-            self.tx_queue_item(QueueItem::packet(pkt, LinkId::DEFAULT))
+            self.tx_queue_item(QueueItem::packet(pkt, LOCAL_LINK_ID))
         })
     }
 
@@ -1319,7 +1339,7 @@ impl Router {
         data: &[T],
     ) -> TelemetryResult<()> {
         log_raw(self.sender, ty, data, timestamp, |pkt| {
-            self.tx_item(QueueItem::packet(pkt, LinkId::DEFAULT))
+            self.tx_item(QueueItem::packet(pkt, LOCAL_LINK_ID))
         })
     }
 
@@ -1332,7 +1352,7 @@ impl Router {
         data: &[T],
     ) -> TelemetryResult<()> {
         log_raw(self.sender, ty, data, timestamp, |pkt| {
-            self.tx_queue_item(QueueItem::packet(pkt, LinkId::DEFAULT))
+            self.tx_queue_item(QueueItem::packet(pkt, LOCAL_LINK_ID))
         })
     }
 }
