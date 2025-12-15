@@ -29,7 +29,7 @@ use crate::{
     MessageElementCount, TelemetryError,
     TelemetryResult,
 };
-use alloc::{boxed::Box, format, sync::Arc, vec, vec::Vec};
+use alloc::{boxed::Box, format, sync::Arc, vec, vec::Vec, borrow::ToOwned};
 use core::fmt;
 use core::fmt::{Debug, Formatter};
 use core::mem::size_of;
