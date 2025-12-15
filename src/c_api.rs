@@ -14,11 +14,10 @@
 use crate::config::get_message_data_type;
 use crate::MessageDataType::NoData;
 use crate::{
-    config::DataEndpoint, do_vec_log_typed, get_needed_message_size, message_meta,
-    router::{Clock, LeBytes, LinkId},
-    router::{EndpointHandler, Router, RouterConfig}, serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet}, telemetry_packet::TelemetryPacket,
+    config::DataEndpoint, do_vec_log_typed, get_needed_message_size, message_meta, router::{Clock, LeBytes, LinkId},
+    router::{EndpointHandler, Router, RouterConfig},
+    serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet}, telemetry_packet::TelemetryPacket, DataType,
     MessageElementCount,
-    DataType,
     TelemetryError,
     TelemetryErrorCode,
     TelemetryResult,
@@ -27,7 +26,7 @@ use alloc::{boxed::Box, string::String, sync::Arc, vec, vec::Vec};
 use core::{ffi::c_char, ffi::c_void, mem::size_of, ptr, slice, str::from_utf8};
 
 use crate::relay::{Relay, RelaySideId};
-
+use crate::router::DEFAULT_LINK_ID;
 // ============================================================================
 //  Constants / basic types shared with the C side
 // ============================================================================
@@ -55,7 +54,7 @@ pub struct SedsLinkId {
 
 #[inline]
 fn seds_link_id_from(link: &LinkId) -> SedsLinkId {
-    SedsLinkId { raw: link.0 }
+    SedsLinkId { raw: link.id() }
 }
 
 /// Opaque owned packet for C. Keeps Rust allocations alive across calls.
@@ -107,18 +106,16 @@ fn ok_or_status(r: TelemetryResult<()>) -> i32 {
     }
 }
 
-
 #[inline]
-fn link_id_from_ptr(link: *const SedsLinkId) -> LinkId {
+fn link_id_from_ptr(link: *const SedsLinkId) -> TelemetryResult<LinkId> {
     if link.is_null() {
-        LinkId::DEFAULT
+        Ok(DEFAULT_LINK_ID)
     } else {
         // SAFETY: caller promises `link` points to a valid SedsLinkId.
         let raw = unsafe { (*link).raw };
-        LinkId(raw)
+        LinkId::new(raw)
     }
 }
-
 
 /// Returns the fixed payload size (in bytes) for a static schema, or `None`
 /// if the message type is dynamically sized.
@@ -248,8 +245,7 @@ fn view_to_packet(view: &SedsPacketView) -> Result<TelemetryPacket, ()> {
         ""
     } else {
         let sb = unsafe { slice::from_raw_parts(view.sender as *const u8, view.sender_len) };
-        let s = from_utf8(sb).map_err(|_| ())?;
-        s
+        from_utf8(sb).map_err(|_| ())?
     };
 
     // Payload bytes
@@ -803,7 +799,7 @@ pub extern "C" fn seds_relay_add_side_serialized(
         return status_from_err(TelemetryError::BadArg);
     };
 
-    let side_id: RelaySideId = relay.add_side(side_name, tx_fn);
+    let side_id: RelaySideId = relay.add_side_serialized(side_name, tx_fn);
     side_id as i32
 }
 
@@ -1543,7 +1539,6 @@ pub extern "C" fn seds_router_process_all_queues_with_timeout(
     ok_or_status(router.process_all_queues_with_timeout(timeout_ms))
 }
 
-
 // ============================================================================
 //  FFI: Receive / queue RX (v2: explicit ingress LinkId)
 // ============================================================================
@@ -1561,7 +1556,11 @@ pub extern "C" fn seds_router_receive_serialized_v2(
     let router = unsafe { &(*r).inner };
     let slice = unsafe { slice::from_raw_parts(bytes, len) };
 
-    let link_id = link_id_from_ptr(link);
+    let link_id = match link_id_from_ptr(link) {
+        Ok(lid) => lid,
+        Err(e) => return status_from_err(e),
+    };
+
     ok_or_status(router.rx_serialized_from(slice, link_id))
 }
 
@@ -1580,7 +1579,10 @@ pub extern "C" fn seds_router_receive_v2(
         Err(_) => return status_from_err(TelemetryError::InvalidType),
     };
 
-    let link_id = link_id_from_ptr(link);
+    let link_id = match link_id_from_ptr(link) {
+        Ok(lid) => lid,
+        Err(e) => return status_from_err(e),
+    };
     ok_or_status(router.rx_from(&pkt, link_id))
 }
 
@@ -1597,7 +1599,10 @@ pub extern "C" fn seds_router_rx_serialized_packet_to_queue_v2(
     let router = unsafe { &(*r).inner };
     let slice = unsafe { slice::from_raw_parts(bytes, len) };
 
-    let link_id = link_id_from_ptr(link);
+    let link_id = match link_id_from_ptr(link) {
+        Ok(lid) => lid,
+        Err(e) => return status_from_err(e),
+    };
     ok_or_status(router.rx_serialized_queue_from(slice, link_id))
 }
 
@@ -1616,10 +1621,12 @@ pub extern "C" fn seds_router_rx_packet_to_queue_v2(
         Err(_) => return status_from_err(TelemetryError::InvalidType),
     };
 
-    let link_id = link_id_from_ptr(link);
+    let link_id = match link_id_from_ptr(link) {
+        Ok(lid) => lid,
+        Err(e) => return status_from_err(e),
+    };
     ok_or_status(router.rx_queue_from(pkt, link_id))
 }
-
 
 // ============================================================================
 //  FFI: Payload pointer & copy helpers

@@ -5,8 +5,9 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 from pathlib import Path
+
+import sys
 
 # The line pattern in .gitignore you want to temporarily comment out.
 # This is treated as a literal and turned into a whole-line regex.

@@ -33,14 +33,10 @@ use pyo3::types::{PyBytes, PyDict, PyList, PyModule, PyTuple};
 use std::sync::{Arc as SArc, Mutex, OnceLock};
 
 use crate::{
-    config::DataEndpoint,
-    get_needed_message_size,
-    message_meta,
-    relay::Relay,
+    config::{DataEndpoint, DataType}, get_needed_message_size, message_meta, relay::Relay,
     router::{Clock, EndpointHandler, LeBytes, LinkId, Router, RouterConfig, RouterMode},
     serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet},
-    telemetry_packet::{DataType, TelemetryPacket},
-    try_enum_from_u32,
+    telemetry_packet::TelemetryPacket, try_enum_from_u32,
     MessageElementCount,
     TelemetryError,
     TelemetryResult,
@@ -383,6 +379,9 @@ impl PyRouter {
                                 .map_err(|_| TelemetryError::Io("packet wrapper"))?
                                 .into_any();
 
+                            // FIX: bind owned Py<PyAny> into Bound<PyAny>
+                            let any = any.bind(py);
+
                             match call_py_cb_1_or_2(py, &cb_for_closure, &any, link) {
                                 Ok(()) => Ok(()),
                                 Err(err) => {
@@ -402,18 +401,19 @@ impl PyRouter {
                     let cb_for_closure = cb.clone_ref(py);
                     keep_ser.push(cb);
 
-                    let eh = EndpointHandler::new_serialized_handler(endpoint, move |bytes, link| {
-                        Python::attach(|py| {
-                            let arg = PyBytes::new(py, bytes).into_any();
-                            match call_py_cb_1_or_2(py, &cb_for_closure, &arg, link) {
-                                Ok(()) => Ok(()),
-                                Err(err) => {
-                                    err.restore(py);
-                                    Err(TelemetryError::Io("serialized handler error"))
+                    let eh =
+                        EndpointHandler::new_serialized_handler(endpoint, move |bytes, link| {
+                            Python::attach(|py| {
+                                let arg = PyBytes::new(py, bytes).into_any();
+                                match call_py_cb_1_or_2(py, &cb_for_closure, &arg, link) {
+                                    Ok(()) => Ok(()),
+                                    Err(err) => {
+                                        err.restore(py);
+                                        Err(TelemetryError::Io("serialized handler error"))
+                                    }
                                 }
-                            }
-                        })
-                    });
+                            })
+                        });
 
                     handlers_vec.push(eh);
                 }
@@ -515,6 +515,9 @@ impl PyRouter {
                                 .map_err(|_| TelemetryError::Io("packet wrapper"))?
                                 .into_any();
 
+                            // FIX: bind owned Py<PyAny> into Bound<PyAny>
+                            let any = any.bind(py);
+
                             match call_py_cb_1_or_2(py, &cb_for_closure, &any, link) {
                                 Ok(()) => Ok(()),
                                 Err(err) => {
@@ -534,18 +537,19 @@ impl PyRouter {
                     let cb_for_closure = cb.clone_ref(py);
                     keep_ser.push(cb);
 
-                    let eh = EndpointHandler::new_serialized_handler(endpoint, move |bytes, link| {
-                        Python::attach(|py| {
-                            let arg = PyBytes::new(py, bytes).into_any();
-                            match call_py_cb_1_or_2(py, &cb_for_closure, &arg, link) {
-                                Ok(()) => Ok(()),
-                                Err(err) => {
-                                    err.restore(py);
-                                    Err(TelemetryError::Io("serialized handler error"))
+                    let eh =
+                        EndpointHandler::new_serialized_handler(endpoint, move |bytes, link| {
+                            Python::attach(|py| {
+                                let arg = PyBytes::new(py, bytes).into_any();
+                                match call_py_cb_1_or_2(py, &cb_for_closure, &arg, link) {
+                                    Ok(()) => Ok(()),
+                                    Err(err) => {
+                                        err.restore(py);
+                                        Err(TelemetryError::Io("serialized handler error"))
+                                    }
                                 }
-                            }
-                        })
-                    });
+                            })
+                        });
 
                     handlers_vec.push(eh);
                 }
@@ -601,7 +605,11 @@ impl PyRouter {
         rtr.tx_queue(pkt_ref.inner.clone()).map_err(py_err_from)
     }
 
-    fn transmit_serialized_message(&self, _py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResult<()> {
+    fn transmit_serialized_message(
+        &self,
+        _py: Python<'_>,
+        data: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
         let bytes: &[u8] = data.extract()?;
         let arc: AArc<[u8]> = AArc::from(bytes);
 
@@ -1065,7 +1073,7 @@ impl PyRelay {
 
         let name_static: &'static str = Box::leak(name.to_owned().into_boxed_str());
 
-        let id = self.inner.add_side(name_static, move |bytes| {
+        let id = self.inner.add_side_serialized(name_static, move |bytes| {
             Python::attach(|py| {
                 let arg = PyBytes::new(py, bytes);
                 match cb_for_closure.call1(py, (&arg,)) {

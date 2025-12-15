@@ -17,8 +17,8 @@ use crate::{
     {config::DataType, MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE},
 };
 
-use alloc::{sync::Arc, vec::Vec, borrow::ToOwned, string::String};
 use crate::telemetry_packet::hash_bytes_u64;
+use alloc::{borrow::ToOwned, string::String, sync::Arc, vec::Vec};
 
 /// Lightweight header-only view of a serialized [`TelemetryPacket`].
 ///
@@ -466,11 +466,11 @@ pub fn header_size_bytes(pkt: &TelemetryPacket) -> usize {
         + uleb128_size(pkt.timestamp())
         + uleb128_size(sender_bytes.len() as u64)
         + if sender_compressed {
-            // extra varint for sender_wire_len when compressed
-            uleb128_size(sender_wire.len() as u64)
-        } else {
-            0
-        }
+        // extra varint for sender_wire_len when compressed
+        uleb128_size(sender_wire.len() as u64)
+    } else {
+        0
+    }
 }
 
 /// Compute the total wire size (header + bitmap + sender + payload) in bytes.
@@ -491,7 +491,6 @@ pub fn packet_wire_size(pkt: &TelemetryPacket) -> usize {
 
     header + EP_BITMAP_BYTES + sender_wire.len() + payload_wire.len()
 }
-
 
 
 #[inline]

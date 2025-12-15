@@ -3,7 +3,7 @@
 mod single_threaded_test {
     use sedsprintf_rs_2026::config::{DataEndpoint, DataType};
     use sedsprintf_rs_2026::relay::Relay;
-    use sedsprintf_rs_2026::router::{RouterConfig, Clock, EndpointHandler, Router, RouterMode, LinkId};
+    use sedsprintf_rs_2026::router::{Clock, EndpointHandler, LinkId, Router, RouterConfig, RouterMode};
     use sedsprintf_rs_2026::telemetry_packet::TelemetryPacket;
     use sedsprintf_rs_2026::TelemetryResult;
 
@@ -148,7 +148,7 @@ mod single_threaded_test {
 
         // Relay side for bus1: TX from relay -> bus1_rx
         let relay_bus1_tx = bus1_tx.clone();
-        let bus1_side_id = relay.add_side("bus1", move |bytes: &[u8]| -> TelemetryResult<()> {
+        let bus1_side_id = relay.add_side_serialized("bus1", move |bytes: &[u8]| -> TelemetryResult<()> {
             // from = usize::MAX so we never skip this in bus1 delivery
             relay_bus1_tx
                 .send((usize::MAX, bytes.to_vec()))
@@ -158,7 +158,7 @@ mod single_threaded_test {
 
         // Relay side for bus2: TX from relay -> bus2_rx
         let relay_bus2_tx = bus2_tx.clone();
-        let bus2_side_id = relay.add_side("bus2", move |bytes: &[u8]| -> TelemetryResult<()> {
+        let bus2_side_id = relay.add_side_serialized("bus2", move |bytes: &[u8]| -> TelemetryResult<()> {
             relay_bus2_tx
                 .send((usize::MAX, bytes.to_vec()))
                 .unwrap();
@@ -285,7 +285,7 @@ mod single_threaded_test {
                     &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
                     (i + 40_000) as u64,
                 )
-                .unwrap();
+                    .unwrap();
                 node.router.tx(pkt2).unwrap();
             }
 
