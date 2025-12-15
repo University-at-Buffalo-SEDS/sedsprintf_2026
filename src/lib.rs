@@ -161,7 +161,6 @@ pub enum MessageElementCount {
 /// Broadcast mode for endpoints
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub enum EndpointsBroadcastMode {
-    
     /// Always transmit the message, even if we have and endpoint for it.
     Always,
     /// Never transmit the packet, even if we don't have an endpoint for it.
@@ -192,7 +191,7 @@ pub fn message_meta(ty: DataType) -> MessageMeta {
 
 impl Mul<MessageElementCount> for usize {
     type Output = usize;
-    
+
     #[inline]
     fn mul(self, rhs: MessageElementCount) -> usize {
         self * rhs.into()

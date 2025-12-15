@@ -6,13 +6,13 @@ mod mega_library_system_tests {
     use sedsprintf_rs::telemetry_packet::TelemetryPacket;
     use sedsprintf_rs::{TelemetryError, TelemetryResult};
 
+    use sedsprintf_rs::serialize::serialize_packet;
     use std::collections::{HashMap, HashSet};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::mpsc;
     use std::sync::{Arc, Mutex};
     use std::thread;
     use std::time::{Duration, Instant};
-    use sedsprintf_rs::serialize::serialize_packet;
 
     fn zero_clock() -> Box<dyn Clock + Send + Sync> {
         Box::new(|| 0u64)
@@ -67,19 +67,19 @@ mod mega_library_system_tests {
         let relay = Arc::new(Relay::new(zero_clock()));
 
         let r_a_tx = bus_a_tx.clone();
-        let relay_side_a = relay.add_side("bus_a", move |bytes: &[u8]| -> TelemetryResult<()> {
+        let relay_side_a = relay.add_side_serialized("bus_a", move |bytes: &[u8]| -> TelemetryResult<()> {
             r_a_tx.send(("relay", link_a, bytes.to_vec())).unwrap();
             Ok(())
         });
 
         let r_b_tx = bus_b_tx.clone();
-        let relay_side_b = relay.add_side("bus_b", move |bytes: &[u8]| -> TelemetryResult<()> {
+        let relay_side_b = relay.add_side_serialized("bus_b", move |bytes: &[u8]| -> TelemetryResult<()> {
             r_b_tx.send(("relay", link_b, bytes.to_vec())).unwrap();
             Ok(())
         });
 
         let r_c_tx = bus_c_tx.clone();
-        let relay_side_c = relay.add_side("bus_c", move |bytes: &[u8]| -> TelemetryResult<()> {
+        let relay_side_c = relay.add_side_serialized("bus_c", move |bytes: &[u8]| -> TelemetryResult<()> {
             r_c_tx.send(("relay", link_c, bytes.to_vec())).unwrap();
             Ok(())
         });
@@ -351,7 +351,7 @@ mod mega_library_system_tests {
                         &[DataEndpoint::SdCard, DataEndpoint::Radio],
                         200 + i as u64,
                     )
-                    .unwrap();
+                        .unwrap();
 
                     let wire = serialize_packet(&pkt);
                     r.tx_serialized_queue_from(wire, link_c).unwrap();
@@ -384,7 +384,7 @@ mod mega_library_system_tests {
                         &[DataEndpoint::SdCard, DataEndpoint::Radio],
                         3000 + i,
                     )
-                    .unwrap();
+                        .unwrap();
                     let wire_c = serialize_packet(&pkt_c);
                     hub.tx_serialized_queue_from(wire_c, link_c).unwrap();
 

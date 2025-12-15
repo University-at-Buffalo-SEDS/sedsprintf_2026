@@ -17,8 +17,8 @@ use crate::{
     config::DataEndpoint, do_vec_log_typed, get_needed_message_size, message_meta,
     router::{Clock, LeBytes, LinkId},
     router::{EndpointHandler, Router, RouterConfig}, serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet}, telemetry_packet::TelemetryPacket,
-    MessageElementCount,
     DataType,
+    MessageElementCount,
     TelemetryError,
     TelemetryErrorCode,
     TelemetryResult,
@@ -184,7 +184,7 @@ type CEndpointHandler = Option<extern "C" fn(pkt: *const SedsPacketView, user: *
 
 /// Endpoint handler callback (serialized bytes) (legacy).
 type CSerializedHandler =
-    Option<extern "C" fn(bytes: *const u8, len: usize, user: *mut c_void) -> i32>;
+Option<extern "C" fn(bytes: *const u8, len: usize, user: *mut c_void) -> i32>;
 
 /// C-facing endpoint descriptor (legacy, must match C header).
 #[repr(C)]
@@ -248,8 +248,7 @@ fn view_to_packet(view: &SedsPacketView) -> Result<TelemetryPacket, ()> {
         ""
     } else {
         let sb = unsafe { slice::from_raw_parts(view.sender as *const u8, view.sender_len) };
-        let s = from_utf8(sb).map_err(|_| ())?;
-        s
+        from_utf8(sb).map_err(|_| ())?
     };
 
     // Payload bytes
@@ -803,7 +802,7 @@ pub extern "C" fn seds_relay_add_side_serialized(
         return status_from_err(TelemetryError::BadArg);
     };
 
-    let side_id: RelaySideId = relay.add_side(side_name, tx_fn);
+    let side_id: RelaySideId = relay.add_side_serialized(side_name, tx_fn);
     side_id as i32
 }
 

@@ -8,11 +8,11 @@
 //!   - [`get_message_info_types`]
 //!   - [`get_message_meta`]
 
+use crate::EndpointsBroadcastMode;
 #[allow(unused_imports)]
 use crate::{MessageDataType, MessageElementCount, MessageMeta, MessageType, STRING_VALUE_ELEMENT};
-use strum_macros::EnumCount;
-use crate::EndpointsBroadcastMode;
 use sedsprintf_macros::define_stack_payload;
+use strum_macros::EnumCount;
 
 // -----------------------------------------------------------------------------
 // User-editable configuration
@@ -103,8 +103,8 @@ impl DataEndpoint {
             DataEndpoint::Radio => "RADIO",
         }
     }
-    
-    pub fn get_broadast_mode(&self) -> EndpointsBroadcastMode{
+
+    pub fn get_broadast_mode(&self) -> EndpointsBroadcastMode {
         match self {
             DataEndpoint::SdCard => EndpointsBroadcastMode::Default,
             DataEndpoint::Radio => EndpointsBroadcastMode::Default,

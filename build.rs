@@ -4,7 +4,6 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::{env, fs};
 
-
 fn main() {
     ensure_rust_target_installed();
     generate_c_header();
@@ -231,20 +230,17 @@ fn transform_enum_block(
         let new_body = body
             .lines()
             .map(|line| {
-                if let Some((lead, rest)) = split_leading_ws(line) {
-                    if let Some(id) = rest
-                        .split([' ', '=', ','])
-                        .next()
-                    {
-                        if !id.is_empty() && id.chars().all(|c| c.is_ascii_uppercase() || c == '_')
-                        {
-                            if rest.trim_start().starts_with(variant_prefix) {
-                                return line.to_string();
-                            }
-                            return format!("{lead}{}{}", variant_prefix, rest);
-                        }
+                if let Some((lead, rest)) = split_leading_ws(line)
+                    && let Some(id) = rest.split([' ', '=', ',']).next()
+                    && !id.is_empty()
+                    && id.chars().all(|c| c.is_ascii_uppercase() || c == '_')
+                {
+                    if rest.trim_start().starts_with(variant_prefix) {
+                        return line.to_string();
                     }
+                    return format!("{lead}{}{}", variant_prefix, rest);
                 }
+
                 line.to_string()
             })
             .collect::<Vec<_>>()
@@ -272,26 +268,23 @@ fn transform_errors_enum_as_seds_result(block: &str) -> String {
         if trimmed.is_empty() {
             continue;
         }
-        if let Some((lead, rest)) = split_leading_ws(line) {
-            if let Some(id) = rest
-                .split([' ', '=', ','])
-                .next()
-            {
-                if !id.is_empty()
-                    && id
-                        .chars()
-                        .all(|c| c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit())
-                {
-                    let prefixed = if rest.trim_start().starts_with("SEDS_") {
-                        rest.to_string()
-                    } else {
-                        format!("SEDS_{}", rest)
-                    };
-                    lines.push(format!("{lead}{prefixed}"));
-                    continue;
-                }
-            }
+        if let Some((lead, rest)) = split_leading_ws(line)
+            && let Some(id) = rest.split([' ', '=', ',']).next()
+            && !id.is_empty()
+            && id
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit())
+        {
+            let prefixed = if rest.trim_start().starts_with("SEDS_") {
+                rest.to_string()
+            } else {
+                format!("SEDS_{}", rest)
+            };
+
+            lines.push(format!("{lead}{prefixed}"));
+            continue;
         }
+
         lines.push(line.to_string());
     }
 
@@ -330,11 +323,7 @@ fn parse_enum_members(block: &str) -> Vec<(String, String)> {
 
         // Grab "IDENT [= VALUE] ," at start of line
         if let Some((_, rest)) = split_leading_ws(line) {
-            let ident = rest
-                .split([' ', '=', ','])
-                .next()
-                .unwrap_or("")
-                .trim();
+            let ident = rest.split([' ', '=', ',']).next().unwrap_or("").trim();
             if ident.is_empty() || !ident.chars().all(|c| c.is_ascii_uppercase() || c == '_') {
                 continue;
             }

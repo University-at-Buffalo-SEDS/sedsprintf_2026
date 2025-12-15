@@ -36,7 +36,6 @@ where
     fn clone(&self) -> Self {
         RouterMutex::new(self.lock().clone())
     }
-
 }
 #[cfg(feature = "std")]
 impl<T> RouterMutex<T> {

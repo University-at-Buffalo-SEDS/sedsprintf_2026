@@ -2,7 +2,7 @@
 mod threaded_system_tests {
     use sedsprintf_rs::config::{DataEndpoint, DataType};
     use sedsprintf_rs::relay::Relay;
-    use sedsprintf_rs::router::{RouterConfig, Clock, EndpointHandler, Router, RouterMode, LinkId};
+    use sedsprintf_rs::router::{Clock, EndpointHandler, LinkId, Router, RouterConfig, RouterMode};
     use sedsprintf_rs::telemetry_packet::TelemetryPacket;
     use sedsprintf_rs::TelemetryResult;
 
@@ -71,7 +71,7 @@ mod threaded_system_tests {
 
         // Frames sent out of relay on "bus1" side get injected into bus1_rx
         let relay_bus1_tx = bus1_tx.clone();
-        let bus1_side_id = relay.add_side("bus1", move |bytes: &[u8]| -> TelemetryResult<()> {
+        let bus1_side_id = relay.add_side_serialized("bus1", move |bytes: &[u8]| -> TelemetryResult<()> {
             // from = usize::MAX so we don't accidentally "skip" any node
             relay_bus1_tx.send((usize::MAX, bytes.to_vec())).unwrap();
             Ok(())
@@ -79,7 +79,7 @@ mod threaded_system_tests {
 
         // Frames sent out of relay on "bus2" side get injected into bus2_rx
         let relay_bus2_tx = bus2_tx.clone();
-        let bus2_side_id = relay.add_side("bus2", move |bytes: &[u8]| -> TelemetryResult<()> {
+        let bus2_side_id = relay.add_side_serialized("bus2", move |bytes: &[u8]| -> TelemetryResult<()> {
             relay_bus2_tx.send((usize::MAX, bytes.to_vec())).unwrap();
             Ok(())
         });
@@ -327,7 +327,7 @@ mod threaded_system_tests {
                     &[DataEndpoint::SdCard, DataEndpoint::Radio],
                     i + 300,
                 )
-                .unwrap();
+                    .unwrap();
                 power_router.tx(pkt2).unwrap();
                 thread::sleep(Duration::from_millis(5));
             }
