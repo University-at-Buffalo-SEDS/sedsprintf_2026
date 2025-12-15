@@ -67,8 +67,8 @@ impl LinkId {
     #[inline]
     pub const fn new(id: u64) -> TelemetryResult<LinkId> {
         match id {
-            0 => Err(TelemetryError::InvalidLinkId("Default link ID is reserved")),
-            1 => Err(TelemetryError::InvalidLinkId("Local link ID is reserved")),
+            0 => Err(TelemetryError::InvalidLinkId("Default link ID is reserved. Please Pick a Value >= 2")),
+            1 => Err(TelemetryError::InvalidLinkId("Local link ID is reserved. Please Pick a Value >= 2")),
             _ => Ok(LinkId { id }),
         }
     }
