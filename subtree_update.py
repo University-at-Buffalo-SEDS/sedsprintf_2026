@@ -2,8 +2,9 @@
 import importlib.util
 import os
 import subprocess
-import sys
 from pathlib import Path
+
+import sys
 
 
 def run(cmd: list[str]) -> None:

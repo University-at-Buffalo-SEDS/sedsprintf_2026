@@ -46,7 +46,7 @@ impl<T: ByteCost + PartialEq> BoundedDeque<T> {
 
     /// Get iterator over items.
     #[allow(dead_code)]
-    pub fn iter(&self) -> impl Iterator<Item = &T> {
+    pub fn iter(&self) -> impl Iterator<Item=&T> {
         self.q.iter()
     }
     /// Remove first occurrence of value.
@@ -55,16 +55,13 @@ impl<T: ByteCost + PartialEq> BoundedDeque<T> {
         if let Some(idx) = pos {
             self.remove_pos(idx)
         }
-        
     }
-    
+
     /// Remove item at position.
     pub fn remove_pos(&mut self, p0: usize) {
-        
         if p0 < self.q.len() {
             self.q.remove(p0);
         }
-        
     }
     /// Check if empty.
     #[allow(dead_code)]

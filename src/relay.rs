@@ -11,12 +11,19 @@ use alloc::{sync::Arc, vec::Vec};
 
 /// Logical side index (CAN, UART, RADIO, etc.)
 pub type RelaySideId = usize;
+/// Packet Handler function type
+type PacketHandlerFn =
+dyn Fn(&TelemetryPacket) -> TelemetryResult<()> + Send + Sync + 'static;
+
+/// Serialized Handler function type
+type SerializedHandlerFn = dyn Fn(&[u8]) -> TelemetryResult<()> + Send + Sync + 'static;
+
 
 /// TX handler for a relay side: either serialized or packet-based.
 #[derive(Clone)]
 pub enum RelayTxHandlerFn {
-    Serialized(Arc<dyn Fn(&[u8]) -> TelemetryResult<()> + Send + Sync>),
-    Packet(Arc<dyn Fn(&TelemetryPacket) -> TelemetryResult<()> + Send + Sync>),
+    Serialized(Arc<SerializedHandlerFn>),
+    Packet(Arc<PacketHandlerFn>),
 }
 
 /// One side of the relay – a name + TX handler.
@@ -124,7 +131,7 @@ impl Relay {
 
     /// Add a new side (e.g. "CAN", "UART", "RADIO") with a **serialized handler**.
     /// Returns the side ID you use when enqueuing from that side.
-    pub fn add_side<F>(&self, name: &'static str, tx: F) -> RelaySideId
+    pub fn add_side_serialized<F>(&self, name: &'static str, tx: F) -> RelaySideId
     where
         F: Fn(&[u8]) -> TelemetryResult<()> + Send + Sync + 'static,
     {

@@ -2,11 +2,11 @@
 import multiprocessing as mp
 import os
 import random
-import time
 from queue import Empty
 
 import numpy as np
 import sedsprintf_rs as seds
+import time
 
 DT = seds.DataType
 EP = seds.DataEndpoint

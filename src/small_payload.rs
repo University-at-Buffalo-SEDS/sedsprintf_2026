@@ -62,7 +62,7 @@ impl<const N: usize> InlineBuf<N> {
         let mut buf: [MaybeUninit<u8>; N] =
             unsafe { MaybeUninit::uninit().assume_init() };
 
-        if data.len() > 0 {
+        if !data.is_empty() {
             // SAFETY:
             // - `data.as_ptr()` is valid for `data.len()` reads.
             // - `buf.as_mut_ptr()` is valid for `N` writes, and we only
@@ -150,7 +150,7 @@ impl<const INLINE: usize> SmallPayload<INLINE> {
             SmallPayload::Heap(a) => a.len(),
         }
     }
-    
+
     /// Returns `true` if the payload is stored inline on the stack.
     #[inline]
     #[allow(dead_code)]
