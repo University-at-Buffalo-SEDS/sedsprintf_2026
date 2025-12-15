@@ -6,7 +6,6 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-
 import sys
 
 # The line pattern in .gitignore you want to temporarily comment out.
@@ -31,7 +30,7 @@ def print_help(error: str | None = None) -> None:
 
 Options (can be combined where it makes sense):
   release             Build in release mode.
-  test                Run `cargo test` instead of `cargo build`.
+  test                Run `cargo test` (and in test mode also validate embedded+python builds).
   embedded            Build for the embedded target (enables `embedded` feature).
   python              Build with Python bindings (enables `python` feature).
   maturin-build       Run `maturin build` with the .pyi .gitignore hack.
@@ -47,6 +46,8 @@ Examples:
   build.py release
   build.py embedded release target=thumbv7em-none-eabihf
   build.py python
+  build.py test
+  build.py test release
   build.py maturin-build
   build.py maturin-install
 """,
@@ -60,7 +61,6 @@ Examples:
 def ensure_rust_target_installed(target: str) -> None:
     """Ensure the given Rust target is installed via rustup."""
     if not target:
-        # Empty target means "host default" – nothing to install.
         return
 
     try:
@@ -105,14 +105,11 @@ def _comment_out_pyi_ignore(gitignore: Path) -> None:
     for line in text:
         stripped = line.strip()
 
-        # Already a comment? leave it alone
         if stripped.startswith("#"):
             new_lines.append(line)
             continue
 
-        # If the stripped line matches our regex, comment it out
         if PYI_IGNORE_REGEX.fullmatch(stripped):
-            # Preserve line ending; comment out the significant part
             commented = "# " + line.lstrip()
             new_lines.append(commented)
             matched_lines.append(stripped)
@@ -150,11 +147,9 @@ def run_with_pyi_unignored(cmd: list[str], env: dict | None = None) -> None:
 
 
 def install_wheel_file(build_mode: list[str], env: dict | None = None) -> None:
-    # Build wheel with maturin under the .gitignore hack
     cmd_build = ["maturin", "build", *build_mode]
     run_with_pyi_unignored(cmd_build, env=env)
 
-    # Install the built wheel
     wheels_dir = Path("target") / "wheels"
     wheels = sorted(wheels_dir.glob("sedsprintf_rs_2026-*.whl"))
     if not wheels:
@@ -167,9 +162,9 @@ def install_wheel_file(build_mode: list[str], env: dict | None = None) -> None:
 
 
 def main(argv: list[str]) -> None:
-    # ensure we are in the correct directory
     repo_root = Path(__file__).parent.resolve()
     os.chdir(repo_root)
+
     build_mode: list[str] = []
     tests = False
     build_embedded = False
@@ -179,9 +174,8 @@ def main(argv: list[str]) -> None:
     release_build = False
     install_wheel = False
     target = ""
-    device_id = ""  # <--- NEW
+    device_id = ""
 
-    # Parse args in any order
     for arg in argv:
         if arg in ("-h", "--help", "help"):
             print_help()
@@ -215,19 +209,63 @@ def main(argv: list[str]) -> None:
         else:
             print_help(f"Unknown option: {arg}")
 
-    # Build environment (inject DEVICE_IDENTIFIER if provided)
     env = os.environ.copy()
     if device_id:
         env["DEVICE_IDENTIFIER"] = device_id
 
-    # Decide build args
-    ensure_rust_target_installed(
-        target if target else "thumbv7em-none-eabihf" if build_embedded else ""
-    )
-    build_args: list[str] = []
+    # Release mode flags (host builds)
     if release_build:
         build_mode = ["--release"]
 
+    # Helper to run commands
+    def run_cmd(cmd: list[str]) -> None:
+        print("Running:", " ".join(cmd))
+        subprocess.run(cmd, check=True, env=env)
+
+    # ---- TEST MODE: also validate embedded + python builds ----
+    if tests:
+        print ("--------------------------------------------")
+        # 1) host tests
+        print ("Running Tests tests")
+        print ("--------------------------------------------")
+        run_cmd(["cargo", "test"])
+        print ("--------------------------------------------")
+        # 2) host build (same feature) to ensure build passes even if tests were filtered
+        print("Ensuring python build passes...")
+        print("--------------------------------------------")
+        run_cmd(["cargo", "build", "--features", "python"])
+        print ("--------------------------------------------")
+
+        # 3) embedded build (always validate)
+        print("Ensuring embedded build passes...")
+        print ("--------------------------------------------")
+        embedded_target = target or "thumbv7em-none-eabihf"
+        ensure_rust_target_installed(embedded_target)
+
+        embedded_mode: list[str] = []
+        if release_build:
+            # embedded uses its own profile when in "release" mode (your existing behavior)
+            embedded_mode = ["--profile", "release-embedded"]
+
+        run_cmd([
+            "cargo", "build",
+            *embedded_mode,
+            "--no-default-features",
+            "--target", embedded_target,
+            "--features", "embedded",
+        ])
+        print ("--------------------------------------------")
+
+        return
+
+    # ---- Non-test modes: preserve your existing behavior ----
+
+    # Ensure target installed only when needed
+    ensure_rust_target_installed(
+        target if target else ("thumbv7em-none-eabihf" if build_embedded else "")
+    )
+
+    build_args: list[str] = []
     if build_embedded:
         if not target:
             print("info: no target specified using thumbv7em-none-eabihf")
@@ -253,23 +291,14 @@ def main(argv: list[str]) -> None:
                 target,
             ]
 
-    # Dispatch to the correct command
-    if tests:
-        cmd = ["cargo", "test", *build_mode, *build_args]
-        print("Running:", " ".join(cmd))
-        subprocess.run(cmd, check=True, env=env)
-    elif build_wheel:
-        # maturin build with temporary .gitignore modification
+    if build_wheel:
         run_with_pyi_unignored(["maturin", "build", *build_mode], env=env)
     elif develop_wheel:
-        # maturin develop with temporary .gitignore modification
         run_with_pyi_unignored(["maturin", "develop", *build_mode], env=env)
     elif install_wheel:
         install_wheel_file(build_mode, env=env)
     else:
-        cmd = ["cargo", "build", *build_mode, *build_args]
-        print("Running:", " ".join(cmd))
-        subprocess.run(cmd, check=True, env=env)
+        run_cmd(["cargo", "build", *build_mode, *build_args])
 
 
 if __name__ == "__main__":

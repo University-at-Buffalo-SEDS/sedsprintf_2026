@@ -92,8 +92,8 @@ fn endpoint_from_u32(x: u32) -> TelemetryResult<DataEndpoint> {
 }
 
 /// Convert Python-side `int`/`u64` → `LinkId`.
-fn link_from_u64(x: u64) -> LinkId {
-    LinkId(x)
+fn link_from_u64(x: u64) -> TelemetryResult<LinkId> {
+    LinkId::new(x)
 }
 
 /// Return the fixed payload size in bytes for a type, or `None` if dynamic.
@@ -112,7 +112,7 @@ fn call_py_cb_1_or_2(
     arg1: &Bound<'_, PyAny>,
     link: &LinkId,
 ) -> Result<(), PyErr> {
-    match cb.call1(py, (arg1, link.0)) {
+    match cb.call1(py, (arg1, link.id())) {
         Ok(_) => Ok(()),
         Err(e) => {
             if e.is_instance_of::<pyo3::exceptions::PyTypeError>(py) {
@@ -661,8 +661,9 @@ impl PyRouter {
             .inner
             .lock()
             .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
-        rtr.rx_serialized_from(bytes, link_from_u64(link_id))
-            .map_err(py_err_from)
+        let link = link_from_u64(link_id).map_err(|e| py_err_from(e))?;
+
+        rtr.rx_serialized_from(bytes, link).map_err(py_err_from)
     }
 
     fn receive_serialized_queue(&self, _py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResult<()> {
@@ -685,7 +686,9 @@ impl PyRouter {
             .inner
             .lock()
             .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
-        rtr.rx_serialized_queue_from(bytes, link_from_u64(link_id))
+        let link = link_from_u64(link_id).map_err(|e| py_err_from(e))?;
+
+        rtr.rx_serialized_queue_from(bytes, link)
             .map_err(py_err_from)
     }
 
@@ -700,7 +703,9 @@ impl PyRouter {
             .inner
             .lock()
             .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
-        rtr.tx_from(pkt_ref.inner.clone(), link_from_u64(link_id))
+        let link = link_from_u64(link_id).map_err(|e| py_err_from(e))?;
+
+        rtr.tx_from(pkt_ref.inner.clone(), link)
             .map_err(py_err_from)
     }
 
@@ -715,7 +720,8 @@ impl PyRouter {
             .inner
             .lock()
             .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
-        rtr.tx_queue_from(pkt_ref.inner.clone(), link_from_u64(link_id))
+        let link = link_from_u64(link_id).map_err(|e| py_err_from(e))?;
+        rtr.tx_queue_from(pkt_ref.inner.clone(), link)
             .map_err(py_err_from)
     }
 
@@ -732,9 +738,8 @@ impl PyRouter {
             .inner
             .lock()
             .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
-
-        rtr.tx_serialized_from(arc, link_from_u64(link_id))
-            .map_err(py_err_from)
+        let link = link_from_u64(link_id).map_err(|e| py_err_from(e))?;
+        rtr.tx_serialized_from(arc, link).map_err(py_err_from)
     }
 
     fn transmit_serialized_message_queue_from(
@@ -750,9 +755,8 @@ impl PyRouter {
             .inner
             .lock()
             .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
-
-        rtr.tx_serialized_queue_from(arc, link_from_u64(link_id))
-            .map_err(py_err_from)
+        let link = link_from_u64(link_id).map_err(|e| py_err_from(e))?;
+        rtr.tx_serialized_queue_from(arc, link).map_err(py_err_from)
     }
 
     // ------------------------------------------------------------------------
