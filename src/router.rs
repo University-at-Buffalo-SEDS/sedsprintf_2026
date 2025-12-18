@@ -72,6 +72,17 @@ impl LinkId {
             _ => Ok(LinkId { id }),
         }
     }
+
+    /// Create a new `LinkId` without checking for reserved values.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that `id` is not `0` or `1`,
+    /// which are reserved values.
+    #[inline]
+    pub const unsafe fn new_unchecked(id: u64) -> LinkId {
+        LinkId { id }
+    }
     
     #[inline]
     pub const fn id(self) -> u64 {
