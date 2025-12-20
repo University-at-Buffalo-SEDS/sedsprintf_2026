@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 import sys
 
-# The line pattern in .gitignore you want to temporarily comment out.
+# The line pattern in .gitignore we want to temporarily comment out.
 # This is treated as a literal and turned into a whole-line regex.
 PYI_IGNORE_LINE = "python-files/sedsprintf_rs_2026/sedsprintf_rs_2026.pyi"
 PYI_IGNORE_REGEX = re.compile(rf"^{re.escape(PYI_IGNORE_LINE)}$")
@@ -226,7 +226,7 @@ def main(argv: list[str]) -> None:
     if tests:
         print ("--------------------------------------------")
         # 1) host tests
-        print ("Running Tests tests")
+        print ("Running Tests...")
         print ("--------------------------------------------")
         run_cmd(["cargo", "test"])
         print ("--------------------------------------------")
@@ -244,7 +244,7 @@ def main(argv: list[str]) -> None:
 
         embedded_mode: list[str] = []
         if release_build:
-            # embedded uses its own profile when in "release" mode (your existing behavior)
+            # embedded uses its own profile when in "release" mode
             embedded_mode = ["--profile", "release-embedded"]
 
         run_cmd([
@@ -258,7 +258,7 @@ def main(argv: list[str]) -> None:
 
         return
 
-    # ---- Non-test modes: preserve your existing behavior ----
+    # ---- Non-test modes ----
 
     # Ensure target installed only when needed
     ensure_rust_target_installed(

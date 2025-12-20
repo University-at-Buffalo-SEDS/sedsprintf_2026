@@ -168,7 +168,6 @@ def producer_proc(name: str, cmd_q: mp.Queue, n_iters: int, seed: int):
             })))
 
         else:
-            # Replace DT.HEARTBEAT with your actual NoData DataType
             cmd_q.put(deep_coerce_enums(("log_bytes", {
                 "ty": DT.HEARTBEAT,  # or whatever logical DataType uses MessageDataType::NoData
                 "data": b"",

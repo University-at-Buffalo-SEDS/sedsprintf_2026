@@ -104,28 +104,41 @@ impl Relay {
         }
     }
 
+    /// Compute a de-dupe hash for a QueueItem.
+    /// Uses packet ID for Packet items, and attempts to extract packet ID from
+    /// serialized bytes. If extraction fails, hashes raw bytes as a fallback.
+    fn get_hash(item: &RelayRxItem) -> u64 {
+        match &item.data {
+            RelayItem::Packet(pkt) => pkt.packet_id(),
+            RelayItem::Serialized(bytes) => {
+                match serialize::packet_id_from_wire(bytes.as_ref()) {
+                    Ok(id) => id,
+                    Err(_e) => {
+                        // Fallback: if bytes are malformed (or compression feature mismatch),
+                        // hash raw bytes so we can still dedupe identical network duplicates.
+                        let h: u64 = 0x9E37_79B9_7F4A_7C15;
+                        hash_bytes_u64(h, bytes.as_ref())
+                    }
+                }
+            }
+        }
+    }
+
     /// Compute a dedupe ID for an incoming RelayRxItem.
     /// Note: we intentionally do *not* include `src` so that the same
     /// packet coming from multiple sides is only processed once.
-    fn is_duplicate_rx(&self, item: &RelayRxItem) -> bool {
-        let id = match &item.data {
-            RelayItem::Packet(pkt) => pkt.packet_id(),
-            RelayItem::Serialized(bytes) => {
-                let mut h: u64 = 0x9E37_79B9_7F4A_7C15;
-                h = hash_bytes_u64(h, bytes.as_ref());
-                h
-            }
-        };
+    fn is_duplicate_pkt(&self, item: &RelayRxItem) -> TelemetryResult<bool> {
+        let id = Self::get_hash(item);
 
         let mut st = self.state.lock();
         if st.recent_rx.contains(&id) {
-            true
+            Ok(true)
         } else {
             if st.recent_rx.len() >= MAX_RECENT_RX_IDS {
                 st.recent_rx.pop_front();
             }
-            st.recent_rx.push_back(id);
-            false
+            st.recent_rx.push_back(id)?;
+            Ok(false)
         }
     }
 
@@ -173,8 +186,7 @@ impl Relay {
         st.rx_queue.push_back(RelayRxItem {
             src,
             data: RelayItem::Serialized(Arc::from(bytes)),
-        });
-        Ok(())
+        })
     }
 
     /// Enqueue a full TelemetryPacket that originated from `src` into the relay RX queue.
@@ -190,8 +202,7 @@ impl Relay {
         st.rx_queue.push_back(RelayRxItem {
             src,
             data: RelayItem::Packet(Arc::new(packet)),
-        });
-        Ok(())
+        })
     }
 
     /// Clear both RX and TX queues.
@@ -216,10 +227,10 @@ impl Relay {
     /// Internal: expand one RX item into TX items for all other sides.
     ///
     /// Fanout is cheap: the `RelayItem` is cloned (Arc bump) and reused across all destinations.
-    fn process_rx_queue_item(&self, item: RelayRxItem) {
-        if self.is_duplicate_rx(&item) {
+    fn process_rx_queue_item(&self, item: RelayRxItem) -> TelemetryResult<()> {
+        if self.is_duplicate_pkt(&item)? {
             // Already fanned out this packet recently; skip.
-            return;
+            return Ok(());
         }
 
         let RelayRxItem { src, data } = item;
@@ -234,8 +245,9 @@ impl Relay {
             st.tx_queue.push_back(RelayTxItem {
                 dst,
                 data: data.clone(),
-            });
+            })?;
         }
+        Ok(())
     }
 
     /// Helper: call a TX handler with the best representation we have.
@@ -312,7 +324,7 @@ impl Relay {
                 st.rx_queue.pop_front()
             };
             let Some(item) = item_opt else { break };
-            self.process_rx_queue_item(item);
+            self.process_rx_queue_item(item)?;
 
             if timeout_ms != 0 && self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
                 break;
@@ -335,7 +347,7 @@ impl Relay {
                 let mut st = self.state.lock();
                 st.rx_queue.pop_front()
             } {
-                self.process_rx_queue_item(item);
+                self.process_rx_queue_item(item)?;
                 did_any = true;
             }
 

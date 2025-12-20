@@ -1,5 +1,7 @@
+use crate::TelemetryError;
 use alloc::collections::VecDeque;
 use core::mem::size_of;
+use crate::TelemetryResult;
 
 pub trait ByteCost {
     /// Approximate heap+payload memory attributable to this queued item.
@@ -18,7 +20,6 @@ pub struct BoundedDeque<T> {
     // hard cap on VecDeque capacity in elements to stop reallocation growth
     max_elems: usize,
 }
-
 
 impl<T: ByteCost + PartialEq> BoundedDeque<T> {
     /// Create new bounded deque with byte budget and starting capacity.
@@ -46,7 +47,7 @@ impl<T: ByteCost + PartialEq> BoundedDeque<T> {
 
     /// Get iterator over items.
     #[allow(dead_code)]
-    pub fn iter(&self) -> impl Iterator<Item=&T> {
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
         self.q.iter()
     }
     /// Remove first occurrence of value.
@@ -77,23 +78,27 @@ impl<T: ByteCost + PartialEq> BoundedDeque<T> {
     }
 
     /// Check if item is contained in the queue.
+    #[inline]
     pub fn contains(&self, p0: &T) -> bool {
         self.q.contains(p0)
     }
 
     /// Clear all items.
+    #[inline]
     pub fn clear(&mut self) {
         self.q.clear();
         self.cur_bytes = 0;
     }
 
     /// Push to back, evicting from front as needed to stay within byte budget.
-    pub fn push_back(&mut self, v: T) {
+    pub fn push_back(&mut self, v: T) -> TelemetryResult<()>{
         let cost = v.byte_cost();
 
         // If a single item is bigger than the entire budget, drop it.
         if cost > self.max_bytes {
-            return;
+            return Err(TelemetryError::PacketTooLarge(
+                "Item exceeds maximum byte budget",
+            ));
         }
 
         // Evict until it fits in the byte budget.
@@ -126,22 +131,26 @@ impl<T: ByteCost + PartialEq> BoundedDeque<T> {
 
         self.q.push_back(v);
         self.cur_bytes += cost;
+        Ok(())
     }
 
     /// Current used bytes.
     #[allow(dead_code)]
+    #[inline]
     pub fn bytes_used(&self) -> usize {
         self.cur_bytes
     }
 
     /// Maximum allowed bytes.
     #[allow(dead_code)]
+    #[inline]
     pub fn max_bytes(&self) -> usize {
         self.max_bytes
     }
 
     /// Reserve additional capacity, but clamped to max_elems.
     #[allow(dead_code)]
+    #[inline]
     pub fn reserve_clamped(&mut self, additional: usize) {
         let want = self.q.len().saturating_add(additional);
         if want > self.max_elems {

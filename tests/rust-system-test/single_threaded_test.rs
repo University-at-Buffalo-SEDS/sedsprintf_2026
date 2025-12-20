@@ -231,8 +231,7 @@ mod single_threaded_test {
         //   C: BATTERY + MESSAGE
         // → 5 packets / iteration, all with [SD_CARD, Radio] endpoints.
         //
-        // Crank this up for heavier profiling if you like.
-        const ITERS: usize = 10_000;
+        const ITERS: usize = 10_000; // increase this for more profiling
         const PACKETS_PER_ITER: usize = 5;
 
         let mut gps_buf = [0.0_f32; 8];

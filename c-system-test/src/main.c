@@ -33,7 +33,7 @@ static SedsResult relay_side_tx_to_bus(const uint8_t * bytes, size_t len, void *
 
 static uint64_t gen_random_us(void)
 {
-    const uint32_t min_ms = 20, max_ms = 1000;
+    const uint32_t min_ms = 2, max_ms = 22;
     uint32_t v = 0;
     int fd = open("/dev/urandom", O_RDONLY);
     if (fd >= 0)
