@@ -28,7 +28,6 @@
 #[derive(Debug)]
 pub struct RouterMutex<T>(std::sync::Mutex<T>);
 
-
 impl<T> Clone for RouterMutex<T>
 where
     T: Clone,

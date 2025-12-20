@@ -12,12 +12,10 @@ use alloc::{sync::Arc, vec::Vec};
 /// Logical side index (CAN, UART, RADIO, etc.)
 pub type RelaySideId = usize;
 /// Packet Handler function type
-type PacketHandlerFn =
-dyn Fn(&TelemetryPacket) -> TelemetryResult<()> + Send + Sync + 'static;
+type PacketHandlerFn = dyn Fn(&TelemetryPacket) -> TelemetryResult<()> + Send + Sync + 'static;
 
 /// Serialized Handler function type
 type SerializedHandlerFn = dyn Fn(&[u8]) -> TelemetryResult<()> + Send + Sync + 'static;
-
 
 /// TX handler for a relay side: either serialized or packet-based.
 #[derive(Clone)]

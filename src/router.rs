@@ -57,18 +57,22 @@ pub struct LinkId {
 }
 
 /// Default link used by legacy APIs (back-compat).
-pub const DEFAULT_LINK_ID:LinkId = LinkId { id: 0 };
+pub const DEFAULT_LINK_ID: LinkId = LinkId { id: 0 };
 
 /// Local link ID used for packets generated locally.
-const LOCAL_LINK_ID:LinkId = LinkId { id: 1 };
+const LOCAL_LINK_ID: LinkId = LinkId { id: 1 };
 
 impl LinkId {
     /// Create a new LinkId.
     #[inline]
     pub const fn new(id: u64) -> TelemetryResult<LinkId> {
         match id {
-            0 => Err(TelemetryError::InvalidLinkId("Default link ID is reserved. Please Pick a Value >= 2")),
-            1 => Err(TelemetryError::InvalidLinkId("Local link ID is reserved. Please Pick a Value >= 2")),
+            0 => Err(TelemetryError::InvalidLinkId(
+                "Default link ID is reserved. Please Pick a Value >= 2",
+            )),
+            1 => Err(TelemetryError::InvalidLinkId(
+                "Local link ID is reserved. Please Pick a Value >= 2",
+            )),
             _ => Ok(LinkId { id }),
         }
     }
@@ -83,7 +87,7 @@ impl LinkId {
     pub const unsafe fn new_unchecked(id: u64) -> LinkId {
         LinkId { id }
     }
-    
+
     #[inline]
     pub const fn id(self) -> u64 {
         self.id
@@ -752,7 +756,8 @@ impl Router {
     #[inline]
     fn tx_queue_item_with_flags(&self, item: QueueItem, ignore_local: bool) -> TelemetryResult<()> {
         let mut st = self.state.lock();
-        st.transmit_queue.push_back(TxQueued { item, ignore_local })?;
+        st.transmit_queue
+            .push_back(TxQueued { item, ignore_local })?;
         Ok(())
     }
 
