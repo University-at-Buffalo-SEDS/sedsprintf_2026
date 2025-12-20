@@ -8,6 +8,23 @@ pub trait ByteCost {
     fn byte_cost(&self) -> usize;
 }
 
+/// Convert float multiplier to ratio (num, den).
+#[inline]
+fn float_to_ratio(mult: f64) -> (usize, usize) {
+    // Clamp to a safe range
+    let mult = mult.clamp(1.01, 16.0);
+
+    // Fixed denominator (power of two is cheap)
+    const DEN: usize = 1024;
+
+    let num = (mult * DEN as f64).round() as usize;
+
+    // Safety: never allow num <= denom
+    let num = num.max(DEN + 1);
+
+    (num, DEN)
+}
+
 /// A double-ended queue with a maximum byte budget.
 ///
 /// Policy:
@@ -22,6 +39,8 @@ pub struct BoundedDeque<T> {
     max_bytes: usize,
     cur_bytes: usize,
     max_elems: usize,
+    grow_num: usize,
+    grow_den: usize,
 }
 
 impl<T: ByteCost> BoundedDeque<T> {
@@ -35,28 +54,25 @@ impl<T: ByteCost> BoundedDeque<T> {
     /// - `max_elems` is derived conservatively from `size_of::<T>()` because
     ///   `ByteCost` is dynamic. This prevents runaway element counts even if
     ///   `byte_cost()` is small.
-    pub fn new(max_bytes: usize, starting_elems: usize) -> Self {
-        // Avoid division by zero and keep cap conservative.
+    pub fn new(
+        max_bytes: usize,
+        starting_elems: usize,
+        grow_mult: f64, // ← user-facing float
+    ) -> Self {
         let min_cost = core::mem::size_of::<T>().max(1);
-        let derived_max_elems = (max_bytes / min_cost).max(1);
+        let max_elems = (max_bytes / min_cost).max(1);
 
-        // Hard element cap.
-        let max_elems = derived_max_elems;
+        let start_cap = starting_elems.clamp(1, max_elems);
 
-        // Hard "never outgrow" guarantee: allocate to max_elems up-front and
-        // never reserve later.
-        //
-        // If you *really* want a smaller initial allocation, you can change this
-        // to `starting_elems.min(max_elems)`, but then the queue may grow later
-        // unless you still avoid reserve. Prealloc is simplest + safest.
-        let _ = starting_elems; // keep parameter for API compatibility
-        let q = VecDeque::with_capacity(max_elems);
+        let (grow_num, grow_den) = float_to_ratio(grow_mult);
 
         Self {
-            q,
+            q: VecDeque::with_capacity(start_cap),
             max_bytes,
             cur_bytes: 0,
             max_elems,
+            grow_num,
+            grow_den,
         }
     }
 
@@ -156,6 +172,59 @@ impl<T: ByteCost> BoundedDeque<T> {
         }
     }
 
+    /// Ensure there is room for one more element *without* `push_back` triggering growth.
+    ///
+    /// Multiplicative growth: new_cap = ceil(cap * grow_num / grow_den), capped at max_elems.
+    /// Always guarantees progress by forcing target_cap >= cap + 1 when growing.
+    fn ensure_room_for_one(&mut self) {
+        let len = self.q.len();
+        let cap = self.q.capacity();
+
+        if len < cap {
+            return;
+        }
+
+        // Hard length cap: ring eviction.
+        if len >= self.max_elems {
+            let _ = self.pop_front();
+            return;
+        }
+
+        // If we've reached the cap (or allocator rounded capacity above it), don't grow.
+        if cap >= self.max_elems {
+            let _ = self.pop_front();
+            return;
+        }
+
+        // ---- multiplicative growth ----
+        // Example: 2x => grow_num=2, grow_den=1
+        // Example: 1.5x => grow_num=3, grow_den=2
+        let grow_num: usize = self.grow_num; // must be >= 1
+        let grow_den: usize = self.grow_den; // must be >= 1
+
+        // ceil(cap * grow_num / grow_den) without floats:
+        // (cap*grow_num + grow_den - 1) / grow_den
+        let scaled = cap.saturating_mul(grow_num).saturating_add(grow_den - 1);
+        let mut target_cap = scaled / grow_den;
+
+        // Ensure we actually grow (avoid target_cap == cap).
+        target_cap = target_cap.max(cap + 1);
+
+        // Cap growth at max_elems.
+        target_cap = target_cap.min(self.max_elems);
+
+        // Reserve exactly the delta from current capacity to requested capacity.
+        let add = target_cap.saturating_sub(cap);
+        if add > 0 {
+            self.q.reserve_exact(add);
+        } else {
+            // Shouldn't happen due to max(cap+1), but keep it safe.
+            let _ = self.pop_front();
+        }
+
+        debug_assert!(self.q.len() < self.q.capacity());
+    }
+
     /// Push to back, evicting from front as needed to stay within byte budget.
     ///
     /// Guarantees:
@@ -182,6 +251,10 @@ impl<T: ByteCost> BoundedDeque<T> {
         if self.q.len() >= self.max_elems {
             let _ = self.pop_front();
         }
+
+        // Ensure push won't trigger implicit growth.
+
+        self.ensure_room_for_one();
 
         // At this point, push cannot require a reallocation because:
         // - capacity was pre-allocated to max_elems
