@@ -562,14 +562,14 @@ impl Router {
 
     /// Compute a de-dupe ID for a QueueItem and record it.
     /// Returns true if this item was seen recently (and should be skipped).
-    fn is_duplicate_pkt(&self, item: &QueueItem) -> bool {
+    fn is_duplicate_pkt(&self, item: &QueueItem) -> TelemetryResult<bool> {
         let id = Self::get_hash(item);
         let mut st = self.state.lock();
         if st.recent_rx.contains(&id) {
-            true
+            Ok(true)
         } else {
-            st.recent_rx.push_back(id);
-            false
+            st.recent_rx.push_back(id)?;
+            Ok(false)
         }
     }
 
@@ -752,7 +752,7 @@ impl Router {
     #[inline]
     fn tx_queue_item_with_flags(&self, item: QueueItem, ignore_local: bool) -> TelemetryResult<()> {
         let mut st = self.state.lock();
-        st.transmit_queue.push_back(TxQueued { item, ignore_local });
+        st.transmit_queue.push_back(TxQueued { item, ignore_local })?;
         Ok(())
     }
 
@@ -787,7 +787,7 @@ impl Router {
     pub fn rx_queue_from(&self, pkt: TelemetryPacket, link: LinkId) -> TelemetryResult<()> {
         pkt.validate()?;
         let mut st = self.state.lock();
-        st.received_queue.push_back(QueueItem::packet(pkt, link));
+        st.received_queue.push_back(QueueItem::packet(pkt, link))?;
         Ok(())
     }
 
@@ -796,7 +796,7 @@ impl Router {
     pub fn rx_serialized_queue_from(&self, bytes: &[u8], link: LinkId) -> TelemetryResult<()> {
         let mut st = self.state.lock();
         st.received_queue
-            .push_back(QueueItem::serialized(Arc::from(bytes), link));
+            .push_back(QueueItem::serialized(Arc::from(bytes), link))?;
         Ok(())
     }
 
@@ -953,7 +953,7 @@ impl Router {
     /// any remotely-forwardable endpoints, the router will rebroadcast the packet ONCE, using
     /// the same ingress `LinkId`. The TX handler is responsible for not echoing back.
     fn rx_item(&self, item: &QueueItem, called_from_queue: bool) -> TelemetryResult<()> {
-        if self.is_duplicate_pkt(item) {
+        if self.is_duplicate_pkt(item)? {
             return Ok(());
         }
 
@@ -1091,7 +1091,7 @@ impl Router {
     /// - If `ignore_local` is false, also dispatches to matching local handlers.
     /// - If `ignore_local` is true, suppresses local dispatch (remote-only).
     fn tx_item_impl(&self, pkt: QueueItem, ignore_local: bool) -> TelemetryResult<()> {
-        if self.is_duplicate_pkt(&pkt) && !ignore_local {
+        if self.is_duplicate_pkt(&pkt)? && !ignore_local {
             return Ok(());
         }
 

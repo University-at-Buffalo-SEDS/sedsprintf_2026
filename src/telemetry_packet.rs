@@ -482,10 +482,16 @@ impl TelemetryPacket {
             return s;
         }
 
-        if get_info_type(self.ty) == MessageType::Error {
-            s.push_str(", Error: (");
-        } else {
-            s.push_str(", Data: (");
+        match get_info_type(self.ty) {
+            MessageType::Info => {
+                s.push_str(", Data: (");
+            }
+            MessageType::Error => {
+                s.push_str(", Error: (");
+            }
+            MessageType::Warning => {
+                s.push_str(", Warning: (");
+            }
         }
 
         if let Some(msg) = self.data_as_utf8_ref() {
