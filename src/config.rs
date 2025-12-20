@@ -43,6 +43,11 @@ pub const STARTING_QUEUE_SIZE: usize = 16;
 /// drops under high load.
 pub const MAX_QUEUE_SIZE: usize = 1024 * 50; // 50 KB
 
+/// Grow step of the internal router and relay queues in Bytes.
+/// Higher values increase memory usage but may help with performance.
+/// the value is a multiplier of the current queue size.
+pub const QUEUE_GROW_STEP: f64 = 3.2; //
+
 /// Minimum payload size (in bytes) before we consider compression.
 pub const PAYLOAD_COMPRESS_THRESHOLD: usize = 16;
 

@@ -1,4 +1,4 @@
-use crate::config::{MAX_QUEUE_SIZE, MAX_RECENT_RX_IDS, STARTING_QUEUE_SIZE};
+use crate::config::{MAX_QUEUE_SIZE, MAX_RECENT_RX_IDS, QUEUE_GROW_STEP, STARTING_QUEUE_SIZE};
 use crate::queue::{BoundedDeque, ByteCost};
 use crate::serialize;
 use crate::telemetry_packet::{hash_bytes_u64, TelemetryPacket};
@@ -12,12 +12,10 @@ use alloc::{sync::Arc, vec::Vec};
 /// Logical side index (CAN, UART, RADIO, etc.)
 pub type RelaySideId = usize;
 /// Packet Handler function type
-type PacketHandlerFn =
-dyn Fn(&TelemetryPacket) -> TelemetryResult<()> + Send + Sync + 'static;
+type PacketHandlerFn = dyn Fn(&TelemetryPacket) -> TelemetryResult<()> + Send + Sync + 'static;
 
 /// Serialized Handler function type
 type SerializedHandlerFn = dyn Fn(&[u8]) -> TelemetryResult<()> + Send + Sync + 'static;
-
 
 /// TX handler for a relay side: either serialized or packet-based.
 #[derive(Clone)]
@@ -93,11 +91,12 @@ impl Relay {
         Self {
             state: RouterMutex::new(RelayInner {
                 sides: Vec::new(),
-                rx_queue: BoundedDeque::new(MAX_QUEUE_SIZE, STARTING_QUEUE_SIZE),
-                tx_queue: BoundedDeque::new(MAX_QUEUE_SIZE, STARTING_QUEUE_SIZE),
+                rx_queue: BoundedDeque::new(MAX_QUEUE_SIZE, STARTING_QUEUE_SIZE, QUEUE_GROW_STEP),
+                tx_queue: BoundedDeque::new(MAX_QUEUE_SIZE, STARTING_QUEUE_SIZE, QUEUE_GROW_STEP),
                 recent_rx: BoundedDeque::new(
                     MAX_RECENT_RX_IDS * size_of::<u64>(),
                     MAX_RECENT_RX_IDS,
+                    QUEUE_GROW_STEP
                 ),
             }),
             clock,
