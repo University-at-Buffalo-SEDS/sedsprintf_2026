@@ -16,7 +16,7 @@
 //! - De-duplication remains packet-id based and link-agnostic (same packet on another link
 //!   still dedupes).
 
-use crate::config::{MAX_QUEUE_SIZE, MAX_RECENT_RX_IDS, STARTING_QUEUE_SIZE};
+use crate::config::{MAX_QUEUE_SIZE, MAX_RECENT_RX_IDS, QUEUE_GROW_STEP, STARTING_QUEUE_SIZE};
 use crate::queue::{BoundedDeque, ByteCost};
 #[cfg(all(not(feature = "std"), target_os = "none"))]
 use crate::seds_error_msg;
@@ -57,18 +57,22 @@ pub struct LinkId {
 }
 
 /// Default link used by legacy APIs (back-compat).
-pub const DEFAULT_LINK_ID:LinkId = LinkId { id: 0 };
+pub const DEFAULT_LINK_ID: LinkId = LinkId { id: 0 };
 
 /// Local link ID used for packets generated locally.
-const LOCAL_LINK_ID:LinkId = LinkId { id: 1 };
+const LOCAL_LINK_ID: LinkId = LinkId { id: 1 };
 
 impl LinkId {
     /// Create a new LinkId.
     #[inline]
     pub const fn new(id: u64) -> TelemetryResult<LinkId> {
         match id {
-            0 => Err(TelemetryError::InvalidLinkId("Default link ID is reserved. Please Pick a Value >= 2")),
-            1 => Err(TelemetryError::InvalidLinkId("Local link ID is reserved. Please Pick a Value >= 2")),
+            0 => Err(TelemetryError::InvalidLinkId(
+                "Default link ID is reserved. Please Pick a Value >= 2",
+            )),
+            1 => Err(TelemetryError::InvalidLinkId(
+                "Local link ID is reserved. Please Pick a Value >= 2",
+            )),
             _ => Ok(LinkId { id }),
         }
     }
@@ -83,7 +87,7 @@ impl LinkId {
     pub const unsafe fn new_unchecked(id: u64) -> LinkId {
         LinkId { id }
     }
-    
+
     #[inline]
     pub const fn id(self) -> u64 {
         self.id
@@ -513,11 +517,20 @@ impl Router {
             mode,
             cfg,
             state: RouterMutex::new(RouterInner {
-                received_queue: BoundedDeque::new(MAX_QUEUE_SIZE, STARTING_QUEUE_SIZE),
-                transmit_queue: BoundedDeque::new(MAX_QUEUE_SIZE, STARTING_QUEUE_SIZE),
+                received_queue: BoundedDeque::new(
+                    MAX_QUEUE_SIZE,
+                    STARTING_QUEUE_SIZE,
+                    QUEUE_GROW_STEP,
+                ),
+                transmit_queue: BoundedDeque::new(
+                    MAX_QUEUE_SIZE,
+                    STARTING_QUEUE_SIZE,
+                    QUEUE_GROW_STEP,
+                ),
                 recent_rx: BoundedDeque::new(
                     MAX_RECENT_RX_IDS * size_of::<u64>(),
                     MAX_RECENT_RX_IDS,
+                    QUEUE_GROW_STEP,
                 ),
             }),
             clock,
@@ -752,7 +765,8 @@ impl Router {
     #[inline]
     fn tx_queue_item_with_flags(&self, item: QueueItem, ignore_local: bool) -> TelemetryResult<()> {
         let mut st = self.state.lock();
-        st.transmit_queue.push_back(TxQueued { item, ignore_local })?;
+        st.transmit_queue
+            .push_back(TxQueued { item, ignore_local })?;
         Ok(())
     }
 

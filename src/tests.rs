@@ -6,7 +6,6 @@ use crate::{get_data_type, message_meta, DataEndpoint, DataType, MessageDataType
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-
 type SeenType = Arc<Mutex<Option<(DataType, Vec<f32>)>>>;
 /// Compute a valid test payload length for a given [`DataType`], respecting the
 /// schema’s static/dynamic element counts and element widths.
@@ -146,7 +145,7 @@ mod tests2 {
             endpoints,
             0,
         )
-            .unwrap();
+        .unwrap();
 
         pkt.validate().unwrap();
 
@@ -410,7 +409,7 @@ unsafe fn copy_telemetry_packet_raw(
         s.timestamp(),
         payload_arc,
     )
-        .map_err(|_| "packet validation failed")?;
+    .map_err(|_| "packet validation failed")?;
 
     *d = new_pkt;
     Ok(())
@@ -451,7 +450,7 @@ fn helpers_copy_telemetry_packet() {
         src.timestamp(),
         Arc::from(src.payload()), // deep copy payload
     )
-        .expect("src packet should be valid");
+    .expect("src packet should be valid");
 
     let st = unsafe { copy_telemetry_packet_raw(&mut dest as *mut _, &src as *const _) };
     assert!(st.is_ok());
@@ -555,7 +554,7 @@ mod handler_failure_tests {
             ts,
             Arc::<[u8]>::from(payload_for(ty)),
         )
-            .unwrap();
+        .unwrap();
 
         handle_errors(router.tx(pkt));
 
@@ -626,7 +625,7 @@ mod handler_failure_tests {
             ts,
             Arc::<[u8]>::from(payload_for(ty)),
         )
-            .unwrap();
+        .unwrap();
 
         handle_errors(router.tx(pkt));
 
@@ -707,7 +706,7 @@ mod timeout_tests {
             &[DataEndpoint::SdCard], // <- only local
             ts,
         )
-            .unwrap()
+        .unwrap()
     }
 
     /// Build a TX function that increments `counter` for each frame sent.
@@ -809,9 +808,9 @@ mod timeout_tests {
                     &[DataEndpoint::SdCard],
                     1 + i,
                 )
-                    .unwrap(),
+                .unwrap(),
             )
-                .unwrap();
+            .unwrap();
         }
 
         // Non-zero timeout: must do *some* work, but we no longer require
@@ -870,9 +869,9 @@ mod timeout_tests {
                     &[DataEndpoint::SdCard],
                     1 + i,
                 )
-                    .unwrap(),
+                .unwrap(),
             )
-                .unwrap();
+            .unwrap();
         }
 
         // Step is 5ms per call; timeout 10ms allows two iterations max
@@ -1014,7 +1013,7 @@ mod tests_extra {
             &[DataEndpoint::SdCard, DataEndpoint::Radio],
             123,
         )
-            .unwrap();
+        .unwrap();
 
         let wire = serialize::serialize_packet(&pkt);
         let hdr = serialize::header_size_bytes(&pkt);
@@ -1047,7 +1046,7 @@ mod tests_extra {
             &[DataEndpoint::SdCard, DataEndpoint::Radio],
             0,
         )
-            .unwrap();
+        .unwrap();
 
         let wire1 = serialize::serialize_packet(&pkt);
         let pkt2 = serialize::deserialize_packet(&wire1).unwrap();
@@ -1075,7 +1074,7 @@ mod tests_extra {
                 ts,
                 Arc::<[u8]>::from(payload),
             )
-                .unwrap()
+            .unwrap()
         }
 
         // Case 1: small (all varints fit in 1 byte)
@@ -1138,7 +1137,7 @@ mod tests_extra {
             123456,
             Arc::<[u8]>::from(payload),
         )
-            .unwrap();
+        .unwrap();
 
         let wire = serialize::serialize_packet(&pkt);
         let back = serialize::deserialize_packet(&wire).unwrap();
@@ -1171,7 +1170,7 @@ mod tests_extra {
             ts,
             Arc::<[u8]>::from(payload),
         )
-            .unwrap();
+        .unwrap();
 
         let wire = serialize::serialize_packet(&pkt);
         let env = serialize::peek_envelope(&wire).unwrap();
@@ -1216,7 +1215,7 @@ mod tests_extra {
             &[DataEndpoint::SdCard],
             123,
         )
-            .unwrap();
+        .unwrap();
         let mut wire = serialize::serialize_packet(&pkt).to_vec();
 
         // Compute where endpoint bits start (right after header varints)
@@ -1259,7 +1258,7 @@ mod tests_extra {
             &[DataEndpoint::SdCard, DataEndpoint::Radio],
             999,
         )
-            .unwrap();
+        .unwrap();
 
         let wire = serialize::serialize_packet(&pkt);
         let hdr = serialize::header_size_bytes(&pkt);
@@ -1289,7 +1288,7 @@ mod tests_extra {
             0,
             Arc::<[u8]>::from(buf),
         )
-            .unwrap();
+        .unwrap();
 
         assert_eq!(pkt.data_as_utf8_ref(), Some("hello"));
     }
@@ -1333,14 +1332,14 @@ mod tests_extra {
             &[DataEndpoint::SdCard, DataEndpoint::Radio],
             0,
         )
-            .unwrap();
+        .unwrap();
         let pkt_rx = TelemetryPacket::from_f32_slice(
             DataType::GpsData,
             &[4.0_f32, 5.0, 6.0],
             &[DataEndpoint::SdCard], // only local to avoid extra TX during receive
             0,
         )
-            .unwrap();
+        .unwrap();
 
         r.tx_queue(pkt_tx).unwrap();
         r.rx_queue(pkt_rx).unwrap();
@@ -1397,7 +1396,7 @@ mod tests_extra {
             &[DataEndpoint::SdCard],
             0,
         )
-            .unwrap();
+        .unwrap();
 
         // Sending should surface a HandlerError after all retries.
         let res = r.tx(pkt);
@@ -1429,7 +1428,7 @@ mod tests_extra {
             &[DataEndpoint::SdCard],
             12345,
         )
-            .unwrap();
+        .unwrap();
 
         assert_eq!(pkt.payload().len(), 12);
         assert_eq!(pkt.data_size(), 12);
@@ -1464,7 +1463,7 @@ mod tests_extra {
             endpoints,
             42,
         )
-            .unwrap();
+        .unwrap();
         let wire = serialize::serialize_packet(&pkt);
 
         let env = serialize::peek_envelope(&wire).unwrap();
@@ -1521,7 +1520,7 @@ mod tests_extra {
             &[DataEndpoint::SdCard, DataEndpoint::Radio],
             7,
         )
-            .unwrap();
+        .unwrap();
 
         let res = r.tx(pkt);
         match res {
@@ -1619,7 +1618,7 @@ mod tests_more {
             0,
             Arc::<[u8]>::from(vec![0u8; need + 1]),
         )
-            .unwrap_err();
+        .unwrap_err();
         assert!(matches!(err, TelemetryError::SizeMismatch { .. }));
     }
 
@@ -1677,7 +1676,7 @@ mod tests_more {
             &[DataEndpoint::SdCard],
             123,
         )
-            .unwrap();
+        .unwrap();
         let wire = serialize::serialize_packet(&pkt);
 
         let called = StdArc::new(AtomicUsize::new(0));
@@ -1776,7 +1775,7 @@ mod tests_more {
             &[DataEndpoint::SdCard],
             0,
         )
-            .unwrap();
+        .unwrap();
         r.tx(pkt).unwrap();
 
         assert_eq!(tx_called.load(Ordering::SeqCst), 0);
@@ -1807,7 +1806,7 @@ mod tests_more {
             &[DataEndpoint::SdCard],
             0,
         )
-            .unwrap();
+        .unwrap();
         r.rx(&pkt).unwrap();
 
         assert_eq!(called.load(Ordering::SeqCst), 1);
@@ -1847,7 +1846,7 @@ mod tests_more {
             &[DataEndpoint::SdCard, DataEndpoint::Radio],
             1,
         )
-            .unwrap();
+        .unwrap();
         let _ = r.tx(pkt);
 
         let s = captured.lock().unwrap().clone();
@@ -2006,7 +2005,7 @@ mod tests_more {
                 &[DataEndpoint::SdCard],
                 i as u64,
             )
-                .unwrap();
+            .unwrap();
             router.rx_queue(pkt).unwrap();
         }
 
@@ -2102,7 +2101,7 @@ mod concurrency_tests {
                         &[DataEndpoint::SdCard],
                         idx,
                     )
-                        .unwrap();
+                    .unwrap();
                     r_cloned.rx_queue(pkt).unwrap();
                 }
             }));
@@ -2165,7 +2164,7 @@ mod concurrency_tests {
                         &[DataEndpoint::SdCard],
                         idx,
                     )
-                        .unwrap();
+                    .unwrap();
                     let wire = serialize::serialize_packet(&pkt);
                     r_cloned
                         .rx_serialized(&wire)
@@ -2320,7 +2319,7 @@ mod concurrency_tests {
                     &[DataEndpoint::SdCard],
                     i as u64,
                 )
-                    .unwrap();
+                .unwrap();
                 r_rx.rx_queue(pkt).expect("rx_packet_to_queue failed");
             }
         });
@@ -2730,7 +2729,7 @@ mod dedupe_tests {
             &[DataEndpoint::SdCard],
             0,
         )
-            .unwrap();
+        .unwrap();
         let wire = serialize::serialize_packet(&pkt);
 
         // Feed the identical frame many times.
@@ -2775,7 +2774,7 @@ mod dedupe_tests {
             &[DataEndpoint::SdCard],
             0,
         )
-            .unwrap();
+        .unwrap();
         let wire = serialize::serialize_packet(&pkt);
 
         // First time → delivered.
@@ -2819,7 +2818,7 @@ mod dedupe_tests {
             &[DataEndpoint::SdCard],
             0,
         )
-            .unwrap();
+        .unwrap();
         let wire_a = serialize::serialize_packet(&pkt_a);
 
         // Frame B (different payload)
@@ -2829,7 +2828,7 @@ mod dedupe_tests {
             &[DataEndpoint::SdCard],
             0,
         )
-            .unwrap();
+        .unwrap();
         let wire_b = serialize::serialize_packet(&pkt_b);
 
         r.rx_serialized(&wire_a).unwrap();

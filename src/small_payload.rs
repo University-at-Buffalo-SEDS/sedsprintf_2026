@@ -22,10 +22,7 @@ pub enum SmallPayload<const INLINE: usize> {
     ///
     /// - `len` is the number of valid bytes stored in `buf`.
     /// - `buf` has capacity `INLINE` bytes, but we only initialize the first `len`.
-    Inline {
-        len: u8,
-        buf: InlineBuf<INLINE>,
-    },
+    Inline { len: u8, buf: InlineBuf<INLINE> },
 
     /// Heap-backed payload for larger data.
     ///
@@ -59,8 +56,7 @@ impl<const N: usize> InlineBuf<N> {
         );
 
         // SAFETY: `[MaybeUninit<u8>; N]` is allowed to be left uninitialized.
-        let mut buf: [MaybeUninit<u8>; N] =
-            unsafe { MaybeUninit::uninit().assume_init() };
+        let mut buf: [MaybeUninit<u8>; N] = unsafe { MaybeUninit::uninit().assume_init() };
 
         if !data.is_empty() {
             // SAFETY:
@@ -69,11 +65,7 @@ impl<const N: usize> InlineBuf<N> {
             //   write `data.len()` bytes (≤ N).
             // - The regions do not overlap.
             unsafe {
-                ptr::copy_nonoverlapping(
-                    data.as_ptr(),
-                    buf.as_mut_ptr() as *mut u8,
-                    data.len(),
-                );
+                ptr::copy_nonoverlapping(data.as_ptr(), buf.as_mut_ptr() as *mut u8, data.len());
             }
         }
 
@@ -91,9 +83,7 @@ impl<const N: usize> InlineBuf<N> {
         // SAFETY:
         // - `self.buf.as_ptr()` points to `N` contiguous `MaybeUninit<u8>`.
         // - We guarantee the first `len` elements have been fully initialized.
-        unsafe {
-            core::slice::from_raw_parts(self.buf.as_ptr() as *const u8, len)
-        }
+        unsafe { core::slice::from_raw_parts(self.buf.as_ptr() as *const u8, len) }
     }
 }
 
