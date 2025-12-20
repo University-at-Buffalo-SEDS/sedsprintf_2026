@@ -47,8 +47,7 @@ impl<T: ByteCost> BoundedDeque<T> {
     /// Create new bounded deque with byte budget and element cap.
     ///
     /// `starting_elems` controls the initial allocation but will be clamped
-    /// to `max_elems`. If you want a strict "never grow" guarantee, we still
-    /// preallocate to `max_elems` (see below) and never reserve afterward.
+    /// to `max_elems`.
     ///
     /// Notes:
     /// - `max_elems` is derived conservatively from `size_of::<T>()` because
