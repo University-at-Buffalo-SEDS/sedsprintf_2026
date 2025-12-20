@@ -1,9 +1,9 @@
-//! Telemetry Router (link-aware)
+//! Telemetry Router
 //!
-//! This version adds `LinkId` plumbing end-to-end so RX/TX and local handlers
+//! This version of the router adds `LinkId` plumbing end-to-end so RX/TX and local handlers
 //! know which “side/link/interface” a packet came from (or is being sent from).
 //!
-//! Goals:
+//! Design changes:
 //! - Preserve legacy APIs (`rx`, `rx_serialized`, `tx`, `tx_serialized`, queue variants):
 //!   they use `LinkId::DEFAULT`.
 //! - Add explicit APIs (`*_from`) to pass an ingress `LinkId`.
@@ -14,7 +14,7 @@
 //! Notes:
 //! - Local endpoint handlers now receive `(&TelemetryPacket, &LinkId)` or `(&[u8], &LinkId)`.
 //! - De-duplication remains packet-id based and link-agnostic (same packet on another link
-//!   still dedupes). If you ever want per-link dedupe, change `recent_rx` key to include link.
+//!   still dedupes).
 
 use crate::config::{MAX_QUEUE_SIZE, MAX_RECENT_RX_IDS, STARTING_QUEUE_SIZE};
 use crate::queue::{BoundedDeque, ByteCost};
