@@ -6,7 +6,7 @@ An implementation of the `sedsprintf` telemetry protocol in Rust.
 
 ## About
 
-This library started out as a rewrite of the original sedsprintf C library
+This library started out as a rewrite of the original sedsprintf C++ library
 found [here](https://github.com/University-at-Buffalo-SEDS/sedsprintf).
 
 After the initial rewrite, many improvements were made to the rust implementation including better safety, easier
