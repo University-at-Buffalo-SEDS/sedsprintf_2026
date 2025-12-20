@@ -386,6 +386,9 @@ pub enum TelemetryError {
     
     /// Invalid link ID provided.
     InvalidLinkId (&'static str),
+
+    /// Packet is bigger than the queue size
+    PacketTooLarge(&'static str),
 }
 
 impl TelemetryError {
@@ -408,6 +411,7 @@ impl TelemetryError {
             TelemetryError::InvalidUtf8 => TelemetryErrorCode::InvalidUtf8,
             TelemetryError::TypeMismatch { .. } => TelemetryErrorCode::TypeMismatch,
             TelemetryError::InvalidLinkId (_) => TelemetryErrorCode::InvalidLinkId,
+            TelemetryError::PacketTooLarge(_) => TelemetryErrorCode::PacketTooLarge,
         }
     }
 }
@@ -468,6 +472,7 @@ pub enum TelemetryErrorCode {
     InvalidUtf8 = -14,
     TypeMismatch = -15,
     InvalidLinkId = -16,
+    PacketTooLarge = -17,
 }
 
 // Generate ReprI32Enum helpers for TelemetryErrorCode
@@ -505,6 +510,7 @@ impl TelemetryErrorCode {
             TelemetryErrorCode::InvalidUtf8 => "{Invalid UTF-8}",
             TelemetryErrorCode::TypeMismatch => "{Type Mismatch}",
             TelemetryErrorCode::InvalidLinkId => "{Invalid Link ID}",
+            TelemetryErrorCode::PacketTooLarge => "{Packet Too Large}",
         }
     }
 
