@@ -335,8 +335,6 @@ mod tests2 {
     /// own TX back into its RX queue.
     #[test]
     fn queued_self_delivery_via_receive_queue() {
-        // If you expect a node to handle its *own* packets, you must explicitly
-        // feed them back into its received queue (mirroring “broadcast to self”).
         let (bus, tx_fn) = TestBus::new();
         let box_clock = StepClock::new_default_box();
 
