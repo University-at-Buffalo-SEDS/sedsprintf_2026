@@ -11,19 +11,20 @@ pub trait ByteCost {
 /// Convert float multiplier to ratio (num, den).
 #[inline]
 fn float_to_ratio(mult: f64) -> (usize, usize) {
-    // Clamp to a safe range
+    // Clamp to sane range
     let mult = mult.clamp(1.01, 16.0);
 
-    // Fixed denominator (power of two is cheap)
     const DEN: usize = 1024;
 
-    let num = (mult * DEN as f64).round() as usize;
+    // Convert using truncation + guarantee progress
+    let num = (mult * DEN as f64) as usize;
 
-    // Safety: never allow num <= denom
+    // Ensure strictly > 1.0 growth
     let num = num.max(DEN + 1);
 
     (num, DEN)
 }
+
 
 /// A double-ended queue with a maximum byte budget.
 ///
