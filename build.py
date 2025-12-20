@@ -183,7 +183,6 @@ def main(argv: list[str]) -> None:
             print("Building release version.")
             release_build = True
         elif arg == "test":
-            print("Running tests.")
             tests = True
         elif arg == "embedded":
             print("Building for Embedded target.")
