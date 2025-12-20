@@ -226,7 +226,7 @@ def main(argv: list[str]) -> None:
     if tests:
         print ("--------------------------------------------")
         # 1) host tests
-        print ("Running Tests tests")
+        print ("Running Tests...")
         print ("--------------------------------------------")
         run_cmd(["cargo", "test"])
         print ("--------------------------------------------")
