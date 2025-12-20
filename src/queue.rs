@@ -29,7 +29,7 @@ fn float_to_ratio(mult: f64) -> (usize, usize) {
 ///
 /// Policy:
 /// - Byte budget is enforced by evicting from the front until the new item fits.
-/// - Element capacity is a **hard cap**: the underlying `VecDeque` is preallocated
+/// - Element capacity is a **hard cap**: the underlying `VecDeque` is pre-allocated
 ///   to `max_elems` and we never call `reserve*`, so it will not grow.
 /// - When the ring is full, we evict one item from the front before pushing.
 /// - `cur_bytes` is kept consistent for *all* removal paths.
@@ -58,7 +58,7 @@ impl<T: ByteCost> BoundedDeque<T> {
         starting_elems: usize,
         grow_mult: f64, // ← user-facing float
     ) -> Self {
-        let min_cost = core::mem::size_of::<T>().max(1);
+        let min_cost = size_of::<T>().max(1);
         let max_elems = (max_bytes / min_cost).max(1);
 
         let start_cap = starting_elems.clamp(1, max_elems);
