@@ -328,6 +328,8 @@ pub enum MessageType {
     Info,
     /// Error / fault telemetry.
     Error,
+    /// Warning telemetry.
+    Warning,
 }
 
 // ============================================================================
