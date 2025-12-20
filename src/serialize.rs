@@ -551,7 +551,7 @@ pub fn packet_id_from_wire(buf: &[u8]) -> Result<u64, TelemetryError> {
         }
         r.read_bytes(dsz)?
     } else {
-        // Compressed payload consumes the rest of the buffer in your format.
+        // Compressed payload consumes the rest of the buffer in the format.
         let comp_len = r.remaining();
         if comp_len < 1 {
             return Err(TelemetryError::Deserialize("short buffer"));
@@ -570,7 +570,7 @@ pub fn packet_id_from_wire(buf: &[u8]) -> Result<u64, TelemetryError> {
     // Logical type as string bytes
     h = hash_bytes_u64(h, ty.as_str().as_bytes());
 
-    // Endpoints as string bytes, in ascending discriminant order (matches your expand loop)
+    // Endpoints as string bytes, in ascending discriminant order
     for idx in 0..EP_BITMAP_BITS {
         let byte = idx / 8;
         let bit = idx % 8;
