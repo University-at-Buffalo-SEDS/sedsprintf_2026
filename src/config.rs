@@ -6,7 +6,7 @@
 //! - Functions that describe per-type schema metadata:
 //!   - [`get_message_meta`]
 
-use crate::EndpointsBroadcastMode;
+use crate::{EndpointMeta, EndpointsBroadcastMode};
 #[allow(unused_imports)]
 use crate::{MessageClass, MessageDataType, MessageElement, MessageMeta, STRING_VALUE_ELEMENT};
 use sedsprintf_macros::define_stack_payload;
@@ -80,25 +80,32 @@ pub enum DataEndpoint {
     Abort,
 }
 
-impl DataEndpoint {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            DataEndpoint::SdCard => "SD_CARD",
-            DataEndpoint::GroundStation => "GROUND_STATION",
-            DataEndpoint::FlightController => "FLIGHT_CONTROLLER",
-            DataEndpoint::ValveBoard => "VALVE_BOARD",
-            DataEndpoint::Abort => "ABORT",
-        }
-    }
-
-    pub fn get_broadcast_mode(&self) -> EndpointsBroadcastMode {
-        match self {
-            DataEndpoint::SdCard => EndpointsBroadcastMode::Default,
-            DataEndpoint::GroundStation => EndpointsBroadcastMode::Default,
-            DataEndpoint::FlightController => EndpointsBroadcastMode::Default,
-            DataEndpoint::ValveBoard => EndpointsBroadcastMode::Default,
-            DataEndpoint::Abort => EndpointsBroadcastMode::Always,
-        }
+/// Return the full schema metadata for a given [`DataEndpoint`].
+/// Each variant specifies:
+/// - `name`: string identifier for the endpoint.
+/// - `broadcast_mode`: default broadcast mode for packets sent to this endpoint.
+pub const fn get_endpoint_meta(endpoint_type: DataEndpoint) -> EndpointMeta {
+    match endpoint_type {
+        DataEndpoint::SdCard => EndpointMeta {
+            name: "SD_CARD",
+            broadcast_mode: EndpointsBroadcastMode::Default,
+        },
+        DataEndpoint::GroundStation => EndpointMeta {
+            name: "GROUND_STATION",
+            broadcast_mode: EndpointsBroadcastMode::Default,
+        },
+        DataEndpoint::FlightController => EndpointMeta {
+            name: "FLIGHT_CONTROLLER",
+            broadcast_mode: EndpointsBroadcastMode::Default,
+        },
+        DataEndpoint::ValveBoard => EndpointMeta {
+            name: "VALVE_BOARD",
+            broadcast_mode: EndpointsBroadcastMode::Default,
+        },
+        DataEndpoint::Abort => EndpointMeta {
+            name: "ABORT",
+            broadcast_mode: EndpointsBroadcastMode::Always,
+        },
     }
 }
 

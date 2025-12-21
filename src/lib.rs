@@ -33,8 +33,8 @@ extern crate std;
 use std::io::Error;
 
 use crate::config::{
-    get_message_meta, DataEndpoint, DataType,
-    STATIC_HEX_LENGTH, STATIC_STRING_LENGTH,
+    get_endpoint_meta, get_message_meta, DataEndpoint, DataType, STATIC_HEX_LENGTH,
+    STATIC_STRING_LENGTH,
 };
 use crate::macros::{ReprI32Enum, ReprU32Enum};
 use alloc::string::ToString;
@@ -148,6 +148,48 @@ impl_repr_u32_enum!(DataEndpoint, MAX_VALUE_DATA_ENDPOINT);
 // ============================================================================
 //  Message metadata (element counts, data types, sizes)
 // ============================================================================
+pub struct EndpointMeta {
+    /// Static name of the endpoint
+    name: &'static str,
+    /// Broadcast mode for the endpoint
+    broadcast_mode: EndpointsBroadcastMode,
+}
+
+impl EndpointMeta {
+    /// Return a stable string representation used in logs and in
+    /// `TelemetryPacket::to_string()` output.
+    ///
+    /// This should remain stable over time for compatibility with tests and
+    /// external tooling.
+    pub fn as_str(&self) -> &'static str {
+        self.name
+    }
+
+    /// Get the broadcast mode for the endpoint
+    /// # Returns
+    /// - `EndpointsBroadcastMode` enum value.
+    pub fn get_broadcast_mode(&self) -> EndpointsBroadcastMode {
+        self.broadcast_mode
+    }
+}
+
+impl DataEndpoint {
+    /// Return a stable string representation used in logs and in
+    /// `TelemetryPacket::to_string()` output.
+    ///
+    /// This should remain stable over time for compatibility with tests and
+    /// external tooling.
+    pub fn as_str(&self) -> &'static str {
+        get_endpoint_meta(*self).name
+    }
+
+    /// Get the broadcast mode for the endpoint
+    /// # Returns
+    /// - `EndpointsBroadcastMode` enum value.
+    pub fn get_broadcast_mode(&self) -> EndpointsBroadcastMode {
+        get_endpoint_meta(*self).broadcast_mode
+    }
+}
 
 /// Describes how many elements are present for a given message type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
@@ -201,9 +243,7 @@ pub struct MessageMeta {
     endpoints: &'static [DataEndpoint],
 }
 
-
-impl DataType{
-
+impl DataType {
     /// Get the string representation of the DataType
     pub const fn as_str(&self) -> &'static str {
         get_message_meta(*self).name
