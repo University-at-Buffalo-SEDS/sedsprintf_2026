@@ -358,7 +358,7 @@ pub const fn data_type_size(dt: MessageDataType) -> usize {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub enum MessageClass {
     /// Informational telemetry.
-    Info,
+    Data,
     /// Error / fault telemetry.
     Error,
     /// Warning telemetry.

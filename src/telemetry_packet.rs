@@ -478,7 +478,7 @@ impl TelemetryPacket {
         }
 
         match get_info_type(self.ty) {
-            MessageClass::Info => {
+            MessageClass::Data => {
                 s.push_str(", Data: (");
             }
             MessageClass::Error => {
