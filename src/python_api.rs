@@ -33,13 +33,13 @@ use pyo3::types::{PyBytes, PyDict, PyList, PyModule, PyTuple};
 use std::sync::{Arc as SArc, Mutex, OnceLock};
 
 use crate::{
-    config::{DataEndpoint, DataType}, get_needed_message_size, message_meta, relay::Relay,
-    router::{Clock, EndpointHandler, LeBytes, LinkId, Router, RouterConfig, RouterMode},
+    config::{DataEndpoint, DataType}, get_needed_message_size, message_meta, relay::Relay, router::{Clock, EndpointHandler, LeBytes, LinkId, Router, RouterConfig, RouterMode},
     serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet},
     telemetry_packet::TelemetryPacket, try_enum_from_u32,
     MessageElement,
     TelemetryError,
     TelemetryResult,
+    get_message_name,
     MAX_VALUE_DATA_ENDPOINT,
     MAX_VALUE_DATA_TYPE,
 };
@@ -99,8 +99,8 @@ fn link_from_u64(x: u64) -> TelemetryResult<LinkId> {
 /// Return the fixed payload size in bytes for a type, or `None` if dynamic.
 fn required_payload_size_for(ty: DataType) -> Option<usize> {
     match message_meta(ty).element {
-        MessageElement::Static(_) => Some(get_needed_message_size(ty)),
-        MessageElement::Dynamic => None,
+        MessageElement::Static(_, _, _) => Some(get_needed_message_size(ty)),
+        MessageElement::Dynamic(_, _) => None,
     }
 }
 
@@ -1281,7 +1281,7 @@ pub fn sedsprintf_rs(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
 
         for v in 0..=MAX_VALUE_DATA_TYPE {
             if let Some(e) = try_enum_from_u32::<DataType>(v) {
-                let name = e.as_str();
+                let name = get_message_name(e);
                 dt_dict.set_item(name, v)?;
                 m.add(name, v)?;
             }
