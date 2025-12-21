@@ -8,12 +8,7 @@
 
 use crate::config::{StandardSmallPayload, DEVICE_IDENTIFIER, STRING_PRECISION};
 use crate::queue::ByteCost;
-use crate::{
-    config::{DataEndpoint, DataType}, data_type_size, get_data_type, get_info_type, message_meta,
-    router::LeBytes,
-    MessageDataType, MessageElementCount, MessageType, TelemetryError,
-    TelemetryResult,
-};
+use crate::{config::{DataEndpoint, DataType}, data_type_size, get_data_type, get_info_type, message_meta, router::LeBytes, MessageDataType, MessageElement, MessageClass, TelemetryError, TelemetryResult, get_message_name};
 use crate::{impl_data_as_prim, impl_from_prim_slices, impl_ledecode_auto};
 use alloc::{string::String, string::ToString, sync::Arc, vec, vec::Vec};
 use core::any::TypeId;
@@ -215,8 +210,8 @@ impl TelemetryPacket {
         }
 
         let meta = message_meta(ty);
-        match meta.element_count {
-            MessageElementCount::Static(need) => {
+        match meta.element {
+            MessageElement::Static(need, _, _) => {
                 let need = need * data_type_size(get_data_type(ty));
                 if payload.len() != need {
                     return Err(TelemetryError::SizeMismatch {
@@ -225,7 +220,7 @@ impl TelemetryPacket {
                     });
                 }
             }
-            MessageElementCount::Dynamic => {
+            MessageElement::Dynamic(_, _) => {
                 validate_dynamic_len_and_content(ty, &payload)?;
             }
         }
@@ -260,7 +255,7 @@ impl TelemetryPacket {
         h = hash_bytes_u64(h, self.sender.as_bytes());
 
         // Logical type as string
-        h = hash_bytes_u64(h, self.ty.as_str().as_bytes());
+        h = hash_bytes_u64(h, get_message_name(self.ty).as_bytes());
 
         // Endpoints (as their string names)
         for ep in self.endpoints.iter() {
@@ -330,8 +325,8 @@ impl TelemetryPacket {
         }
 
         let meta = message_meta(self.ty);
-        match meta.element_count {
-            MessageElementCount::Static(need) => {
+        match meta.element {
+            MessageElement::Static(need, _, _) => {
                 let need = need * data_type_size(get_data_type(self.ty));
                 if self.data_size != need {
                     return Err(TelemetryError::SizeMismatch {
@@ -340,7 +335,7 @@ impl TelemetryPacket {
                     });
                 }
             }
-            MessageElementCount::Dynamic => {
+            MessageElement::Dynamic(_, _) => {
                 validate_dynamic_len_and_content(self.ty, &self.payload)?;
             }
         }
@@ -398,7 +393,7 @@ impl TelemetryPacket {
         let _ = write!(
             &mut out,
             "Type: {}, Data Size: {}, Sender: {}, Endpoints: [",
-            self.ty.as_str(),
+            get_message_name(self.ty),
             self.data_size,
             self.sender.as_ref(),
         );
@@ -483,13 +478,13 @@ impl TelemetryPacket {
         }
 
         match get_info_type(self.ty) {
-            MessageType::Info => {
+            MessageClass::Info => {
                 s.push_str(", Data: (");
             }
-            MessageType::Error => {
+            MessageClass::Error => {
                 s.push_str(", Error: (");
             }
-            MessageType::Warning => {
+            MessageClass::Warning => {
                 s.push_str(", Warning: (");
             }
         }
@@ -692,7 +687,7 @@ impl TelemetryPacket {
         let total_bytes = values.len() * element_size;
 
         // If the schema has a static element count, enforce it up front.
-        if let MessageElementCount::Static(exact) = message_meta(ty).element_count {
+        if let MessageElement::Static(exact, _, _) = message_meta(ty).element {
             let exact_bytes = exact * element_size;
             if total_bytes != exact_bytes {
                 return Err(TelemetryError::SizeMismatch {
@@ -769,8 +764,8 @@ impl TelemetryPacket {
         timestamp: u64,
     ) -> TelemetryResult<Self> {
         let meta = message_meta(ty);
-        match meta.element_count {
-            MessageElementCount::Static(need) => {
+        match meta.element {
+            MessageElement::Static(need, _, _) => {
                 if need != 0 {
                     return Err(TelemetryError::SizeMismatch {
                         expected: need,
@@ -778,7 +773,7 @@ impl TelemetryPacket {
                     });
                 }
             }
-            MessageElementCount::Dynamic => {
+            MessageElement::Dynamic(_, _) => {
                 // Dynamic with zero-length payload is OK.
             }
         }
@@ -808,7 +803,7 @@ impl TelemetryPacket {
         }
 
         let total_bytes = values.len();
-        if let MessageElementCount::Static(exact) = message_meta(ty).element_count
+        if let MessageElement::Static(exact, _, _) = message_meta(ty).element
             && total_bytes != exact
         {
             return Err(TelemetryError::SizeMismatch {

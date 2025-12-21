@@ -26,7 +26,7 @@ use crate::{
     message_meta,
     serialize, telemetry_packet::TelemetryPacket,
     EndpointsBroadcastMode,
-    MessageElementCount, TelemetryError,
+    MessageElement, TelemetryError,
     TelemetryResult,
 };
 use alloc::{borrow::ToOwned, boxed::Box, format, sync::Arc, vec, vec::Vec};
@@ -332,8 +332,8 @@ pub(crate) fn encode_slice_le<T: LeBytes>(data: &[T]) -> Arc<[u8]> {
 /// static/dynamic sizing rules from `message_meta`.
 fn make_error_payload(msg: &str) -> Arc<[u8]> {
     let meta = message_meta(DataType::TelemetryError);
-    match meta.element_count {
-        MessageElementCount::Static(_) => {
+    match meta.element {
+        MessageElement::Static(_, _, _) => {
             let max = get_needed_message_size(DataType::TelemetryError);
             let bytes = msg.as_bytes();
             let n = core::cmp::min(max, bytes.len());
@@ -343,7 +343,7 @@ fn make_error_payload(msg: &str) -> Arc<[u8]> {
             }
             Arc::from(buf)
         }
-        MessageElementCount::Dynamic => Arc::from(msg.as_bytes()),
+        MessageElement::Dynamic(_, _) => Arc::from(msg.as_bytes()),
     }
 }
 
@@ -364,8 +364,8 @@ where
     let meta = message_meta(ty);
     let got = data.len() * T::WIDTH;
 
-    match meta.element_count {
-        MessageElementCount::Static(_) => {
+    match meta.element {
+        MessageElement::Static(_, _, _) => {
             if got != get_needed_message_size(ty) {
                 return Err(TelemetryError::SizeMismatch {
                     expected: get_needed_message_size(ty),
@@ -373,7 +373,7 @@ where
                 });
             }
         }
-        MessageElementCount::Dynamic => {
+        MessageElement::Dynamic(_, _) => {
             // For dynamic numeric payloads, require total byte length to be a multiple of element width.
             if !got.is_multiple_of(T::WIDTH) {
                 return Err(TelemetryError::SizeMismatch {
@@ -454,8 +454,8 @@ impl Debug for Router {
 #[inline]
 fn has_remote_endpoint(eps: &[DataEndpoint], cfg: &RouterConfig) -> bool {
     eps.iter().copied().any(|ep| {
-        (!cfg.is_local_endpoint(ep) && ep.get_broadast_mode() != EndpointsBroadcastMode::Never)
-            || ep.get_broadast_mode() == EndpointsBroadcastMode::Always
+        (!cfg.is_local_endpoint(ep) && ep.get_broadcast_mode() != EndpointsBroadcastMode::Never)
+            || ep.get_broadcast_mode() == EndpointsBroadcastMode::Always
     })
 }
 
@@ -1123,8 +1123,8 @@ impl Router {
 
                 let send_remote = pkt_ref.endpoints().iter().any(|e| {
                     (!self.cfg.is_local_endpoint(*e)
-                        && e.get_broadast_mode() != EndpointsBroadcastMode::Never)
-                        || e.get_broadast_mode() == EndpointsBroadcastMode::Always
+                        && e.get_broadcast_mode() != EndpointsBroadcastMode::Never)
+                        || e.get_broadcast_mode() == EndpointsBroadcastMode::Always
                 });
 
                 // Serialize only if needed (remote OR local-serialized).
@@ -1193,8 +1193,8 @@ impl Router {
 
                 let send_remote = env.endpoints.iter().copied().any(|e| {
                     (!self.cfg.is_local_endpoint(e)
-                        && e.get_broadast_mode() != EndpointsBroadcastMode::Never)
-                        || e.get_broadast_mode() == EndpointsBroadcastMode::Always
+                        && e.get_broadcast_mode() != EndpointsBroadcastMode::Never)
+                        || e.get_broadcast_mode() == EndpointsBroadcastMode::Always
                 });
 
                 // Remote transmit: bytes are already serialized.
