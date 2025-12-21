@@ -33,7 +33,7 @@ extern crate std;
 use std::io::Error;
 
 use crate::config::{
-    get_message_data_type, get_message_info_types, get_message_meta, DataEndpoint, DataType,
+    get_message_meta, DataEndpoint, DataType,
     STATIC_HEX_LENGTH, STATIC_STRING_LENGTH,
 };
 use crate::macros::{ReprI32Enum, ReprU32Enum};
@@ -151,13 +151,36 @@ impl_repr_u32_enum!(DataEndpoint, MAX_VALUE_DATA_ENDPOINT);
 
 /// Describes how many elements are present for a given message type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
-pub enum MessageElementCount {
+pub enum MessageElement {
     /// Fixed number of elements.
-    Static(usize),
+    ///
+    /// (count, MessageDataType, MessageType)
+    Static(usize, MessageDataType, MessageClass),
     /// Variable number of elements (payload size can vary).
-    Dynamic,
+    ///
+    /// (MessageDataType, MessageType)
+    Dynamic(MessageDataType, MessageClass),
 }
 
+impl MessageElement {
+    /// Get the `MessageDataType` for this element count.
+    #[inline]
+    pub const fn data_type(&self) -> MessageDataType {
+        match self {
+            MessageElement::Static(_, dt, _) => *dt,
+            MessageElement::Dynamic(dt, _) => *dt,
+        }
+    }
+
+    /// Get the `MessageType` for this element count.
+    #[inline]
+    pub const fn message_type(&self) -> MessageClass {
+        match self {
+            MessageElement::Static(_, _, mt) => *mt,
+            MessageElement::Dynamic(_, mt) => *mt,
+        }
+    }
+}
 /// Broadcast mode for endpoints
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub enum EndpointsBroadcastMode {
@@ -171,8 +194,9 @@ pub enum EndpointsBroadcastMode {
 /// Static metadata for a message type: element count and valid endpoints.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct MessageMeta {
+    name: &'static str,
     /// How many elements are present (fixed vs dynamic).
-    element_count: MessageElementCount,
+    element: MessageElement,
     /// Allowed endpoints for this message type.
     endpoints: &'static [DataEndpoint],
 }
@@ -189,16 +213,16 @@ pub fn message_meta(ty: DataType) -> MessageMeta {
 
 // ---- Convenience multiplication helpers ----
 
-impl Mul<MessageElementCount> for usize {
+impl Mul<MessageElement> for usize {
     type Output = usize;
 
     #[inline]
-    fn mul(self, rhs: MessageElementCount) -> usize {
+    fn mul(self, rhs: MessageElement) -> usize {
         self * rhs.into()
     }
 }
 
-impl Mul<usize> for MessageElementCount {
+impl Mul<usize> for MessageElement {
     type Output = usize;
 
     #[inline]
@@ -207,7 +231,7 @@ impl Mul<usize> for MessageElementCount {
     }
 }
 
-impl MessageElementCount {
+impl MessageElement {
     /// Convert the element count to a `usize`.
     ///
     /// - `Static(n)` → `n`
@@ -215,7 +239,7 @@ impl MessageElementCount {
     #[inline]
     fn into(self) -> usize {
         match self {
-            MessageElementCount::Static(a) => a,
+            MessageElement::Static(a, _, _) => a,
             _ => 0,
         }
     }
@@ -232,7 +256,7 @@ impl MessageElementCount {
 /// - Total static payload size in bytes.
 #[inline]
 pub fn get_needed_message_size(ty: DataType) -> usize {
-    data_type_size(get_data_type(ty)) * get_message_meta(ty).element_count
+    data_type_size(get_data_type(ty)) * get_message_meta(ty).element
 }
 
 /// Return the logical "info" type (Info/Error) for a given `DataType`.
@@ -241,8 +265,8 @@ pub fn get_needed_message_size(ty: DataType) -> usize {
 /// # Returns
 /// - `MessageType` enum value.
 #[inline]
-pub const fn get_info_type(ty: DataType) -> MessageType {
-    get_message_info_types(ty)
+pub const fn get_info_type(ty: DataType) -> MessageClass {
+    get_message_meta(ty).element.message_type()
 }
 
 /// Return the *element* data type (e.g., `Float32`, `Int16`, `String`) for a
@@ -253,9 +277,18 @@ pub const fn get_info_type(ty: DataType) -> MessageType {
 /// - `MessageDataType` enum value.
 #[inline]
 pub const fn get_data_type(ty: DataType) -> MessageDataType {
-    get_message_data_type(ty)
+    get_message_meta(ty).element.data_type()
 }
 
+/// Return the message name for a given `DataType`.
+/// # Arguments
+/// - `ty`: Logical data type to query.
+/// # Returns
+/// - Static string name of the message type.
+#[inline]
+pub const fn get_message_name(ty: DataType) -> &'static str {
+    get_message_meta(ty).name
+}
 /// Return the default endpoints for a given `DataType`.
 /// # Arguments
 /// - `ty`: Logical data type to query.
@@ -323,7 +356,7 @@ pub const fn data_type_size(dt: MessageDataType) -> usize {
 /// High-level classification of message kind.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
-pub enum MessageType {
+pub enum MessageClass {
     /// Informational telemetry.
     Info,
     /// Error / fault telemetry.

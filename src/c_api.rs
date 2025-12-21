@@ -11,13 +11,12 @@
 //! It also provides **v2** entry points that include LinkId in callbacks,
 //! while preserving the old ABI exactly.
 
-use crate::config::get_message_data_type;
-use crate::MessageDataType::NoData;
+use crate::{MessageDataType::NoData, get_data_type};
 use crate::{
     config::DataEndpoint, do_vec_log_typed, get_needed_message_size, message_meta, router::{Clock, LeBytes, LinkId},
     router::{EndpointHandler, Router, RouterConfig},
     serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet}, telemetry_packet::TelemetryPacket, DataType,
-    MessageElementCount,
+    MessageElement,
     TelemetryError,
     TelemetryErrorCode,
     TelemetryResult,
@@ -121,9 +120,9 @@ fn link_id_from_ptr(link: *const SedsLinkId) -> TelemetryResult<LinkId> {
 /// if the message type is dynamically sized.
 #[inline]
 fn fixed_payload_size_if_static(ty: DataType) -> Option<usize> {
-    match message_meta(ty).element_count {
-        MessageElementCount::Static(_) => Some(get_needed_message_size(ty)),
-        MessageElementCount::Dynamic => None,
+    match message_meta(ty).element {
+        MessageElement::Static(_,_,_) => Some(get_needed_message_size(ty)),
+        MessageElement::Dynamic(_,_) => None,
     }
 }
 
@@ -1029,7 +1028,7 @@ fn finish_with<T: LeBytes + Copy>(
     required_elems: usize,
     elem_size: usize,
 ) -> i32 {
-    if get_message_data_type(ty) == NoData {
+    if get_data_type(ty) == NoData {
         return ok_or_status(unsafe {
             let router = &(*r).inner;
             if queue {

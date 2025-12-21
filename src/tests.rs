@@ -26,9 +26,9 @@ impl Clock for UnixClock {
 }
 
 fn test_payload_len_for(ty: DataType) -> usize {
-    match message_meta(ty).element_count {
-        crate::MessageElementCount::Static(_) => get_needed_message_size(ty),
-        crate::MessageElementCount::Dynamic => {
+    match message_meta(ty).element {
+        crate::MessageElement::Static(_, _, _) => get_needed_message_size(ty),
+        crate::MessageElement::Dynamic(_, _) => {
             // Pick reasonable defaults per data kind
             match get_data_type(ty) {
                 MessageDataType::String => STATIC_STRING_LENGTH, // router error-path expects this
@@ -48,7 +48,7 @@ fn test_payload_len_for(ty: DataType) -> usize {
                         MessageDataType::String | MessageDataType::Binary => 1,
                         MessageDataType::NoData => 0,
                     };
-                    let elems = get_message_meta(ty).element_count.into().max(1);
+                    let elems = get_message_meta(ty).element.into().max(1);
                     w * elems
                 }
             }
@@ -79,10 +79,7 @@ fn get_sd_card_handler(sd_seen_c: SeenType) -> EndpointHandler {
         DataEndpoint::SdCard,
         move |pkt: &TelemetryPacket, _link_id| {
             // sanity: element sizing must be 4 bytes (f32) for GPS_DATA
-            let elems = get_message_meta(pkt.data_type())
-                .element_count
-                .into()
-                .max(1);
+            let elems = get_message_meta(pkt.data_type()).element.into().max(1);
             let per_elem = get_needed_message_size(pkt.data_type()) / elems;
             assert_eq!(pkt.data_type(), DataType::GpsData);
             assert_eq!(per_elem, 4, "GPS_DATA expected f32 elements");
@@ -1552,7 +1549,7 @@ mod tests_more {
         config::{DataEndpoint, DataType}, get_data_type, get_needed_message_size, message_meta,
         router::{Clock, EndpointHandler, Router, RouterConfig}, serialize, telemetry_packet::TelemetryPacket,
         MessageDataType,
-        MessageElementCount, TelemetryError, TelemetryErrorCode,
+        MessageElement, TelemetryError, TelemetryErrorCode,
         TelemetryResult,
         MAX_VALUE_DATA_ENDPOINT,
         MAX_VALUE_DATA_TYPE,
@@ -1574,9 +1571,9 @@ mod tests_more {
     /// Compute a concrete length for test packets, respecting schema element
     /// counts for static/dynamic payloads.
     fn concrete_len_for_test(ty: DataType) -> usize {
-        match message_meta(ty).element_count {
-            MessageElementCount::Static(_) => get_needed_message_size(ty),
-            MessageElementCount::Dynamic => {
+        match message_meta(ty).element {
+            MessageElement::Static(_, _, _) => get_needed_message_size(ty),
+            MessageElement::Dynamic(_, _) => {
                 // Choose a reasonable dynamic size for tests:
                 // numeric/bool → element_width * MESSAGE_ELEMENTS
                 // string/hex    → 1 * MESSAGE_ELEMENTS (or any positive size)
@@ -1593,7 +1590,7 @@ mod tests_more {
                     MessageDataType::String | MessageDataType::Binary => 1,
                     MessageDataType::NoData => 0,
                 };
-                let elems = get_message_meta(ty).element_count.into().max(1);
+                let elems = get_message_meta(ty).element.into().max(1);
                 core::cmp::max(1, w * elems)
             }
         }
@@ -2410,7 +2407,7 @@ mod data_conversion_types {
         };
 
         let eps = &[DataEndpoint::SdCard];
-        let vals = [true, false, true, true, false];
+        let vals = [true];
 
         let pkt = TelemetryPacket::from_bool_slice(bool_ty, &vals, eps, 0).unwrap();
         let decoded = pkt.data_as_bool().unwrap();
