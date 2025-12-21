@@ -4,13 +4,11 @@
 //! - Device-/build-time constants (identifiers, limits, retries).
 //! - The `DataEndpoint` and `DataType` enums.
 //! - Functions that describe per-type schema metadata:
-//!   - [`get_message_data_type`]
-//!   - [`get_message_info_types`]
 //!   - [`get_message_meta`]
 
 use crate::EndpointsBroadcastMode;
 #[allow(unused_imports)]
-use crate::{MessageDataType, MessageElementCount, MessageMeta, MessageType, STRING_VALUE_ELEMENT};
+use crate::{MessageClass, MessageDataType, MessageElement, MessageMeta, STRING_VALUE_ELEMENT};
 use sedsprintf_macros::define_stack_payload;
 use strum_macros::EnumCount;
 
@@ -27,26 +25,23 @@ pub const DEVICE_IDENTIFIER: &str = match option_env!("DEVICE_IDENTIFIER") {
     None => "TEST_PLATFORM",
 };
 
-/// Maximum number of recent received packet IDs to track for duplicate
-/// detection.
+/// Maximum number of recent received packet IDs to track for duplicate detection.
 ///
 /// Higher values increase memory usage but improve duplicate detection for
 /// high-throughput links or bursty traffic patterns.
-// This value should be a power of two for optimal performance.
+///
+/// This value should be a power of two for optimal performance.
 pub const MAX_RECENT_RX_IDS: usize = 128;
 
 /// Starting size of the internal router and relay queues.
 pub const STARTING_QUEUE_SIZE: usize = 16;
 
 /// Maximum size of the internal router and relay queues in Bytes.
-/// Higher values increase memory usage but may help prevent packet
-/// drops under high load.
 pub const MAX_QUEUE_SIZE: usize = 1024 * 50; // 50 KB
 
 /// Grow step of the internal router and relay queues in Bytes.
-/// Higher values increase memory usage but may help with performance.
-/// the value is a multiplier of the current queue size.
-pub const QUEUE_GROW_STEP: f64 = 3.2; //
+/// The value is a multiplier of the current queue size.
+pub const QUEUE_GROW_STEP: f64 = 3.2;
 
 /// Minimum payload size (in bytes) before we consider compression.
 pub const PAYLOAD_COMPRESS_THRESHOLD: usize = 16;
@@ -55,38 +50,25 @@ pub const PAYLOAD_COMPRESS_THRESHOLD: usize = 16;
 pub const PAYLOAD_COMPRESSION_LEVEL: u8 = 10;
 
 /// Maximum length, in bytes, of any **static** UTF-8 string payload.
-///
-/// Dynamic string messages may be longer, but many tests and error paths
-/// assume this bound when generating placeholder data.
 pub const STATIC_STRING_LENGTH: usize = 1024;
 
 /// Maximum length, in bytes, of any **static** hex payload.
 pub const STATIC_HEX_LENGTH: usize = 1024;
 
-/// Maximum number of fractional digits when converting floating-point values
-/// to strings (e.g., for human-readable error payloads).
-///
-/// Higher values increase both payload size and formatting cost.
+/// Maximum number of fractional digits when converting floating-point values to strings.
 pub const STRING_PRECISION: usize = 8; // 12 is expensive; tune as needed
 
-/// Maximum payload size (in bytes) that is allowed to be allocated on the
-/// stack before the implementation switches to heap allocation.
+/// Maximum payload size (in bytes) that is allowed to be allocated on the stack
+/// before switching to heap allocation.
 define_stack_payload!(64);
 
-/// Maximum number of times a handler is retried before giving up and
-/// surfacing a [`TelemetryError::HandlerError`](crate::TelemetryError::HandlerError).
+/// Maximum number of times a handler is retried before giving up.
 pub const MAX_HANDLER_RETRIES: usize = 3;
 
 // -----------------------------------------------------------------------------
 // Endpoints
 // -----------------------------------------------------------------------------
 
-/// The different destinations where telemetry packets can be sent.
-///
-/// When adding new endpoints:
-/// - Keep the discriminants sequential from `0` with no gaps (if you assign
-///   explicit values).
-/// - Update any tests that iterate over `0..=MAX_VALUE_DATA_ENDPOINT`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, EnumCount)]
 #[repr(u32)]
 pub enum DataEndpoint {
@@ -99,11 +81,6 @@ pub enum DataEndpoint {
 }
 
 impl DataEndpoint {
-    /// Return a stable string representation used in logs and in
-    /// `TelemetryPacket::to_string()` output.
-    ///
-    /// This should remain stable over time for compatibility with tests and
-    /// external tooling.
     pub fn as_str(&self) -> &'static str {
         match self {
             DataEndpoint::SdCard => "SD_CARD",
@@ -114,7 +91,7 @@ impl DataEndpoint {
         }
     }
 
-    pub fn get_broadast_mode(&self) -> EndpointsBroadcastMode {
+    pub fn get_broadcast_mode(&self) -> EndpointsBroadcastMode {
         match self {
             DataEndpoint::SdCard => EndpointsBroadcastMode::Default,
             DataEndpoint::GroundStation => EndpointsBroadcastMode::Default,
@@ -129,21 +106,9 @@ impl DataEndpoint {
 // Data types
 // -----------------------------------------------------------------------------
 
-/// Logical telemetry message kinds.
-///
-/// Each variant corresponds to:
-/// - a concrete payload element type (via [`get_message_data_type`]),
-/// - a message severity/role (via [`get_message_info_types`]),
-/// - schema metadata (via [`get_message_meta`]).
-///
-/// When adding new variants:
-/// - Keep discriminants sequential from `0` with no gaps (if assigning
-///   explicit values).
-/// - Update all mapping functions and any tests that iterate over the enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, EnumCount)]
 #[repr(u32)]
 pub enum DataType {
-    /// Encoded telemetry error text (string payload).
     TelemetryError,
     GenericError,
     GpsData,
@@ -161,250 +126,166 @@ pub enum DataType {
     FlightState,
     Heartbeat,
     Warning,
-    /// Generic string message payload.
     MessageData,
 }
 
-impl DataType {
-    /// Return a stable string representation used in logs, headers, and in
-    /// `TelemetryPacket::to_string()` formatting.
-    ///
-    /// This must be kept up to date when adding new variants.
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            DataType::TelemetryError => "TELEMETRY_ERROR",
-            DataType::GenericError => "GENERIC_ERROR",
-            DataType::GpsData => "GPS_DATA",
-            DataType::KalmanFilterData => "KALMAN_FILTER_DATA",
-            DataType::GyroData => "GYRO_DATA",
-            DataType::AccelData => "ACCEL_DATA",
-            DataType::BatteryVoltage => "BATTERY_VOLTAGE",
-            DataType::BatteryCurrent => "BATTERY_CURRENT",
-            DataType::BarometerData => "BAROMETER_DATA",
-            DataType::Abort => "ABORT",
-            DataType::FuelFlow => "FUEL_FLOW",
-            DataType::ValveCommand => "VALVE_COMMAND",
-            DataType::FlightCommand => "FLIGHT_COMMAND",
-            DataType::FuelTankPressure => "FUEL_TANK_PRESSURE",
-            DataType::FlightState => "FLIGHT_STATE",
-            DataType::Heartbeat => "HEARTBEAT",
-            DataType::Warning => "WARNING",
-            DataType::MessageData => "MESSAGE_DATA",
-        }
-    }
-}
-
-// -----------------------------------------------------------------------------
-// Schema helpers: element type, message kind, and metadata
-// -----------------------------------------------------------------------------
-
-/// Return the element type for the payload of a given [`DataType`].
-///
-/// The order and mapping must stay in lock-step with [`DataType`], and with the
-/// schema used by `TelemetryPacket` validation. Available element types are:
-///
-/// - `String`
-/// - `Float32`
-/// - `UInt8`, `UInt16`, `UInt32`, `UInt64`, `UInt128`
-/// - `Int8`, `Int16`, `Int32`, `Int64`, `Int128`
-pub const fn get_message_data_type(data_type: DataType) -> MessageDataType {
-    match data_type {
-        DataType::TelemetryError => MessageDataType::String,
-        DataType::GenericError => MessageDataType::String,
-        DataType::GpsData => MessageDataType::Float32,
-        DataType::KalmanFilterData => MessageDataType::Float32,
-        DataType::BatteryVoltage => MessageDataType::Float32,
-        DataType::BatteryCurrent => MessageDataType::Float32,
-        DataType::GyroData => MessageDataType::Float32,
-        DataType::AccelData => MessageDataType::Float32,
-        DataType::BarometerData => MessageDataType::Float32,
-        DataType::Abort => MessageDataType::String,
-        DataType::FuelFlow => MessageDataType::Float32,
-        DataType::ValveCommand => MessageDataType::UInt8,
-        DataType::FlightCommand => MessageDataType::UInt8,
-        DataType::FuelTankPressure => MessageDataType::Float32,
-        DataType::FlightState => MessageDataType::UInt8,
-        DataType::MessageData => MessageDataType::String,
-        DataType::Warning => MessageDataType::String,
-        DataType::Heartbeat => MessageDataType::NoData,
-    }
-}
-
-/// Return the logical message type (severity/category) for a given [`DataType`].
-///
-/// This affects how messages may be surfaced or filtered in the higher-level
-/// API (e.g. errors vs informational telemetry).
-pub const fn get_message_info_types(message_type: DataType) -> MessageType {
-    match message_type {
-        DataType::TelemetryError => MessageType::Error,
-        DataType::GenericError => MessageType::Error,
-        DataType::GpsData => MessageType::Info,
-        DataType::KalmanFilterData => MessageType::Info,
-        DataType::BatteryVoltage => MessageType::Info,
-        DataType::BatteryCurrent => MessageType::Info,
-        DataType::GyroData => MessageType::Info,
-        DataType::AccelData => MessageType::Info,
-        DataType::BarometerData => MessageType::Info,
-        DataType::Abort => MessageType::Error,
-        DataType::FuelFlow => MessageType::Info,
-        DataType::ValveCommand => MessageType::Info,
-        DataType::FlightCommand => MessageType::Info,
-        DataType::FuelTankPressure => MessageType::Info,
-        DataType::FlightState => MessageType::Info,
-        DataType::MessageData => MessageType::Info,
-        DataType::Warning => MessageType::Info,
-        DataType::Heartbeat => MessageType::Info,
-    }
-}
-
 /// Return the full schema metadata for a given [`DataType`].
-///
-/// Each variant specifies:
-/// - `element_count`: either `Static(n)` (fixed number of elements) or
-///   `Dynamic` (variable-length payload—size validated at runtime).
-/// - `endpoints`: default destination list for packets of that type.
-///
-/// The element count is interpreted relative to the element type returned by
-/// [`get_message_data_type`].
 pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
     match data_type {
-        DataType::TelemetryError => {
-            MessageMeta {
-                // Telemetry Error
-                element_count: MessageElementCount::Dynamic, // Telemetry Error messages have dynamic length
-                endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
-            }
-        }
-        DataType::GenericError => {
-            MessageMeta {
-                // Telemetry Error
-                element_count: MessageElementCount::Dynamic, // Generic Error messages have dynamic length
-                endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
-            }
-        }
-        DataType::GpsData => {
-            MessageMeta {
-                // GPS Data
-                element_count: MessageElementCount::Static(2), // GPS Data messages carry 3 float32 elements (latitude, longitude)
-                endpoints: &[
-                    DataEndpoint::GroundStation,
-                    DataEndpoint::SdCard,
-                    DataEndpoint::FlightController,
-                ],
-            }
-        }
-        DataType::KalmanFilterData => {
-            MessageMeta {
-                // IMU Data
-                element_count: MessageElementCount::Static(3), // Kalman Filter Data messages carry 3 float32 elements
-                endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
-            }
-        }
-        DataType::BatteryVoltage => {
-            MessageMeta {
-                // Battery Status
-                element_count: MessageElementCount::Static(1), // Battery Voltage messages carry 1 float32 element (voltage)
-                endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
-            }
-        }
-        DataType::BatteryCurrent => {
-            MessageMeta {
-                // Battery Status
-                element_count: MessageElementCount::Static(1), // Battery Current messages carry 1 float32 elements (current)
-                endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
-            }
-        }
-        DataType::GyroData => {
-            MessageMeta {
-                // System Status
-                element_count: MessageElementCount::Static(3), // Gyro data messages carry 3 float32 elements (Gyro x, y,z)
-                endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
-            }
-        }
-        DataType::BarometerData => {
-            MessageMeta {
-                // Barometer Data
-                element_count: MessageElementCount::Static(3), // Barometer Data messages carry 2 float32 elements (pressure, temperature)
-                endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
-            }
-        }
-        DataType::AccelData => {
-            MessageMeta {
-                // Barometer Data
-                element_count: MessageElementCount::Static(3), // // Accel data messages carry 3 float32 elements (Accel x, y,z)
-                endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
-            }
-        }
-        DataType::Abort => {
-            MessageMeta {
-                // Abort Command
-                element_count: MessageElementCount::Dynamic, // Abort messages carry 1 boolean element
-                endpoints: &[DataEndpoint::Abort],
-            }
-        }
-        DataType::FuelFlow => {
-            MessageMeta {
-                // Fuel Flow Data
-                element_count: MessageElementCount::Static(1), // Fuel Flow messages carry 1 float32 element
-                endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
-            }
-        }
-        DataType::ValveCommand => {
-            MessageMeta {
-                // Valve Command Data
-                element_count: MessageElementCount::Static(1), // Valve Command messages have dynamic length
-                endpoints: &[
-                    DataEndpoint::GroundStation,
-                    DataEndpoint::SdCard,
-                    DataEndpoint::ValveBoard,
-                ],
-            }
-        }
-        DataType::FlightCommand => {
-            MessageMeta {
-                // Flight Command Data
-                element_count: MessageElementCount::Static(1), // Flight Command messages carry 1 uint8 element
-                endpoints: &[
-                    DataEndpoint::GroundStation,
-                    DataEndpoint::SdCard,
-                    DataEndpoint::FlightController,
-                ],
-            }
-        }
-        DataType::FuelTankPressure => {
-            MessageMeta {
-                // Fuel Tank Pressure Data
-                element_count: MessageElementCount::Static(1), // Fuel Tank Pressure messages carry 1 float32 element
-                endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
-            }
-        }
-        DataType::FlightState => {
-            MessageMeta {
-                // Flight State Data
-                element_count: MessageElementCount::Static(1), // Flight State messages carry 1 uint8 element
-                endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
-            }
-        }
-        DataType::Heartbeat => {
-            MessageMeta {
-                // Heartbeat Data
-                element_count: MessageElementCount::Static(0), // Heartbeat messages carry 1 binary element
-                endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
-            }
-        }
-        DataType::Warning => {
-            MessageMeta {
-                // Warning Data
-                element_count: MessageElementCount::Dynamic, // Warning messages have dynamic length
-                endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
-            }
-        }
-        DataType::MessageData => {
-            MessageMeta {
-                // Message Data
-                element_count: MessageElementCount::Dynamic, // Message Data messages have dynamic length
-                endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
-            }
-        }
+        DataType::TelemetryError => MessageMeta {
+            // Telemetry Error:
+            // Dynamic string payload (human-readable error message).
+            name: "TELEMETRY_ERROR",
+            element: MessageElement::Dynamic(MessageDataType::String, MessageClass::Error),
+            endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
+        },
+
+        DataType::GenericError => MessageMeta {
+            // Generic Error:
+            // Dynamic string payload (human-readable error message).
+            name: "GENERIC_ERROR",
+            element: MessageElement::Dynamic(MessageDataType::String, MessageClass::Error),
+            endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
+        },
+
+        DataType::GpsData => MessageMeta {
+            // GPS Data:
+            // 2 × float32 elements (latitude, longitude).
+            name: "GPS_DATA",
+            element: MessageElement::Static(2, MessageDataType::Float32, MessageClass::Info),
+            endpoints: &[
+                DataEndpoint::GroundStation,
+                DataEndpoint::SdCard,
+                DataEndpoint::FlightController,
+            ],
+        },
+
+        DataType::KalmanFilterData => MessageMeta {
+            // Kalman Filter Data:
+            // 3 × float32 elements.
+            name: "KALMAN_FILTER_DATA",
+            element: MessageElement::Static(3, MessageDataType::Float32, MessageClass::Info),
+            endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
+        },
+
+        DataType::GyroData => MessageMeta {
+            // Gyro Data:
+            // 3 × float32 elements (x, y, z).
+            name: "GYRO_DATA",
+            element: MessageElement::Static(3, MessageDataType::Float32, MessageClass::Info),
+            endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
+        },
+
+        DataType::AccelData => MessageMeta {
+            // Accel Data:
+            // 3 × float32 elements (x, y, z).
+            name: "ACCEL_DATA",
+            element: MessageElement::Static(3, MessageDataType::Float32, MessageClass::Info),
+            endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
+        },
+
+        DataType::BatteryVoltage => MessageMeta {
+            // Battery Voltage:
+            // 1 × float32 element.
+            name: "BATTERY_VOLTAGE",
+            element: MessageElement::Static(1, MessageDataType::Float32, MessageClass::Info),
+            endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
+        },
+
+        DataType::BatteryCurrent => MessageMeta {
+            // Battery Current:
+            // 1 × float32 element.
+            name: "BATTERY_CURRENT",
+            element: MessageElement::Static(1, MessageDataType::Float32, MessageClass::Info),
+            endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
+        },
+
+        DataType::BarometerData => MessageMeta {
+            // Barometer Data:
+            // 3 × float32 elements.
+            name: "BAROMETER_DATA",
+            element: MessageElement::Static(3, MessageDataType::Float32, MessageClass::Info),
+            endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
+        },
+
+        DataType::Abort => MessageMeta {
+            // Abort:
+            // Dynamic string payload (reason / code / message).
+            name: "ABORT",
+            element: MessageElement::Dynamic(MessageDataType::String, MessageClass::Error),
+            endpoints: &[DataEndpoint::Abort],
+        },
+
+        DataType::FuelFlow => MessageMeta {
+            // Fuel Flow:
+            // 1 × float32 element.
+            name: "FUEL_FLOW",
+            element: MessageElement::Static(1, MessageDataType::Float32, MessageClass::Info),
+            endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
+        },
+
+        DataType::ValveCommand => MessageMeta {
+            // Valve Command:
+            // 1 × uint8 element (command).
+            name: "VALVE_COMMAND",
+            element: MessageElement::Static(1, MessageDataType::UInt8, MessageClass::Info),
+            endpoints: &[
+                DataEndpoint::GroundStation,
+                DataEndpoint::SdCard,
+                DataEndpoint::ValveBoard,
+            ],
+        },
+
+        DataType::FlightCommand => MessageMeta {
+            // Flight Command:
+            // 1 × uint8 element (command).
+            name: "FLIGHT_COMMAND",
+            element: MessageElement::Static(1, MessageDataType::UInt8, MessageClass::Info),
+            endpoints: &[
+                DataEndpoint::GroundStation,
+                DataEndpoint::SdCard,
+                DataEndpoint::FlightController,
+            ],
+        },
+
+        DataType::FuelTankPressure => MessageMeta {
+            // Fuel Tank Pressure:
+            // 1 × float32 element.
+            name: "FUEL_TANK_PRESSURE",
+            element: MessageElement::Static(1, MessageDataType::Float32, MessageClass::Info),
+            endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
+        },
+
+        DataType::FlightState => MessageMeta {
+            // Flight State:
+            // 1 × uint8 element.
+            name: "FLIGHT_STATE",
+            element: MessageElement::Static(1, MessageDataType::UInt8, MessageClass::Info),
+            endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
+        },
+
+        DataType::Heartbeat => MessageMeta {
+            // Heartbeat:
+            // No payload.
+            name: "HEARTBEAT",
+            element: MessageElement::Static(0, MessageDataType::NoData, MessageClass::Info),
+            endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
+        },
+
+        DataType::Warning => MessageMeta {
+            // Warning:
+            // Dynamic string payload (human-readable warning text).
+            name: "WARNING",
+            element: MessageElement::Dynamic(MessageDataType::String, MessageClass::Warning),
+            endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
+        },
+
+        DataType::MessageData => MessageMeta {
+            // Message Data:
+            // Dynamic string payload (free-form log message).
+            name: "MESSAGE_DATA",
+            element: MessageElement::Dynamic(MessageDataType::String, MessageClass::Info),
+            endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
+        },
     }
 }

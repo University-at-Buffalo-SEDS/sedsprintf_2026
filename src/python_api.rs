@@ -37,7 +37,7 @@ use crate::{
     router::{Clock, EndpointHandler, LeBytes, LinkId, Router, RouterConfig, RouterMode},
     serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet},
     telemetry_packet::TelemetryPacket, try_enum_from_u32,
-    MessageElementCount,
+    MessageElement,
     TelemetryError,
     TelemetryResult,
     MAX_VALUE_DATA_ENDPOINT,
@@ -98,9 +98,9 @@ fn link_from_u64(x: u64) -> TelemetryResult<LinkId> {
 
 /// Return the fixed payload size in bytes for a type, or `None` if dynamic.
 fn required_payload_size_for(ty: DataType) -> Option<usize> {
-    match message_meta(ty).element_count {
-        MessageElementCount::Static(_) => Some(get_needed_message_size(ty)),
-        MessageElementCount::Dynamic => None,
+    match message_meta(ty).element {
+        MessageElement::Static(_) => Some(get_needed_message_size(ty)),
+        MessageElement::Dynamic => None,
     }
 }
 

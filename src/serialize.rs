@@ -9,12 +9,7 @@
 //! The core public type here is [`TelemetryEnvelope`], a lightweight view of
 //! the header fields used by `peek_envelope`.
 
-use crate::{
-    telemetry_packet::TelemetryPacket, try_enum_from_u32, DataEndpoint,
-    TelemetryError,
-    TelemetryResult,
-    {config::DataType, MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE},
-};
+use crate::{get_message_name, telemetry_packet::TelemetryPacket, try_enum_from_u32, DataEndpoint, TelemetryError, TelemetryResult, {config::DataType, MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE}};
 
 use crate::telemetry_packet::hash_bytes_u64;
 use alloc::{borrow::ToOwned, string::String, sync::Arc, vec::Vec};
@@ -566,7 +561,7 @@ pub fn packet_id_from_wire(buf: &[u8]) -> Result<u64, TelemetryError> {
     h = hash_bytes_u64(h, sender_bytes);
 
     // Logical type as string bytes
-    h = hash_bytes_u64(h, ty.as_str().as_bytes());
+    h = hash_bytes_u64(h, get_message_name(ty).as_bytes());
 
     // Endpoints as string bytes, in ascending discriminant order
     for idx in 0..EP_BITMAP_BITS {
