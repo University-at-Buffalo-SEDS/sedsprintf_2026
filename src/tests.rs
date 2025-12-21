@@ -1146,7 +1146,7 @@ mod tests_extra {
         let back = serialize::deserialize_packet(&wire).unwrap();
         assert_eq!(
             back.endpoints(),
-            [DataEndpoint::SdCard, DataEndpoint::GroundStation, DataEndpoint::FlightController, DataEndpoint::FuelBoard, DataEndpoint::Abort],
+            [DataEndpoint::SdCard, DataEndpoint::GroundStation, DataEndpoint::FlightController, DataEndpoint::ValveBoard, DataEndpoint::Abort],
             "endpoints must roundtrip 1:1"
         );
         assert_eq!(back.data_type(), pkt.data_type());

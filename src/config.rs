@@ -94,9 +94,8 @@ pub enum DataEndpoint {
     SdCard,
     GroundStation,
     FlightController,
-    FuelBoard,
+    ValveBoard,
     Abort,
-
 }
 
 impl DataEndpoint {
@@ -110,7 +109,7 @@ impl DataEndpoint {
             DataEndpoint::SdCard => "SD_CARD",
             DataEndpoint::GroundStation => "GROUND_STATION",
             DataEndpoint::FlightController => "FLIGHT_CONTROLLER",
-            DataEndpoint::FuelBoard => "FUEL_BOARD",
+            DataEndpoint::ValveBoard => "VALVE_BOARD",
             DataEndpoint::Abort => "ABORT",
         }
     }
@@ -120,7 +119,7 @@ impl DataEndpoint {
             DataEndpoint::SdCard => EndpointsBroadcastMode::Default,
             DataEndpoint::GroundStation => EndpointsBroadcastMode::Default,
             DataEndpoint::FlightController => EndpointsBroadcastMode::Default,
-            DataEndpoint::FuelBoard => EndpointsBroadcastMode::Default,
+            DataEndpoint::ValveBoard => EndpointsBroadcastMode::Default,
             DataEndpoint::Abort => EndpointsBroadcastMode::Always,
         }
     }
@@ -156,6 +155,8 @@ pub enum DataType {
     BarometerData,
     Abort,
     FuelFlow,
+    ValveCommand,
+    FlightCommand,
     FuelTankPressure,
     FlightState,
     Heartbeat,
@@ -182,6 +183,8 @@ impl DataType {
             DataType::BarometerData => "BAROMETER_DATA",
             DataType::Abort => "ABORT",
             DataType::FuelFlow => "FUEL_FLOW",
+            DataType::ValveCommand => "VALVE_COMMAND",
+            DataType::FlightCommand => "FLIGHT_COMMAND",
             DataType::FuelTankPressure => "FUEL_TANK_PRESSURE",
             DataType::FlightState => "FLIGHT_STATE",
             DataType::Heartbeat => "HEARTBEAT",
@@ -217,6 +220,8 @@ pub const fn get_message_data_type(data_type: DataType) -> MessageDataType {
         DataType::BarometerData => MessageDataType::Float32,
         DataType::Abort => MessageDataType::String,
         DataType::FuelFlow => MessageDataType::Float32,
+        DataType::ValveCommand => MessageDataType::UInt8,
+        DataType::FlightCommand => MessageDataType::UInt8,
         DataType::FuelTankPressure => MessageDataType::Float32,
         DataType::FlightState => MessageDataType::UInt8,
         DataType::MessageData => MessageDataType::String,
@@ -242,6 +247,8 @@ pub const fn get_message_info_types(message_type: DataType) -> MessageType {
         DataType::BarometerData => MessageType::Info,
         DataType::Abort => MessageType::Error,
         DataType::FuelFlow => MessageType::Info,
+        DataType::ValveCommand => MessageType::Info,
+        DataType::FlightCommand => MessageType::Info,
         DataType::FuelTankPressure => MessageType::Info,
         DataType::FlightState => MessageType::Info,
         DataType::MessageData => MessageType::Info,
@@ -332,9 +339,7 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
             MessageMeta {
                 // Abort Command
                 element_count: MessageElementCount::Dynamic, // Abort messages carry 1 boolean element
-                endpoints: &[
-                    DataEndpoint::Abort,
-                ],
+                endpoints: &[DataEndpoint::Abort],
             }
         }
         DataType::FuelFlow => {
@@ -342,6 +347,28 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
                 // Fuel Flow Data
                 element_count: MessageElementCount::Static(1), // Fuel Flow messages carry 1 float32 element
                 endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
+            }
+        }
+        DataType::ValveCommand => {
+            MessageMeta {
+                // Valve Command Data
+                element_count: MessageElementCount::Static(1), // Valve Command messages have dynamic length
+                endpoints: &[
+                    DataEndpoint::GroundStation,
+                    DataEndpoint::SdCard,
+                    DataEndpoint::ValveBoard,
+                ],
+            }
+        }
+        DataType::FlightCommand => {
+            MessageMeta {
+                // Flight Command Data
+                element_count: MessageElementCount::Static(1), // Flight Command messages carry 1 uint8 element
+                endpoints: &[
+                    DataEndpoint::GroundStation,
+                    DataEndpoint::SdCard,
+                    DataEndpoint::FlightController,
+                ],
             }
         }
         DataType::FuelTankPressure => {
