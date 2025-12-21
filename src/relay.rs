@@ -96,7 +96,7 @@ impl Relay {
                 recent_rx: BoundedDeque::new(
                     MAX_RECENT_RX_IDS * size_of::<u64>(),
                     MAX_RECENT_RX_IDS,
-                    QUEUE_GROW_STEP
+                    QUEUE_GROW_STEP,
                 ),
             }),
             clock,

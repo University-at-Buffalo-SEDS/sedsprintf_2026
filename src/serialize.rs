@@ -9,7 +9,12 @@
 //! The core public type here is [`TelemetryEnvelope`], a lightweight view of
 //! the header fields used by `peek_envelope`.
 
-use crate::{get_message_name, telemetry_packet::TelemetryPacket, try_enum_from_u32, DataEndpoint, TelemetryError, TelemetryResult, {config::DataType, MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE}};
+use crate::{
+    get_message_name, telemetry_packet::TelemetryPacket, try_enum_from_u32, DataEndpoint,
+    TelemetryError,
+    TelemetryResult,
+    {config::DataType, MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE},
+};
 
 use crate::telemetry_packet::hash_bytes_u64;
 use alloc::{borrow::ToOwned, string::String, sync::Arc, vec::Vec};

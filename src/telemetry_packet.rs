@@ -8,7 +8,12 @@
 
 use crate::config::{StandardSmallPayload, DEVICE_IDENTIFIER, STRING_PRECISION};
 use crate::queue::ByteCost;
-use crate::{config::{DataEndpoint, DataType}, data_type_size, get_data_type, get_info_type, message_meta, router::LeBytes, MessageDataType, MessageElement, MessageClass, TelemetryError, TelemetryResult, get_message_name};
+use crate::{
+    config::{DataEndpoint, DataType}, data_type_size, get_data_type, get_info_type, get_message_name,
+    message_meta,
+    router::LeBytes, MessageClass, MessageDataType, MessageElement, TelemetryError,
+    TelemetryResult,
+};
 use crate::{impl_data_as_prim, impl_from_prim_slices, impl_ledecode_auto};
 use alloc::{string::String, string::ToString, sync::Arc, vec, vec::Vec};
 use core::any::TypeId;
