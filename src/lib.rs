@@ -201,6 +201,14 @@ pub struct MessageMeta {
     endpoints: &'static [DataEndpoint],
 }
 
+
+impl DataType{
+
+    /// Get the string representation of the DataType
+    pub const fn as_str(&self) -> &'static str {
+        get_message_meta(*self).name
+    }
+}
 /// Lookup `MessageMeta` for a given [`DataType`] using the generated config.
 /// # Arguments
 /// - `ty`: Logical data type to query.
