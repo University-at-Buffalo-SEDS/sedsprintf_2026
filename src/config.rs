@@ -152,7 +152,7 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
             // GPS Data:
             // 2 × float32 elements (latitude, longitude).
             name: "GPS_DATA",
-            element: MessageElement::Static(2, MessageDataType::Float32, MessageClass::Info),
+            element: MessageElement::Static(2, MessageDataType::Float32, MessageClass::Data),
             endpoints: &[
                 DataEndpoint::GroundStation,
                 DataEndpoint::SdCard,
@@ -164,7 +164,7 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
             // Kalman Filter Data:
             // 3 × float32 elements.
             name: "KALMAN_FILTER_DATA",
-            element: MessageElement::Static(3, MessageDataType::Float32, MessageClass::Info),
+            element: MessageElement::Static(3, MessageDataType::Float32, MessageClass::Data),
             endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
         },
 
@@ -172,7 +172,7 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
             // Gyro Data:
             // 3 × float32 elements (x, y, z).
             name: "GYRO_DATA",
-            element: MessageElement::Static(3, MessageDataType::Float32, MessageClass::Info),
+            element: MessageElement::Static(3, MessageDataType::Float32, MessageClass::Data),
             endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
         },
 
@@ -180,7 +180,7 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
             // Accel Data:
             // 3 × float32 elements (x, y, z).
             name: "ACCEL_DATA",
-            element: MessageElement::Static(3, MessageDataType::Float32, MessageClass::Info),
+            element: MessageElement::Static(3, MessageDataType::Float32, MessageClass::Data),
             endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
         },
 
@@ -188,7 +188,7 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
             // Battery Voltage:
             // 1 × float32 element.
             name: "BATTERY_VOLTAGE",
-            element: MessageElement::Static(1, MessageDataType::Float32, MessageClass::Info),
+            element: MessageElement::Static(1, MessageDataType::Float32, MessageClass::Data),
             endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
         },
 
@@ -196,7 +196,7 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
             // Battery Current:
             // 1 × float32 element.
             name: "BATTERY_CURRENT",
-            element: MessageElement::Static(1, MessageDataType::Float32, MessageClass::Info),
+            element: MessageElement::Static(1, MessageDataType::Float32, MessageClass::Data),
             endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
         },
 
@@ -204,7 +204,7 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
             // Barometer Data:
             // 3 × float32 elements.
             name: "BAROMETER_DATA",
-            element: MessageElement::Static(3, MessageDataType::Float32, MessageClass::Info),
+            element: MessageElement::Static(3, MessageDataType::Float32, MessageClass::Data),
             endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
         },
 
@@ -220,7 +220,7 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
             // Fuel Flow:
             // 1 × float32 element.
             name: "FUEL_FLOW",
-            element: MessageElement::Static(1, MessageDataType::Float32, MessageClass::Info),
+            element: MessageElement::Static(1, MessageDataType::Float32, MessageClass::Data),
             endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
         },
 
@@ -228,7 +228,7 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
             // Valve Command:
             // 1 × uint8 element (command).
             name: "VALVE_COMMAND",
-            element: MessageElement::Static(1, MessageDataType::UInt8, MessageClass::Info),
+            element: MessageElement::Static(1, MessageDataType::UInt8, MessageClass::Data),
             endpoints: &[
                 DataEndpoint::GroundStation,
                 DataEndpoint::SdCard,
@@ -240,7 +240,7 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
             // Flight Command:
             // 1 × uint8 element (command).
             name: "FLIGHT_COMMAND",
-            element: MessageElement::Static(1, MessageDataType::UInt8, MessageClass::Info),
+            element: MessageElement::Static(1, MessageDataType::UInt8, MessageClass::Data),
             endpoints: &[
                 DataEndpoint::GroundStation,
                 DataEndpoint::SdCard,
@@ -252,7 +252,7 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
             // Fuel Tank Pressure:
             // 1 × float32 element.
             name: "FUEL_TANK_PRESSURE",
-            element: MessageElement::Static(1, MessageDataType::Float32, MessageClass::Info),
+            element: MessageElement::Static(1, MessageDataType::Float32, MessageClass::Data),
             endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
         },
 
@@ -260,7 +260,7 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
             // Flight State:
             // 1 × uint8 element.
             name: "FLIGHT_STATE",
-            element: MessageElement::Static(1, MessageDataType::UInt8, MessageClass::Info),
+            element: MessageElement::Static(1, MessageDataType::UInt8, MessageClass::Data),
             endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
         },
 
@@ -268,7 +268,7 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
             // Heartbeat:
             // No payload.
             name: "HEARTBEAT",
-            element: MessageElement::Static(0, MessageDataType::NoData, MessageClass::Info),
+            element: MessageElement::Static(0, MessageDataType::NoData, MessageClass::Data),
             endpoints: &[DataEndpoint::GroundStation, DataEndpoint::SdCard],
         },
 
@@ -284,7 +284,7 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
             // Message Data:
             // Dynamic string payload (free-form log message).
             name: "MESSAGE_DATA",
-            element: MessageElement::Dynamic(MessageDataType::String, MessageClass::Info),
+            element: MessageElement::Dynamic(MessageDataType::String, MessageClass::Data),
             endpoints: &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
         },
     }
