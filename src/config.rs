@@ -174,49 +174,49 @@ pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
             // GPS Data:
             // 3 × float32 elements (e.g. latitude, longitude, altitude).
             name: "GPS_DATA",
-            element: MessageElement::Static(3, MessageDataType::Float32, MessageClass::Info),
+            element: MessageElement::Static(3, MessageDataType::Float32, MessageClass::Data),
             endpoints: &[DataEndpoint::Radio, DataEndpoint::SdCard],
         },
         DataType::ImuData => MessageMeta {
             // IMU Data:
             // 6 × float32 elements (accel x/y/z and gyro x/y/z).
             name: "IMU_DATA",
-            element: MessageElement::Static(6, MessageDataType::Float32, MessageClass::Info),
+            element: MessageElement::Static(6, MessageDataType::Float32, MessageClass::Data),
             endpoints: &[DataEndpoint::Radio, DataEndpoint::SdCard],
         },
         DataType::BatteryStatus => MessageMeta {
             // Battery Status:
             // 2 × float32 elements (e.g. voltage, current).
             name: "BATTERY_STATUS",
-            element: MessageElement::Static(2, MessageDataType::Float32, MessageClass::Info),
+            element: MessageElement::Static(2, MessageDataType::Float32, MessageClass::Data),
             endpoints: &[DataEndpoint::Radio, DataEndpoint::SdCard],
         },
         DataType::SystemStatus => MessageMeta {
             // System Status:
             // 1 × uint8 element (status/health code).
             name: "SYSTEM_STATUS",
-            element: MessageElement::Static(1, MessageDataType::Bool, MessageClass::Info),
+            element: MessageElement::Static(1, MessageDataType::Bool, MessageClass::Data),
             endpoints: &[DataEndpoint::SdCard],
         },
         DataType::BarometerData => MessageMeta {
             // Barometer Data:
             // 3 × float32 elements (e.g. pressure, temperature, altitude/reserved).
             name: "BAROMETER_DATA",
-            element: MessageElement::Static(3, MessageDataType::Float32, MessageClass::Info),
+            element: MessageElement::Static(3, MessageDataType::Float32, MessageClass::Data),
             endpoints: &[DataEndpoint::Radio, DataEndpoint::SdCard],
         },
         DataType::MessageData => MessageMeta {
             // Message Data:
             // Dynamic string payload (e.g. free-form log message).
             name: "MESSAGE_DATA",
-            element: MessageElement::Dynamic(MessageDataType::String, MessageClass::Info),
+            element: MessageElement::Dynamic(MessageDataType::String, MessageClass::Data),
             endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
         },
         DataType::Heartbeat => MessageMeta {
             // Heartbeat:
             // No payload.
             name: "HEARTBEAT",
-            element: MessageElement::Static(0, MessageDataType::NoData, MessageClass::Info),
+            element: MessageElement::Static(0, MessageDataType::NoData, MessageClass::Data),
             endpoints: &[DataEndpoint::SdCard, DataEndpoint::Radio],
         },
     }
