@@ -25,7 +25,6 @@ fn float_to_ratio(mult: f64) -> (usize, usize) {
     (num, DEN)
 }
 
-
 /// A double-ended queue with a maximum byte budget.
 ///
 /// Policy:

@@ -11,7 +11,6 @@
 //! It also provides **v2** entry points that include LinkId in callbacks,
 //! while preserving the old ABI exactly.
 
-use crate::{MessageDataType::NoData, get_data_type};
 use crate::{
     config::DataEndpoint, do_vec_log_typed, get_needed_message_size, message_meta, router::{Clock, LeBytes, LinkId},
     router::{EndpointHandler, Router, RouterConfig},
@@ -21,6 +20,7 @@ use crate::{
     TelemetryErrorCode,
     TelemetryResult,
 };
+use crate::{get_data_type, MessageDataType::NoData};
 use alloc::{boxed::Box, string::String, sync::Arc, vec, vec::Vec};
 use core::{ffi::c_char, ffi::c_void, mem::size_of, ptr, slice, str::from_utf8};
 
@@ -121,8 +121,8 @@ fn link_id_from_ptr(link: *const SedsLinkId) -> TelemetryResult<LinkId> {
 #[inline]
 fn fixed_payload_size_if_static(ty: DataType) -> Option<usize> {
     match message_meta(ty).element {
-        MessageElement::Static(_,_,_) => Some(get_needed_message_size(ty)),
-        MessageElement::Dynamic(_,_) => None,
+        MessageElement::Static(_, _, _) => Some(get_needed_message_size(ty)),
+        MessageElement::Dynamic(_, _) => None,
     }
 }
 
