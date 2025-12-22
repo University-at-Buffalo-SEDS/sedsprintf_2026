@@ -217,7 +217,7 @@ impl PyPacket {
     /// Raw payload bytes.
     #[getter]
     fn payload<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
-        PyBytes::new(py, &self.inner.payload())
+        PyBytes::new(py, self.inner.payload())
     }
 
     /// Decode payload as a UTF-8 string for `DataType::String`.
@@ -327,8 +327,7 @@ impl PyRouter {
 
         // Build transmit callback (NEW ROUTER API: (bytes, link))
         let tx_for_closure = tx_keep.as_ref().map(|p| p.clone_ref(py));
-        let transmit = if let Some(cb) = tx_for_closure {
-            Some(move |bytes: &[u8], link: &LinkId| -> TelemetryResult<()> {
+        let transmit = tx_for_closure.map(|cb| move |bytes: &[u8], link: &LinkId| -> TelemetryResult<()> {
                 Python::attach(|py| {
                     let arg = PyBytes::new(py, bytes).into_any();
                     match call_py_cb_1_or_2(py, &cb, &arg, link) {
@@ -339,10 +338,7 @@ impl PyRouter {
                         }
                     }
                 })
-            })
-        } else {
-            None
-        };
+            });
 
         // Build endpoint handlers
         let mut handlers_vec = Vec::new();
@@ -381,7 +377,7 @@ impl PyRouter {
                             // FIX: bind owned Py<PyAny> into Bound<PyAny>
                             let any = any.bind(py);
 
-                            match call_py_cb_1_or_2(py, &cb_for_closure, &any, link) {
+                            match call_py_cb_1_or_2(py, &cb_for_closure, any, link) {
                                 Ok(()) => Ok(()),
                                 Err(err) => {
                                     err.restore(py);
@@ -428,8 +424,8 @@ impl PyRouter {
         let cfg = RouterConfig::new(handlers_vec);
 
         let mode = match mode {
-            0 => crate::router::RouterMode::Sink,
-            1 => crate::router::RouterMode::Relay,
+            0 => RouterMode::Sink,
+            1 => RouterMode::Relay,
             _ => {
                 return Err(PyValueError::new_err("mode must be 0 (Sink) or 1 (Relay)"));
             }
@@ -464,8 +460,7 @@ impl PyRouter {
         let tx_for_closure = tx_keep.as_ref().map(|p| p.clone_ref(py));
 
         // Build TX closure (NEW ROUTER API: (bytes, link))
-        let transmit = if let Some(cb) = tx_for_closure {
-            Some(move |bytes: &[u8], link: &LinkId| -> TelemetryResult<()> {
+        let transmit = tx_for_closure.map(|cb| move |bytes: &[u8], link: &LinkId| -> TelemetryResult<()> {
                 Python::attach(|py| {
                     let arg = PyBytes::new(py, bytes).into_any();
                     match call_py_cb_1_or_2(py, &cb, &arg, link) {
@@ -476,10 +471,7 @@ impl PyRouter {
                         }
                     }
                 })
-            })
-        } else {
-            None
-        };
+            });
 
         let mut handlers_vec = Vec::new();
         let mut keep_pkt = Vec::new();
@@ -517,7 +509,7 @@ impl PyRouter {
                             // FIX: bind owned Py<PyAny> into Bound<PyAny>
                             let any = any.bind(py);
 
-                            match call_py_cb_1_or_2(py, &cb_for_closure, &any, link) {
+                            match call_py_cb_1_or_2(py, &cb_for_closure, any, link) {
                                 Ok(()) => Ok(()),
                                 Err(err) => {
                                     err.restore(py);
@@ -561,8 +553,8 @@ impl PyRouter {
         let cfg = RouterConfig::new(handlers_vec);
 
         let mode = match mode {
-            0 => crate::router::RouterMode::Sink,
-            1 => crate::router::RouterMode::Relay,
+            0 => RouterMode::Sink,
+            1 => RouterMode::Relay,
             _ => {
                 return Err(PyValueError::new_err("mode must be 0 (Sink) or 1 (Relay)"));
             }
@@ -660,7 +652,7 @@ impl PyRouter {
             .inner
             .lock()
             .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
-        let link = link_from_u64(link_id).map_err(|e| py_err_from(e))?;
+        let link = link_from_u64(link_id).map_err(py_err_from)?;
 
         rtr.rx_serialized_from(bytes, link).map_err(py_err_from)
     }
@@ -685,7 +677,7 @@ impl PyRouter {
             .inner
             .lock()
             .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
-        let link = link_from_u64(link_id).map_err(|e| py_err_from(e))?;
+        let link = link_from_u64(link_id).map_err(py_err_from)?;
 
         rtr.rx_serialized_queue_from(bytes, link)
             .map_err(py_err_from)
@@ -702,7 +694,7 @@ impl PyRouter {
             .inner
             .lock()
             .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
-        let link = link_from_u64(link_id).map_err(|e| py_err_from(e))?;
+        let link = link_from_u64(link_id).map_err(py_err_from)?;
 
         rtr.tx_from(pkt_ref.inner.clone(), link)
             .map_err(py_err_from)
@@ -719,7 +711,7 @@ impl PyRouter {
             .inner
             .lock()
             .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
-        let link = link_from_u64(link_id).map_err(|e| py_err_from(e))?;
+        let link = link_from_u64(link_id).map_err(py_err_from)?;
         rtr.tx_queue_from(pkt_ref.inner.clone(), link)
             .map_err(py_err_from)
     }
@@ -737,7 +729,7 @@ impl PyRouter {
             .inner
             .lock()
             .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
-        let link = link_from_u64(link_id).map_err(|e| py_err_from(e))?;
+        let link = link_from_u64(link_id).map_err(py_err_from)?;
         rtr.tx_serialized_from(arc, link).map_err(py_err_from)
     }
 
@@ -754,7 +746,7 @@ impl PyRouter {
             .inner
             .lock()
             .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
-        let link = link_from_u64(link_id).map_err(|e| py_err_from(e))?;
+        let link = link_from_u64(link_id).map_err(py_err_from)?;
         rtr.tx_serialized_queue_from(arc, link).map_err(py_err_from)
     }
 
@@ -842,6 +834,7 @@ impl PyRouter {
         r.map_err(py_err_from)
     }
 
+    #[allow(clippy::too_many_arguments)] // PyO3 method: `self` and `py` are not Python-visible
     #[pyo3(signature = (ty, data, elem_size, elem_kind, timestamp_ms=None, queue=false))]
     fn log(
         &self,
@@ -1319,8 +1312,8 @@ pub fn sedsprintf_rs(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     {
         let rm_dict = PyDict::new(py);
         rm_dict.set_item("__module__", &mod_name)?;
-        rm_dict.set_item("Relay", 1 as u32)?;
-        rm_dict.set_item("Sink", 0 as u32)?;
+        rm_dict.set_item("Relay", 1u32)?;
+        rm_dict.set_item("Sink", 0u32)?;
 
         let rm_enum = int_enum.call1(("RouterMode", rm_dict))?;
         m.add("RouterMode", rm_enum)?;
