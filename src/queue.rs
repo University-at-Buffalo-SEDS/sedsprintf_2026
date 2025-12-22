@@ -59,9 +59,9 @@ impl<T: ByteCost> BoundedDeque<T> {
         starting_elems: usize,
         grow_mult: f64, // ← user-facing float
     ) -> Self {
-        if starting_elems > 0 && starting_elems <= MAX_RECENT_RX_IDS {
+        if starting_elems > MAX_RECENT_RX_IDS {
             panic!(
-                "starting_elems must be 0 or greater than MAX_RECENT_RX_IDS ({}) to avoid conflicts",
+                "starting_elems must be less than MAX_RECENT_RX_IDS ({}) to avoid conflicts",
                 MAX_RECENT_RX_IDS
             );
         }
