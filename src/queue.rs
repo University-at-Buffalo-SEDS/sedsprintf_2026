@@ -1,3 +1,4 @@
+use crate::config::MAX_RECENT_RX_IDS;
 use crate::{TelemetryError, TelemetryResult};
 use alloc::collections::VecDeque;
 
@@ -58,6 +59,18 @@ impl<T: ByteCost> BoundedDeque<T> {
         starting_elems: usize,
         grow_mult: f64, // ← user-facing float
     ) -> Self {
+        if starting_elems > 0 && starting_elems <= MAX_RECENT_RX_IDS {
+            panic!(
+                "starting_elems must be 0 or greater than MAX_RECENT_RX_IDS ({}) to avoid conflicts",
+                MAX_RECENT_RX_IDS
+            );
+        }
+        if max_bytes == 0 {
+            panic!("max_bytes must be greater than 0");
+        }
+        if grow_mult <= 1.0 {
+            panic!("grow_mult must be greater than 1.0");
+        }
         let min_cost = size_of::<T>().max(1);
         let max_elems = (max_bytes / min_cost).max(1);
 
