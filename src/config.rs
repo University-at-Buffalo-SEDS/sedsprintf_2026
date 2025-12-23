@@ -8,9 +8,10 @@
 //!   - [`get_message_info_types`]
 //!   - [`get_message_meta`]
 
-use crate::{EndpointMeta, EndpointsBroadcastMode};
-#[allow(unused_imports)]
-use crate::{MessageClass, MessageDataType, MessageElement, MessageMeta, STRING_VALUE_ELEMENT};
+use crate::{
+    EndpointMeta, EndpointsBroadcastMode, MessageClass, MessageDataType, MessageElement,
+    MessageMeta,
+};
 use sedsprintf_macros::define_stack_payload;
 use strum_macros::EnumCount;
 // -----------------------------------------------------------------------------

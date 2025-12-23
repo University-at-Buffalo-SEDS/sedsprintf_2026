@@ -129,10 +129,6 @@ pub mod telemetry_packet;
 //  Schema-derived global constants
 // ============================================================================
 
-/// Element count used for "string value" schema entries.
-#[allow(dead_code)]
-pub const STRING_VALUE_ELEMENT: usize = 1;
-
 /// Maximum enum value for `DataEndpoint` (inclusive), derived from the schema.
 pub const MAX_VALUE_DATA_ENDPOINT: u32 = (DataEndpoint::COUNT - 1) as u32;
 
