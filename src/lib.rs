@@ -129,10 +129,6 @@ pub mod telemetry_packet;
 //  Schema-derived global constants
 // ============================================================================
 
-/// Element count used for "string value" schema entries.
-#[allow(dead_code)]
-pub const STRING_VALUE_ELEMENT: usize = 1;
-
 /// Maximum enum value for `DataEndpoint` (inclusive), derived from the schema.
 pub const MAX_VALUE_DATA_ENDPOINT: u32 = (DataEndpoint::COUNT - 1) as u32;
 
@@ -223,6 +219,7 @@ impl MessageElement {
         }
     }
 }
+
 /// Broadcast mode for endpoints
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub enum EndpointsBroadcastMode {
@@ -233,6 +230,7 @@ pub enum EndpointsBroadcastMode {
     /// Transmit only if we don't have an endpoint for it. Otherwise, use the endpoint handler and don't broadcast.
     Default,
 }
+
 /// Static metadata for a message type: element count and valid endpoints.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct MessageMeta {
@@ -337,6 +335,7 @@ pub const fn get_data_type(ty: DataType) -> MessageDataType {
 pub const fn get_message_name(ty: DataType) -> &'static str {
     get_message_meta(ty).name
 }
+
 /// Return the default endpoints for a given `DataType`.
 /// # Arguments
 /// - `ty`: Logical data type to query.
@@ -346,6 +345,7 @@ pub const fn get_message_name(ty: DataType) -> &'static str {
 pub const fn endpoints_from_datatype(ty: DataType) -> &'static [DataEndpoint] {
     get_message_meta(ty).endpoints
 }
+
 /// Primitive element type used by a message.
 ///
 /// This is the underlying "slot" type, not the high-level `DataType`
@@ -522,6 +522,7 @@ impl From<Error> for TelemetryError {
     }
 }
 
+/// Allow the conversion from boxed std error to telemetry error
 #[cfg(feature = "std")]
 impl From<Box<dyn std::error::Error>> for TelemetryError {
     fn from(err: Box<dyn std::error::Error>) -> Self {
