@@ -4,8 +4,7 @@
 //! - Device-/build-time constants (identifiers, limits, retries).
 //! - The `DataEndpoint` and `DataType` enums.
 //! - Functions that describe per-type schema metadata:
-//!   - [`get_message_data_type`]
-//!   - [`get_message_info_types`]
+//!   - [`get_endpoint_meta`]
 //!   - [`get_message_meta`]
 
 use crate::{
