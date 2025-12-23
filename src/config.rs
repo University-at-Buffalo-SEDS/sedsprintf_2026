@@ -4,11 +4,13 @@
 //! - Device-/build-time constants (identifiers, limits, retries).
 //! - The `DataEndpoint` and `DataType` enums.
 //! - Functions that describe per-type schema metadata:
+//!   - [`get_endpoint_meta`]
 //!   - [`get_message_meta`]
 
-use crate::{EndpointMeta, EndpointsBroadcastMode};
-#[allow(unused_imports)]
-use crate::{MessageClass, MessageDataType, MessageElement, MessageMeta, STRING_VALUE_ELEMENT};
+use crate::{
+    EndpointMeta, EndpointsBroadcastMode, MessageClass, MessageDataType, MessageElement,
+    MessageMeta,
+};
 use sedsprintf_macros::define_stack_payload;
 use strum_macros::EnumCount;
 
@@ -39,8 +41,10 @@ pub const STARTING_QUEUE_SIZE: usize = 16;
 /// Maximum size of the internal router and relay queues in Bytes.
 pub const MAX_QUEUE_SIZE: usize = 1024 * 50; // 50 KB
 
-/// Grow step of the internal router and relay queues in Bytes.
-/// The value is a multiplier of the current queue size.
+/// Grow amount of the internal router and relay queues.
+/// Higher values increase memory usage but may help with performance.
+/// the value is a multiplier of the current queue size.
+/// This value should be greater than 1.0.
 pub const QUEUE_GROW_STEP: f64 = 3.2;
 
 /// Minimum payload size (in bytes) before we consider compression.
