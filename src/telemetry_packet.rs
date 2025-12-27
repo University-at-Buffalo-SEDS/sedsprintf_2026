@@ -933,6 +933,6 @@ impl ByteCost for TelemetryPacket {
         size_of::<Self>()
             + self.sender.len()
             + self.endpoints.len() * size_of::<DataEndpoint>()
-            + self.payload.len()
+            + self.payload.byte_cost()
     }
 }
