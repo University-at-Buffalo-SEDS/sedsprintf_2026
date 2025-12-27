@@ -99,7 +99,7 @@ impl<T: ByteCost> BoundedDeque<T> {
     /// Get iterator over items.
     #[allow(dead_code)]
     #[inline]
-    pub fn iter(&self) -> impl Iterator<Item = &T> {
+    pub fn iter(&self) -> impl Iterator<Item=&T> {
         self.q.iter()
     }
 
