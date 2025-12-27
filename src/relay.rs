@@ -1,4 +1,6 @@
-use crate::config::{MAX_QUEUE_SIZE, MAX_RECENT_RX_IDS, QUEUE_GROW_STEP, STARTING_QUEUE_SIZE, STARTING_RECENT_RX_IDS};
+use crate::config::{
+    MAX_QUEUE_SIZE, MAX_RECENT_RX_IDS, QUEUE_GROW_STEP, STARTING_QUEUE_SIZE, STARTING_RECENT_RX_IDS,
+};
 use crate::queue::{BoundedDeque, ByteCost};
 use crate::serialize;
 use crate::telemetry_packet::{hash_bytes_u64, TelemetryPacket};

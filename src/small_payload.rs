@@ -117,7 +117,6 @@ impl<const INLINE: usize> SmallPayload<INLINE> {
         }
     }
 
-
     /// Return the payload as a borrowed byte slice.
     #[inline]
     pub fn as_slice(&self) -> &[u8] {

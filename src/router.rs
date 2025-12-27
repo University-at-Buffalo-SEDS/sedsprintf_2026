@@ -16,7 +16,9 @@
 //! - De-duplication remains packet-id based and link-agnostic (same packet on another link
 //!   still dedupes).
 
-use crate::config::{MAX_QUEUE_SIZE, MAX_RECENT_RX_IDS, QUEUE_GROW_STEP, STARTING_QUEUE_SIZE, STARTING_RECENT_RX_IDS};
+use crate::config::{
+    MAX_QUEUE_SIZE, MAX_RECENT_RX_IDS, QUEUE_GROW_STEP, STARTING_QUEUE_SIZE, STARTING_RECENT_RX_IDS,
+};
 use crate::queue::{BoundedDeque, ByteCost};
 #[cfg(all(not(feature = "std"), target_os = "none"))]
 use crate::seds_error_msg;
