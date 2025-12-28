@@ -90,7 +90,7 @@ pub trait ReprI32Enum: Copy + Sized {
 macro_rules! impl_repr_i32_enum {
     ($ty:ty, $max:expr, $min:expr) => {
         // Compile-time size check for this concrete type.
-        const _: [(); size_of::<$ty>()] = [(); size_of::<u32>()];
+        const _: [(); size_of::<$ty>()] = [(); size_of::<i32>()];
 
         impl $crate::macros::ReprI32Enum for $ty {
             const MAX: i32 = $max;

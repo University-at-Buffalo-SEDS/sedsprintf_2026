@@ -465,11 +465,11 @@ pub fn header_size_bytes(pkt: &TelemetryPacket) -> usize {
         + uleb128_size(pkt.timestamp())
         + uleb128_size(sender_bytes.len() as u64)
         + if sender_compressed {
-            // extra varint for sender_wire_len when compressed
-            uleb128_size(sender_wire.len() as u64)
-        } else {
-            0
-        }
+        // extra varint for sender_wire_len when compressed
+        uleb128_size(sender_wire.len() as u64)
+    } else {
+        0
+    }
 }
 
 /// Compute the total wire size (header + bitmap + sender + payload) in bytes.
