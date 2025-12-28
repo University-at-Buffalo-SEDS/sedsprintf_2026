@@ -1,4 +1,6 @@
-use crate::config::{MAX_QUEUE_SIZE, MAX_RECENT_RX_IDS, QUEUE_GROW_STEP, STARTING_QUEUE_SIZE};
+use crate::config::{
+    MAX_QUEUE_SIZE, MAX_RECENT_RX_IDS, QUEUE_GROW_STEP, STARTING_QUEUE_SIZE, STARTING_RECENT_RX_IDS,
+};
 use crate::queue::{BoundedDeque, ByteCost};
 use crate::serialize;
 use crate::telemetry_packet::{hash_bytes_u64, TelemetryPacket};
@@ -95,7 +97,7 @@ impl Relay {
                 tx_queue: BoundedDeque::new(MAX_QUEUE_SIZE, STARTING_QUEUE_SIZE, QUEUE_GROW_STEP),
                 recent_rx: BoundedDeque::new(
                     MAX_RECENT_RX_IDS * size_of::<u64>(),
-                    MAX_RECENT_RX_IDS,
+                    STARTING_RECENT_RX_IDS * size_of::<u64>(),
                     QUEUE_GROW_STEP,
                 ),
             }),

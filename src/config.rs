@@ -35,8 +35,12 @@ pub const DEVICE_IDENTIFIER: &str = match option_env!("DEVICE_IDENTIFIER") {
 /// This value should be a power of two for optimal performance.
 pub const MAX_RECENT_RX_IDS: usize = 128;
 
-/// Starting size of the internal router and relay queues.
-pub const STARTING_QUEUE_SIZE: usize = 16;
+/// Starting number of recent received packet IDs to track for duplicate
+/// detection.
+pub const STARTING_RECENT_RX_IDS: usize = 32;
+
+/// Starting size of the internal router and relay queues in bytes.
+pub const STARTING_QUEUE_SIZE: usize = 64;
 
 /// Maximum size of the internal router and relay queues in Bytes.
 pub const MAX_QUEUE_SIZE: usize = 1024 * 50; // 50 KB

@@ -327,7 +327,8 @@ impl PyRouter {
 
         // Build transmit callback (NEW ROUTER API: (bytes, link))
         let tx_for_closure = tx_keep.as_ref().map(|p| p.clone_ref(py));
-        let transmit = tx_for_closure.map(|cb| move |bytes: &[u8], link: &LinkId| -> TelemetryResult<()> {
+        let transmit = tx_for_closure.map(|cb| {
+            move |bytes: &[u8], link: &LinkId| -> TelemetryResult<()> {
                 Python::attach(|py| {
                     let arg = PyBytes::new(py, bytes).into_any();
                     match call_py_cb_1_or_2(py, &cb, &arg, link) {
@@ -338,7 +339,8 @@ impl PyRouter {
                         }
                     }
                 })
-            });
+            }
+        });
 
         // Build endpoint handlers
         let mut handlers_vec = Vec::new();
@@ -460,7 +462,8 @@ impl PyRouter {
         let tx_for_closure = tx_keep.as_ref().map(|p| p.clone_ref(py));
 
         // Build TX closure (NEW ROUTER API: (bytes, link))
-        let transmit = tx_for_closure.map(|cb| move |bytes: &[u8], link: &LinkId| -> TelemetryResult<()> {
+        let transmit = tx_for_closure.map(|cb| {
+            move |bytes: &[u8], link: &LinkId| -> TelemetryResult<()> {
                 Python::attach(|py| {
                     let arg = PyBytes::new(py, bytes).into_any();
                     match call_py_cb_1_or_2(py, &cb, &arg, link) {
@@ -471,7 +474,8 @@ impl PyRouter {
                         }
                     }
                 })
-            });
+            }
+        });
 
         let mut handlers_vec = Vec::new();
         let mut keep_pkt = Vec::new();

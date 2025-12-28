@@ -16,7 +16,9 @@
 //! - De-duplication remains packet-id based and link-agnostic (same packet on another link
 //!   still dedupes).
 
-use crate::config::{MAX_QUEUE_SIZE, MAX_RECENT_RX_IDS, QUEUE_GROW_STEP, STARTING_QUEUE_SIZE};
+use crate::config::{
+    MAX_QUEUE_SIZE, MAX_RECENT_RX_IDS, QUEUE_GROW_STEP, STARTING_QUEUE_SIZE, STARTING_RECENT_RX_IDS,
+};
 use crate::queue::{BoundedDeque, ByteCost};
 #[cfg(all(not(feature = "std"), target_os = "none"))]
 use crate::seds_error_msg;
@@ -169,7 +171,7 @@ impl ByteCost for u64 {
 // -------------------- endpoint + board config --------------------
 /// Packet Handler function type
 type PacketHandlerFn =
-    dyn Fn(&TelemetryPacket, &LinkId) -> TelemetryResult<()> + Send + Sync + 'static;
+dyn Fn(&TelemetryPacket, &LinkId) -> TelemetryResult<()> + Send + Sync + 'static;
 
 /// Serialized Handler function type
 type SerializedHandlerFn = dyn Fn(&[u8], &LinkId) -> TelemetryResult<()> + Send + Sync + 'static;
@@ -529,7 +531,7 @@ impl Router {
                 ),
                 recent_rx: BoundedDeque::new(
                     MAX_RECENT_RX_IDS * size_of::<u64>(),
-                    MAX_RECENT_RX_IDS,
+                    STARTING_RECENT_RX_IDS * size_of::<u64>(),
                     QUEUE_GROW_STEP,
                 ),
             }),
@@ -538,6 +540,7 @@ impl Router {
     }
 
     /// Create a new Router with no transmit function (sink mode only).
+    #[inline]
     pub fn new_no_tx(
         mode: RouterMode,
         cfg: RouterConfig,
@@ -1116,10 +1119,10 @@ impl Router {
 
                 let has_serialized_local = !ignore_local
                     && pkt_ref
-                        .endpoints()
-                        .iter()
-                        .copied()
-                        .any(|ep| self.endpoint_has_serialized_handler(ep));
+                    .endpoints()
+                    .iter()
+                    .copied()
+                    .any(|ep| self.endpoint_has_serialized_handler(ep));
 
                 let send_remote = pkt_ref.endpoints().iter().any(|e| {
                     (!self.cfg.is_local_endpoint(*e)
@@ -1201,7 +1204,7 @@ impl Router {
                 if send_remote
                     && let Some(tx) = &self.transmit
                     && let Err(e) =
-                        self.retry(MAX_HANDLER_RETRIES, || tx(bytes_arc.as_ref(), &link))
+                    self.retry(MAX_HANDLER_RETRIES, || tx(bytes_arc.as_ref(), &link))
                 {
                     let _ = self.handle_callback_error_from_env(&env, None, e, &link);
                     return Err(TelemetryError::HandlerError("TX failed"));

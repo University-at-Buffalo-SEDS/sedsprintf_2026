@@ -6,6 +6,7 @@
 //!
 //! It derefs to `&[u8]`, so you can pass it anywhere a byte slice is expected.
 
+use crate::queue::ByteCost;
 use alloc::sync::Arc;
 use core::{fmt, mem::MaybeUninit, ops::Deref, ptr};
 
@@ -107,6 +108,15 @@ impl<const INLINE: usize> SmallPayload<INLINE> {
         }
     }
 
+    /// Byte cost of the payload (for use in byte-limited queues).
+    #[inline]
+    fn byte_cost(&self) -> usize {
+        match self {
+            SmallPayload::Inline { len, .. } => *len as usize,
+            SmallPayload::Heap(a) => a.len() + size_of::<Arc<[u8]>>(),
+        }
+    }
+
     /// Return the payload as a borrowed byte slice.
     #[inline]
     pub fn as_slice(&self) -> &[u8] {
@@ -204,5 +214,12 @@ impl<const INLINE: usize> PartialEq<Arc<[u8]>> for SmallPayload<INLINE> {
     #[inline]
     fn eq(&self, other: &Arc<[u8]>) -> bool {
         self.as_slice() == other.as_ref()
+    }
+}
+
+impl<const INLINE: usize> ByteCost for SmallPayload<INLINE> {
+    #[inline]
+    fn byte_cost(&self) -> usize {
+        self.byte_cost()
     }
 }

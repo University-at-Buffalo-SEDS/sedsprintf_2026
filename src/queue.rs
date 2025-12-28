@@ -1,4 +1,3 @@
-use crate::config::MAX_RECENT_RX_IDS;
 use crate::{TelemetryError, TelemetryResult};
 use alloc::collections::VecDeque;
 
@@ -54,11 +53,11 @@ impl<T: ByteCost> BoundedDeque<T> {
     /// - `max_elems` is derived conservatively from `size_of::<T>()` because
     ///   `ByteCost` is dynamic. This prevents runaway element counts even if
     ///   `byte_cost()` is small.
-    pub fn new(max_bytes: usize, starting_elems: usize, grow_mult: f64) -> Self {
-        if starting_elems > MAX_RECENT_RX_IDS {
+    pub fn new(max_bytes: usize, starting_bytes: usize, grow_mult: f64) -> Self {
+        if starting_bytes > max_bytes {
             panic!(
-                "starting_elems must be less than MAX_RECENT_RX_IDS ({}) to avoid conflicts",
-                MAX_RECENT_RX_IDS
+                "starting_bytes ({}) must be less than max_bytes ({}) to avoid conflicts",
+                starting_bytes, max_bytes
             );
         }
         if max_bytes == 0 {
@@ -69,7 +68,7 @@ impl<T: ByteCost> BoundedDeque<T> {
         }
         let min_cost = size_of::<T>().max(1);
         let max_elems = (max_bytes / min_cost).max(1);
-
+        let starting_elems = starting_bytes / min_cost;
         let start_cap = starting_elems.clamp(1, max_elems);
 
         let (grow_num, grow_den) = float_to_ratio(grow_mult);
@@ -100,7 +99,7 @@ impl<T: ByteCost> BoundedDeque<T> {
     /// Get iterator over items.
     #[allow(dead_code)]
     #[inline]
-    pub fn iter(&self) -> impl Iterator<Item = &T> {
+    pub fn iter(&self) -> impl Iterator<Item=&T> {
         self.q.iter()
     }
 

@@ -5,8 +5,8 @@ import os
 import re
 import shutil
 import subprocess
-from pathlib import Path
 import sys
+from pathlib import Path
 
 # The line pattern in .gitignore we want to temporarily comment out.
 # This is treated as a literal and turned into a whole-line regex.
@@ -223,21 +223,21 @@ def main(argv: list[str]) -> None:
 
     # ---- TEST MODE: also validate embedded + python builds ----
     if tests:
-        print ("--------------------------------------------")
+        print("--------------------------------------------")
         # 1) host tests
-        print ("Running Tests...")
-        print ("--------------------------------------------")
+        print("Running Tests...")
+        print("--------------------------------------------")
         run_cmd(["cargo", "test"])
-        print ("--------------------------------------------")
+        print("--------------------------------------------")
         # 2) host build (same feature) to ensure build passes even if tests were filtered
         print("Ensuring python build passes...")
         print("--------------------------------------------")
         run_cmd(["cargo", "build", "--features", "python"])
-        print ("--------------------------------------------")
+        print("--------------------------------------------")
 
         # 3) embedded build (always validate)
         print("Ensuring embedded build passes...")
-        print ("--------------------------------------------")
+        print("--------------------------------------------")
         embedded_target = target or "thumbv7em-none-eabihf"
         ensure_rust_target_installed(embedded_target)
 
@@ -253,7 +253,7 @@ def main(argv: list[str]) -> None:
             "--target", embedded_target,
             "--features", "embedded",
         ])
-        print ("--------------------------------------------")
+        print("--------------------------------------------")
 
         return
 
