@@ -1,394 +1,513 @@
 // build.rs
-use regex::Regex;
-use std::path::PathBuf;
-use std::process::Command;
-use std::{env, fs};
+//
+// Generates C header + Python .pyi enums directly from telemetry_config.json,
+// by *discovering the JSON path* from the Rust source that invokes:
+//
+//   define_telemetry_schema!(path = "telemetry_config.json");
+//
+// Also generates a C-friendly SedsResult enum from the TelemetryErrorCode enum
+// found in src/lib.rs.
+//
+// No cbindgen is used. No intermediate temp header is written.
+// Output:
+//   - C-Headers/sedsprintf.h                     (injects enums into template marker)
+//   - python-files/sedsprintf_rs/sedsprintf_rs.pyi (injects enums into template marker)
+//
+// Rebuild triggers:
+//   - src/config.rs (or overridden)
+//   - discovered telemetry_config.json
+//   - src/lib.rs (or overridden)
+//   - the header templates
+//
+// Optional env vars:
+//   - SEDSPRINTF_RS_SKIP_ENUMGEN=1          -> skip all enum generation
+//   - SEDSPRINTF_RS_CONFIG_RS=path/to.rs    -> override source file to scan (default: src/config.rs)
+//   - SEDSPRINTF_RS_LIB_RS=path/to.rs       -> override lib.rs to scan (default: src/lib.rs)
 
-fn main() {
-    ensure_rust_target_installed();
-    generate_c_header();
-    generate_pyi_stub();
+use regex::Regex;
+use serde::Deserialize;
+use std::collections::HashSet;
+use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+// ========================= JSON schema =========================
+
+#[derive(Debug, Deserialize)]
+struct TelemetryConfig {
+    endpoints: Vec<JsonEndpoint>,
+    types: Vec<JsonType>,
 }
 
-/// Ensure the current Cargo target triple has its std/core installed via rustup.
-///
-/// Reads the `TARGET` env var (set by Cargo), checks `rustup target list --installed`,
-/// and if the target is missing, runs `rustup target add <target>`.
-fn ensure_rust_target_installed() {
-    let target = match env::var("TARGET") {
-        Ok(t) => t,
-        Err(_) => {
-            // No target info, nothing to do.
-            return;
-        }
-    };
+#[derive(Debug, Deserialize)]
+struct JsonEndpoint {
+    /// Rust enum variant, e.g. "SdCard"
+    rust: String,
+    /// Schema string name, e.g. "SD_CARD" (ALL CAPS)
+    name: String,
+    /// Optional docstring for the enum variant
+    #[serde(default)]
+    doc: Option<String>,
+    /// Optional broadcast mode variant name, e.g. "Default"
+    #[serde(default)]
+    _broadcast_mode: Option<String>,
+}
 
-    // Best-effort: if rustup isn't available, bail with a clear message.
-    let list_output = Command::new("rustup")
-        .args(["target", "list", "--installed"])
-        .output()
-        .expect(
-            "Failed to run `rustup target list --installed` – is rustup installed and on PATH?",
-        );
+#[derive(Debug, Deserialize)]
+struct JsonType {
+    /// Rust enum variant, e.g. "TelemetryError"
+    rust: String,
+    /// Schema string name, e.g. "TELEMETRY_ERROR" (ALL CAPS)
+    name: String,
+    #[serde(default)]
+    doc: Option<String>,
 
-    if !list_output.status.success() {
-        panic!(
-            "Failed to list installed rustup targets:\n{}",
-            String::from_utf8_lossy(&list_output.stderr)
-        );
-    }
+    element: JsonElement,
+    class: String,
 
-    let installed = String::from_utf8_lossy(&list_output.stdout);
-    if installed.lines().any(|line| line.trim() == target) {
+    /// list of DataEndpoint rust variants, e.g. ["SdCard","Radio"]
+    endpoints: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind")]
+enum JsonElement {
+    Static { data_type: String },
+    Dynamic { data_type: String },
+}
+
+// ========================= main =========================
+
+fn main() {
+    if env::var_os("SEDSPRINTF_RS_SKIP_ENUMGEN").is_some() {
+        println!("cargo:warning=Skipping enum generation (SEDSPRINTF_RS_SKIP_ENUMGEN set)");
         return;
     }
 
-    let status = Command::new("rustup")
-        .args(["target", "add", &target])
-        .status()
-        .expect("Failed to run `rustup target add` – is rustup installed and on PATH?");
+    let crate_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
 
-    if !status.success() {
-        panic!(
-            "`rustup target add {}` failed with status: {}",
-            target, status
-        );
-    }
-}
+    let config_rs_rel =
+        env::var("SEDSPRINTF_RS_CONFIG_RS").unwrap_or_else(|_| "src/config.rs".to_string());
+    let config_rs_path = crate_dir.join(&config_rs_rel);
 
-// ========================= C HEADER =========================
+    let lib_rs_rel = env::var("SEDSPRINTF_RS_LIB_RS").unwrap_or_else(|_| "src/lib.rs".to_string());
+    let lib_rs_path = crate_dir.join(&lib_rs_rel);
 
-fn generate_c_header() {
-    // 1) Run cbindgen to a visible temp file
-    let crate_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
-    let out_dir = PathBuf::from(&crate_dir)
-        .join("target")
-        .join("cbindgen_out");
-    fs::create_dir_all(&out_dir).expect("create cbindgen_out");
-    let enums_tmp = out_dir.join("enums_raw.h");
+    // Rebuild triggers
+    println!("cargo:rerun-if-changed={}", config_rs_path.display());
+    println!("cargo:rerun-if-changed={}", lib_rs_path.display());
 
-    cbindgen::Builder::new()
-        .with_config(cbindgen::Config::from_root_or_default(&crate_dir))
-        .with_crate(&crate_dir)
-        .generate()
-        .expect("cbindgen failed")
-        .write_to_file(&enums_tmp);
+    // Discover schema json path by scanning config.rs for define_telemetry_schema!(path="...")
+    let schema_path = find_schema_path_from_config_rs(&config_rs_path, &crate_dir);
+    println!("cargo:rerun-if-changed={}", schema_path.display());
 
-    // 2) Load the generated header
-    let raw = fs::read_to_string(&enums_tmp).expect("read enums_raw.h");
-    if raw.trim().is_empty() {
-        panic!("cbindgen produced empty output at {}", enums_tmp.display());
-    }
+    // Templates: rebuild if they change
+    let header_tpl_path = crate_dir.join("header_templates/sedsprintf.h.txt");
+    let pyi_tpl_path = crate_dir.join("header_templates/sedsprintf_rs.pyi.txt");
+    println!("cargo:rerun-if-changed={}", header_tpl_path.display());
+    println!("cargo:rerun-if-changed={}", pyi_tpl_path.display());
 
-    // 3) Extract & transform the three enums
-    let dt = extract_enum(&raw, "DataType")
-        .map(|b| transform_enum_block(&b, "DataType", "SedsDataType", "SEDS_DT_"))
-        .unwrap_or_else(|| {
-            dump_excerpt(&raw, "DataType");
-            panic!("DataType not found in cbindgen output");
-        });
+    // Load + validate JSON schema
+    let cfg = load_schema_absolute(&schema_path);
+    validate_schema(&cfg);
 
-    let ep = extract_enum(&raw, "DataEndpoint")
-        .map(|b| transform_enum_block(&b, "DataEndpoint", "SedsDataEndpoint", "SEDS_EP_"))
-        .unwrap_or_else(|| {
-            dump_excerpt(&raw, "DataEndpoint");
-            panic!("DataEndpoint not found in cbindgen output");
-        });
+    // Parse TelemetryErrorCode from lib.rs into SedsResult members
+    let seds_result = parse_seds_result_from_lib_rs(&lib_rs_path);
 
-    let er = extract_enum(&raw, "TelemetryErrorCode")
-        .map(|b| transform_errors_enum_as_seds_result(&b))
-        .unwrap_or_else(|| {
-            dump_excerpt(&raw, "TelemetryErrorCode");
-            panic!("TelemetryErrorCode not found in cbindgen output");
-        });
+    // Generate C enums text
+    let (c_dt, c_ep) = render_c_enums(&cfg);
+    let c_sr = render_c_enum_seds_result(&seds_result);
 
-    let enums_joined = format!("{dt}\n\n{ep}\n\n{er}\n");
+    let c_enums_joined = format!("{c_dt}\n\n{c_ep}\n\n{c_sr}\n");
 
-    // 4) Load template, replace marker, write final header
-    let tpl_path = PathBuf::from(&crate_dir).join("header_templates/sedsprintf.h.txt");
-    let tpl = fs::read_to_string(&tpl_path)
-        .unwrap_or_else(|e| panic!("read template header {}: {e}", tpl_path.display()));
+    // Generate PYI enums text (DataType, DataEndpoint, SedsResult)
+    let pyi = render_pyi_enums(&cfg, &seds_result);
 
-    let marker = "/* {{AUTOGEN:ENUMS}} */";
-    if !tpl.contains(marker) {
-        panic!(
-            "Template {} is missing marker: {}",
-            tpl_path.display(),
-            marker
-        );
-    }
-
-    let final_text = tpl.replace(marker, &enums_joined);
-    let final_out = PathBuf::from(&crate_dir).join("C-Headers/sedsprintf.h");
-    fs::create_dir_all(final_out.parent().unwrap()).expect("create C-Headers/ failed");
-    fs::write(&final_out, final_text)
-        .unwrap_or_else(|e| panic!("write final header {}: {e}", final_out.display()));
-}
-
-// ========================= PYI STUB =========================
-
-fn generate_pyi_stub() {
-    let crate_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
-    let out_dir = PathBuf::from(&crate_dir)
-        .join("target")
-        .join("cbindgen_out");
-    let enums_tmp = out_dir.join("enums_raw.h");
-
-    // Ensure cbindgen was already run by generate_c_header()
-    if !enums_tmp.exists() {
-        panic!(
-            "Missing {}. Ensure generate_c_header runs before generate_pyi_stub.",
-            enums_tmp.display()
-        );
-    }
-    let raw = fs::read_to_string(&enums_tmp).expect("read enums_raw.h");
-
-    // Extract the two enums from raw cbindgen output (unprefixed names)
-    let dt_block = extract_enum(&raw, "DataType").unwrap_or_else(|| {
-        dump_excerpt(&raw, "DataType");
-        panic!("DataType not found for .pyi");
-    });
-    let ep_block = extract_enum(&raw, "DataEndpoint").unwrap_or_else(|| {
-        dump_excerpt(&raw, "DataEndpoint");
-        panic!("DataEndpoint not found for .pyi");
-    });
-
-    let dt_members = parse_enum_members(&dt_block); // Vec<(NAME, VALUE_TEXT)>
-    let ep_members = parse_enum_members(&ep_block);
-
-    let dt_enum_text = render_python_intenum(
-        "DataType",
-        r#"Wire-level type tags (generated to match Rust/config.rs)."#,
-        &dt_members,
+    // Inject into templates
+    write_injected(
+        &header_tpl_path,
+        "/* {{AUTOGEN:ENUMS}} */",
+        &crate_dir.join("C-Headers/sedsprintf.h"),
+        &c_enums_joined,
     );
 
-    let ep_enum_text = render_python_intenum(
-        "DataEndpoint",
-        r#"Routing endpoints for packets."#,
-        &ep_members,
+    write_injected(
+        &pyi_tpl_path,
+        "/* {{AUTOGEN:PY_ENUMS}} */",
+        &crate_dir
+            .join("python-files")
+            .join("sedsprintf_rs")
+            .join("sedsprintf_rs.pyi"),
+        &pyi,
     );
+}
 
-    let joined = format!("{dt_enum_text}\n\n{ep_enum_text}\n");
+// ========================= discovery =========================
 
-    // Load .pyi template and inject
-    let tpl_path = PathBuf::from(&crate_dir).join("header_templates/sedsprintf_rs.pyi.txt");
-    let tpl = fs::read_to_string(&tpl_path)
-        .unwrap_or_else(|e| panic!("read pyi template {}: {e}", tpl_path.display()));
-    let marker = "/* {{AUTOGEN:PY_ENUMS}} */";
-    if !tpl.contains(marker) {
+fn find_schema_path_from_config_rs(config_rs_path: &Path, crate_dir: &Path) -> PathBuf {
+    let text = fs::read_to_string(config_rs_path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", config_rs_path.display()));
+
+    // Matches across newlines; captures the string literal contents
+    // define_telemetry_schema!(path = "telemetry_config.json");
+    let re = Regex::new(r#"(?s)define_telemetry_schema!\s*\(\s*[^)]*?\bpath\s*=\s*"([^"]+)""#)
+        .expect("regex compile failed");
+
+    let mut it = re.captures_iter(&text);
+
+    let first = it.next().unwrap_or_else(|| {
         panic!(
-            "pyi template {} missing marker {}",
-            tpl_path.display(),
-            marker
+            "could not find define_telemetry_schema!(path = \"...\") in {}",
+            config_rs_path.display()
+        )
+    });
+
+    // If there are multiple, error (keeps build deterministic)
+    if it.next().is_some() {
+        panic!(
+            "multiple define_telemetry_schema!(path = \"...\") invocations found in {} (expected exactly one)",
+            config_rs_path.display()
         );
     }
 
-    let final_text = tpl.replace(marker, &joined);
-
-    // Write to an importable location inside the crate workspace
-    let out_pyi = PathBuf::from(&crate_dir)
-        .join("python-files")
-        .join("sedsprintf_rs")
-        .join("sedsprintf_rs.pyi");
-    fs::create_dir_all(out_pyi.parent().unwrap()).expect("create python_bindings/");
-    fs::write(&out_pyi, final_text).unwrap_or_else(|e| panic!("write {}: {e}", out_pyi.display()));
+    let rel = first.get(1).unwrap().as_str();
+    crate_dir.join(rel)
 }
 
-// ========================= Helpers (shared) =========================
+// ========================= load / validate =========================
 
-/// Extract `typedef enum [Name]? { ... } Name;` OR `enum Name { ... };`.
-/// If only the plain form exists, rebuild a typedef-style block.
-fn extract_enum(input: &str, name: &str) -> Option<String> {
-    let pat_typedef = format!(r"(?s)typedef\s+enum(?:\s+{name})?\s*\{{(.*?)\}}\s+{name}\s*;");
-    let re_typedef = Regex::new(&pat_typedef).ok()?;
-    if let Some(caps) = re_typedef.captures(input) {
-        let full = caps.get(0)?.as_str().to_string();
-        return Some(full);
-    }
+fn load_schema_absolute(path: &Path) -> TelemetryConfig {
+    let bytes = fs::read(path)
+        .unwrap_or_else(|e| panic!("failed to read telemetry schema {}: {e}", path.display()));
 
-    let pat_plain = format!(r"(?s)\benum\s+{name}\s*\{{(.*?)\}}\s*;");
-    let re_plain = Regex::new(&pat_plain).ok()?;
-    if let Some(caps) = re_plain.captures(input) {
-        let body = caps.get(1)?.as_str();
-        let rebuilt = format!("typedef enum {name} {{\n{body}\n}} {name};");
-        return Some(rebuilt);
-    }
-
-    None
+    serde_json::from_slice::<TelemetryConfig>(&bytes).unwrap_or_else(|e| {
+        panic!(
+            "failed to parse telemetry schema {} as JSON: {e}",
+            path.display()
+        )
+    })
 }
 
-/// Generic transformer used for DataType/DataEndpoint:
-fn transform_enum_block(
-    block: &str,
-    old_type: &str,
-    new_type: &str,
-    variant_prefix: &str,
-) -> String {
-    let mut s = block.replace(&format!("}} {};", old_type), &format!("}} {};", new_type));
-    if let (Some(l), Some(r)) = (s.find('{'), s.rfind('}')) {
-        let body = &s[(l + 1)..r];
-        let new_body = body
-            .lines()
-            .map(|line| {
-                if let Some((lead, rest)) = split_leading_ws(line)
-                    && let Some(id) = rest.split([' ', '=', ',']).next()
-                    && !id.is_empty()
-                    && id.chars().all(|c| c.is_ascii_uppercase() || c == '_')
-                {
-                    if rest.trim_start().starts_with(variant_prefix) {
-                        return line.to_string();
-                    }
-                    return format!("{lead}{}{}", variant_prefix, rest);
-                }
-
-                line.to_string()
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        s = format!("{}{{\n{}\n}} {};", &s[..l], new_body, new_type);
+fn validate_schema(cfg: &TelemetryConfig) {
+    if cfg.endpoints.is_empty() {
+        panic!("telemetry_config.json: endpoints is empty");
     }
-    s
-}
-
-/// Specialized transformer for TelemetryErrorCode -> SedsResult
-fn transform_errors_enum_as_seds_result(block: &str) -> String {
-    let (l, r) = match (block.find('{'), block.rfind('}')) {
-        (Some(l), Some(r)) => (l, r),
-        _ => {
-            return String::from(
-                "typedef enum SedsResult { SEDS_OK = 0, SEDS_ERR = -1, } SedsResult;",
-            );
-        }
-    };
-    let body = &block[(l + 1)..r];
-
-    let mut lines = Vec::new();
-    for line in body.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if let Some((lead, rest)) = split_leading_ws(line)
-            && let Some(id) = rest.split([' ', '=', ',']).next()
-            && !id.is_empty()
-            && id
-            .chars()
-            .all(|c| c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit())
-        {
-            let prefixed = if rest.trim_start().starts_with("SEDS_") {
-                rest.to_string()
-            } else {
-                format!("SEDS_{}", rest)
-            };
-
-            lines.push(format!("{lead}{prefixed}"));
-            continue;
-        }
-
-        lines.push(line.to_string());
+    if cfg.types.is_empty() {
+        panic!("telemetry_config.json: types is empty");
     }
 
-    let mut injected = Vec::new();
-    if !lines.iter().any(|l| l.contains("SEDS_OK")) {
-        injected.push(String::from("  SEDS_OK = 0,"));
+    // Ensure schema names are ALL CAPS (or underscore/digit).
+    for ep in &cfg.endpoints {
+        ensure_rust_ident(&ep.rust, "endpoints[].rust");
+        ensure_all_caps(&ep.name, "endpoints[].name");
     }
-    if !lines.iter().any(|l| l.contains("SEDS_ERR")) {
-        injected.push(String::from("  SEDS_ERR = -1,"));
-    }
-    if !injected.is_empty() {
-        injected.push(String::from(""));
-    }
-    injected.extend(lines);
 
-    format!(
-        "typedef enum SedsResult {{\n\n{}\n\n}} SedsResult;",
-        injected.join("\n")
-    )
-}
+    let endpoint_set: HashSet<&str> = cfg.endpoints.iter().map(|e| e.rust.as_str()).collect();
 
-/// Parse enum body into (NAME, VALUE_TEXT) pairs. Keeps values verbatim (e.g., "= 5", " = -2").
-fn parse_enum_members(block: &str) -> Vec<(String, String)> {
-    let (l, r) = match (block.find('{'), block.rfind('}')) {
-        (Some(l), Some(r)) => (l, r),
-        _ => return Vec::new(),
-    };
-    let body = &block[(l + 1)..r];
-    let mut out = Vec::new();
+    for ty in &cfg.types {
+        ensure_rust_ident(&ty.rust, "types[].rust");
+        ensure_all_caps(&ty.name, "types[].name");
 
-    for line in body.lines() {
-        let t = line.trim();
-        if t.is_empty() || t.starts_with("/*") || t.starts_with("//") {
-            continue;
-        }
-
-        // Grab "IDENT [= VALUE] ," at start of line
-        if let Some((_, rest)) = split_leading_ws(line) {
-            let ident = rest.split([' ', '=', ',']).next().unwrap_or("").trim();
-            if ident.is_empty() || !ident.chars().all(|c| c.is_ascii_uppercase() || c == '_') {
-                continue;
+        // Ensure referenced endpoints exist
+        for eprust in &ty.endpoints {
+            if !endpoint_set.contains(eprust.as_str()) {
+                panic!(
+                    "telemetry_config.json: type {} ({}) references unknown endpoint {:?}. Valid endpoints: {:?}",
+                    ty.rust,
+                    ty.name,
+                    eprust,
+                    cfg.endpoints
+                        .iter()
+                        .map(|e| e.rust.as_str())
+                        .collect::<Vec<_>>()
+                );
             }
+        }
 
-            // Snip out the "= value" if present
-            let after_ident = &rest[rest.find(ident).unwrap() + ident.len()..];
-            let value = if let Some(eq_pos) = after_ident.find('=') {
-                // "= ...", stop at comma if any
-                let after_eq = after_ident[eq_pos..].trim(); // starts with '='
-                let val_only = if let Some(cpos) = after_eq.find(',') {
-                    &after_eq[..cpos]
-                } else {
-                    after_eq
-                };
-                val_only.trim().to_string() // e.g., "= 3"
-            } else {
-                String::new() // no explicit value
-            };
+        // Sanity check element datatype + class
+        match &ty.element {
+            JsonElement::Static { data_type } | JsonElement::Dynamic { data_type } => {
+                if data_type.trim().is_empty() {
+                    panic!(
+                        "telemetry_config.json: types[{}].element.data_type is empty",
+                        ty.rust
+                    );
+                }
+            }
+        }
+        if ty.class.trim().is_empty() {
+            panic!("telemetry_config.json: types[{}].class is empty", ty.rust);
+        }
+    }
+}
 
-            out.push((ident.to_string(), value));
+fn ensure_rust_ident(s: &str, field: &str) {
+    let re = Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").unwrap();
+    if !re.is_match(s) {
+        panic!("telemetry_config.json: {field} must be a valid Rust identifier, got {s:?}");
+    }
+}
+
+fn ensure_all_caps(s: &str, field: &str) {
+    let ok = s
+        .chars()
+        .all(|c| c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit());
+    if !ok {
+        panic!("telemetry_config.json: {field} must be ALL CAPS (A-Z, 0-9, _), got {s:?}");
+    }
+}
+
+// ========================= lib.rs -> SedsResult =========================
+
+#[derive(Debug, Clone)]
+struct SedsResultEnum {
+    // name -> value (i64)
+    members: Vec<(String, i64)>, // (NAME, VALUE)
+}
+
+/// Parse TelemetryErrorCode from lib.rs and build a SedsResult enum mapping.
+/// Rules:
+/// - Includes all TelemetryErrorCode variants as SEDS_<NAME> with same numeric value.
+/// - Ensures SEDS_OK = 0 exists (injected if missing).
+/// - Ensures SEDS_ERR = -1 exists (injected if missing).
+fn parse_seds_result_from_lib_rs(lib_rs_path: &Path) -> SedsResultEnum {
+    let text = fs::read_to_string(lib_rs_path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", lib_rs_path.display()));
+
+    let re_enum = Regex::new(r#"(?s)\bpub\s+enum\s+TelemetryErrorCode\s*\{(.*?)\}"#)
+        .expect("regex compile failed");
+
+    let caps = re_enum.captures(&text).unwrap_or_else(|| {
+        panic!(
+            "could not find `pub enum TelemetryErrorCode {{ ... }}` in {}",
+            lib_rs_path.display()
+        )
+    });
+
+    let body = caps.get(1).unwrap().as_str();
+
+    let re_member = Regex::new(r#"(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([-]?\d+)\s*,?\s*$"#)
+        .expect("regex compile failed");
+
+    let mut members: Vec<(String, i64)> = Vec::new();
+
+    for m in re_member.captures_iter(body) {
+        let rust_name = m.get(1).unwrap().as_str();
+        let val: i64 = m.get(2).unwrap().as_str().parse().unwrap();
+        let c_name = format!("SEDS_{}", to_screaming_snake(rust_name));
+        members.push((c_name, val));
+    }
+
+    if members.is_empty() {
+        panic!(
+            "TelemetryErrorCode enum found, but no explicit `Variant = <int>` members were parsed in {}",
+            lib_rs_path.display()
+        );
+    }
+
+    // Inject SEDS_OK=0 and SEDS_ERR=-1 if missing
+    let has_ok = members.iter().any(|(n, _)| n == "SEDS_OK");
+    let has_err = members.iter().any(|(n, _)| n == "SEDS_ERR");
+    if !has_ok {
+        members.push(("SEDS_OK".to_string(), 0));
+    }
+    if !has_err {
+        members.push(("SEDS_ERR".to_string(), -1));
+    }
+
+    // Dedup by name (keep first), then sort by value descending (0, -1, -2, ...)
+    {
+        use std::collections::HashSet;
+        let mut seen = HashSet::new();
+        members.retain(|(n, _)| seen.insert(n.clone()));
+    }
+
+    members.sort_by(|(na, va), (nb, vb)| {
+        // primary: value descending
+        vb.cmp(va)
+            // secondary: name ascending (stable-ish)
+            .then_with(|| na.cmp(nb))
+    });
+
+    SedsResultEnum { members }
+}
+
+fn to_screaming_snake(s: &str) -> String {
+    // Simple PascalCase/camelCase -> SCREAMING_SNAKE.
+    // Good enough for your variant names like GenericError, InvalidType, SizeMismatchError...
+    let mut out = String::new();
+    let mut prev_lower_or_digit = false;
+
+    for ch in s.chars() {
+        if ch.is_ascii_uppercase() {
+            if prev_lower_or_digit {
+                out.push('_');
+            }
+            out.push(ch);
+            prev_lower_or_digit = false;
+        } else if ch.is_ascii_lowercase() {
+            out.push(ch.to_ascii_uppercase());
+            prev_lower_or_digit = true;
+        } else if ch.is_ascii_digit() {
+            if !out.ends_with('_') && !out.is_empty() && !prev_lower_or_digit {
+                // usually not needed; keep conservative
+            }
+            out.push(ch);
+            prev_lower_or_digit = true;
+        } else {
+            // skip unexpected chars
         }
     }
 
-    out
+    if out.is_empty() {
+        "UNKNOWN".to_string()
+    } else {
+        out
+    }
 }
 
-fn render_python_intenum(name: &str, doc: &str, members: &[(String, String)]) -> String {
-    // Build a quick lookup for per-member comment text
-    let per_member_doc = std::collections::HashMap::<&str, &str>::new();
+// ========================= render C enums =========================
 
+fn render_c_enums(cfg: &TelemetryConfig) -> (String, String) {
+    let dt = render_c_enum_datatype(cfg);
+    let ep = render_c_enum_endpoint(cfg);
+    (dt, ep)
+}
+
+fn render_c_enum_datatype(cfg: &TelemetryConfig) -> String {
+    let mut lines = Vec::new();
+    lines.push("typedef enum SedsDataType {".to_string());
+
+    // Sequential discriminants from 0, in the JSON order
+    for (i, ty) in cfg.types.iter().enumerate() {
+        // TELEMETRY_ERROR -> SEDS_DT_TELEMETRY_ERROR
+        let name = format!("SEDS_DT_{}", ty.name);
+        let doc = ty.doc.as_deref().unwrap_or("").trim();
+
+        if !doc.is_empty() {
+            lines.push(format!("  /* {} */", sanitize_c_comment(doc)));
+        }
+        lines.push(format!("  {name} = {i},"));
+    }
+
+    lines.push("} SedsDataType;".to_string());
+    lines.join("\n")
+}
+
+fn render_c_enum_endpoint(cfg: &TelemetryConfig) -> String {
+    let mut lines = Vec::new();
+    lines.push("typedef enum SedsDataEndpoint {".to_string());
+
+    for (i, ep) in cfg.endpoints.iter().enumerate() {
+        // SD_CARD -> SEDS_EP_SD_CARD
+        let name = format!("SEDS_EP_{}", ep.name);
+        let doc = ep.doc.as_deref().unwrap_or("").trim();
+
+        if !doc.is_empty() {
+            lines.push(format!("  /* {} */", sanitize_c_comment(doc)));
+        }
+        lines.push(format!("  {name} = {i},"));
+    }
+
+    lines.push("} SedsDataEndpoint;".to_string());
+    lines.join("\n")
+}
+
+fn render_c_enum_seds_result(sr: &SedsResultEnum) -> String {
+    let mut lines = Vec::new();
+    lines.push("typedef enum SedsResult {".to_string());
+
+    for (name, val) in &sr.members {
+        lines.push(format!("  {name} = {val},"));
+    }
+
+    lines.push("} SedsResult;".to_string());
+    lines.join("\n")
+}
+
+fn sanitize_c_comment(s: &str) -> String {
+    s.replace("*/", "* /")
+}
+
+// ========================= render PYI enums =========================
+
+fn render_pyi_enums(cfg: &TelemetryConfig, sr: &SedsResultEnum) -> String {
+    // This assumes your template already imports IntEnum, etc.
+    let dt = render_python_intenum(
+        "DataType",
+        "Wire-level type tags (generated from telemetry_config.json).",
+        cfg.types
+            .iter()
+            .enumerate()
+            .map(|(i, t)| (t.name.as_str(), i as i64, t.doc.as_deref().unwrap_or("")))
+            .collect::<Vec<_>>(),
+    );
+
+    let ep = render_python_intenum(
+        "DataEndpoint",
+        "Routing endpoints for packets (generated from telemetry_config.json).",
+        cfg.endpoints
+            .iter()
+            .enumerate()
+            .map(|(i, e)| (e.name.as_str(), i as i64, e.doc.as_deref().unwrap_or("")))
+            .collect::<Vec<_>>(),
+    );
+
+    let sr_members = sr
+        .members
+        .iter()
+        .map(|(name, val)| (name.as_str(), *val, ""))
+        .collect::<Vec<_>>();
+
+    let sr_txt = render_python_intenum(
+        "SedsResult",
+        "Result/error codes (generated from TelemetryErrorCode).",
+        sr_members,
+    );
+
+    format!("{dt}\n\n{ep}\n\n{sr_txt}\n")
+}
+
+fn render_python_intenum(name: &str, doc: &str, members: Vec<(&str, i64, &str)>) -> String {
     let mut lines = Vec::new();
     lines.push(format!("class {name}(IntEnum):"));
     lines.push(format!("    \"\"\"{doc}\"\"\""));
 
-    for (ident, valtxt) in members {
-        let rhs = if valtxt.is_empty() {
-            String::from("...  # (value assigned at runtime)")
+    for (ident, value, member_doc) in members {
+        if member_doc.trim().is_empty() {
+            lines.push(format!("    {ident}: int = {value}"));
         } else {
-            valtxt.trim_start_matches('=').trim().to_string()
-        };
-        let comment = per_member_doc
-            .get(ident.as_str())
-            .map(|c| format!("  #: {}", c))
-            .unwrap_or_default();
-        lines.push(format!("    {ident}: int = {rhs}{comment}"));
+            lines.push(format!(
+                "    {ident}: int = {value}  #: {}",
+                member_doc.trim()
+            ));
+        }
     }
 
     lines.join("\n")
 }
 
-fn split_leading_ws(s: &str) -> Option<(&str, &str)> {
-    let n = s.chars().take_while(|c| c.is_whitespace()).count();
-    Some(s.split_at(n))
-}
+// ========================= template injection =========================
 
-fn dump_excerpt(raw: &str, want: &str) {
-    if let Some(i) = raw.find(want) {
-        let start = i.saturating_sub(200);
-        let end = (i + 200).min(raw.len());
-        let excerpt = &raw[start..end];
-        eprintln!("cargo:warning=Excerpt around `{}`:\n{}", want, excerpt);
-    } else {
-        eprintln!(
-            "cargo:warning=`{}` not found anywhere in cbindgen output",
-            want
+fn write_injected(template_path: &Path, marker: &str, out_path: &Path, injected: &str) {
+    let tpl = fs::read_to_string(template_path)
+        .unwrap_or_else(|e| panic!("read template {} failed: {e}", template_path.display()));
+
+    if !tpl.contains(marker) {
+        panic!(
+            "template {} is missing marker: {}",
+            template_path.display(),
+            marker
         );
     }
+
+    let final_text = tpl.replace(marker, injected);
+
+    if let Some(parent) = out_path.parent() {
+        fs::create_dir_all(parent)
+            .unwrap_or_else(|e| panic!("create dir {} failed: {e}", parent.display()));
+    }
+
+    fs::write(out_path, final_text)
+        .unwrap_or_else(|e| panic!("write {} failed: {e}", out_path.display()));
 }
