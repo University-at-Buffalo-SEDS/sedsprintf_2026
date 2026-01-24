@@ -10,13 +10,27 @@ set(SEDSPRINTF_RS_DIR "${SEDSPRINTF_RS_DIR_DEFAULT}" CACHE PATH "Path to sedspri
 get_filename_component(RUST_DIR "${SEDSPRINTF_RS_DIR}" REALPATH)
 
 # ============================================================
-# Device identifier override for Rust (passed to build.py)
+# Config overrides forwarded into the Rust build (via build.py)
 # ============================================================
+
+# Device identifier override for Rust (passed to build.py)
 set(SEDSPRINTF_RS_DEVICE_IDENTIFIER "" CACHE STRING
     "Override DEVICE_IDENTIFIER passed to build.py (empty = use default)")
 
+# New: proc-macro env var (define_stack_payload!(env = \"MAX_STACK_PAYLOAD\", default = ...))
+set(SEDSPRINTF_RS_MAX_STACK_PAYLOAD "" CACHE STRING
+    "Override MAX_STACK_PAYLOAD used by define_stack_payload! (empty = use macro default)")
+
+# For each env var you want to set, define a CMake var named:
+#   SEDSPRINTF_RS_ENV_<ENVKEY>
+# Example:
+#   set(SEDSPRINTF_RS_ENV_MAX_QUEUE_SIZE "65536" CACHE STRING "" FORCE)
+#
+# These will be forwarded as build.py args: env:ENVKEY=VALUE
+
+# ============================================================
 # Detect embedded build
-# Option: allow user/parent to force embedded on/off
+# ============================================================
 option(SEDSPRINTF_EMBEDDED_BUILD "Build sedsprintf_rs for embedded" OFF)
 
 # Auto-detect embedded if user hasn't forced it
@@ -64,7 +78,7 @@ set(RS_INCLUDE "${RUST_DIR}/C-Headers")
 set(RS_HEADER "${RS_INCLUDE}/sedsprintf.h")
 
 # ============================================================
-# Build-time args (for logging only)
+# Build.py args (for logging only)
 # ============================================================
 set(RS_ARGS_STR "")
 if (SEDSPRINTF_EMBEDDED_BUILD)
@@ -76,25 +90,56 @@ endif ()
 if (NOT SEDSPRINTF_RS_DEVICE_IDENTIFIER STREQUAL "")
     set(RS_ARGS_STR "${RS_ARGS_STR} device_id=${SEDSPRINTF_RS_DEVICE_IDENTIFIER}")
 endif ()
+if (NOT SEDSPRINTF_RS_MAX_STACK_PAYLOAD STREQUAL "")
+    set(RS_ARGS_STR "${RS_ARGS_STR} max_stack_payload=${SEDSPRINTF_RS_MAX_STACK_PAYLOAD}")
+endif ()
+
+# Show release in log string
 set(RS_ARG_REL " $<$<CONFIG:Release>:release>")
 set(RS_ARGS_STR "${RS_ARGS_STR} ${RS_ARG_REL}")
 
 # ============================================================
-# Configure-time args passed to build.py
+# Configure-time args passed to build.py (list form)
 # ============================================================
 set(RS_ARGS_BOOTSTRAP "")
+
 if (SEDSPRINTF_EMBEDDED_BUILD)
     list(APPEND RS_ARGS_BOOTSTRAP "embedded")
 endif ()
+
 if (NOT RUST_TRIPLE STREQUAL "")
     list(APPEND RS_ARGS_BOOTSTRAP "target=${RUST_TRIPLE}")
 endif ()
+
+# NOTE: When using multi-config generators (VS/Xcode), CMAKE_BUILD_TYPE is empty.
+# We rely on the build step to rebuild as needed anyway; default to Debug.
 if (CMAKE_BUILD_TYPE STREQUAL "Release")
     list(APPEND RS_ARGS_BOOTSTRAP "release")
 endif ()
+
 if (NOT SEDSPRINTF_RS_DEVICE_IDENTIFIER STREQUAL "")
     list(APPEND RS_ARGS_BOOTSTRAP "device_id=${SEDSPRINTF_RS_DEVICE_IDENTIFIER}")
 endif ()
+
+# New: forward proc-macro env var
+if (NOT SEDSPRINTF_RS_MAX_STACK_PAYLOAD STREQUAL "")
+    list(APPEND RS_ARGS_BOOTSTRAP "max_stack_payload=${SEDSPRINTF_RS_MAX_STACK_PAYLOAD}")
+endif ()
+
+# New: forward arbitrary option_env config vars: SEDSPRINTF_RS_ENV_<KEY> => env:KEY=VALUE
+get_cmake_property(_all_cache_vars CACHE_VARIABLES)
+foreach (_v ${_all_cache_vars})
+    if (_v MATCHES "^SEDSPRINTF_RS_ENV_(.+)$")
+        string(REGEX REPLACE "^SEDSPRINTF_RS_ENV_" "" _env_key "${_v}")
+        # Value comes from the cache variable
+        set(_env_val "${${_v}}")
+        if (NOT _env_val STREQUAL "")
+            list(APPEND RS_ARGS_BOOTSTRAP "env:${_env_key}=${_env_val}")
+            # Also append to logging string
+            set(RS_ARGS_STR "${RS_ARGS_STR} env:${_env_key}=${_env_val}")
+        endif ()
+    endif ()
+endforeach ()
 
 # Ensure include dir exists
 file(MAKE_DIRECTORY "${RS_INCLUDE}")
@@ -177,3 +222,4 @@ set(SEDSPRINTF_RS_INCLUDE_DIR "${RS_INCLUDE}" PARENT_SCOPE)
 message(STATUS "sedsprintf_rs include dir: ${RS_INCLUDE}")
 message(STATUS "sedsprintf_rs debug lib:  ${RS_LIB_DBG}")
 message(STATUS "sedsprintf_rs release lib:${RS_LIB_REL}")
+message(STATUS "sedsprintf_rs build args: ${RS_ARGS_STR}")

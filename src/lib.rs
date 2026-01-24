@@ -141,6 +141,134 @@ impl_repr_u32_enum!(DataType, MAX_VALUE_DATA_TYPE);
 /// Implement `ReprU32Enum` helpers for `DataEndpoint`.
 impl_repr_u32_enum!(DataEndpoint, MAX_VALUE_DATA_ENDPOINT);
 
+#[inline]
+const fn parse_usize(s: &str) -> usize {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    let mut val = 0;
+
+    while i < bytes.len() {
+        let c = bytes[i];
+        if c < b'0' || c > b'9' {
+            panic!("Invalid digit");
+        }
+        val = val * 10 + (c - b'0') as usize;
+        i += 1;
+    }
+    val
+}
+
+#[inline]
+pub const fn parse_f64(s: &str) -> f64 {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+
+    if bytes.is_empty() {
+        panic!("empty string");
+    }
+
+    // sign
+    let mut sign = 1.0;
+    if bytes[i] == b'-' {
+        sign = -1.0;
+        i += 1;
+    } else if bytes[i] == b'+' {
+        i += 1;
+    }
+
+    let mut int_part: f64 = 0.0;
+    let mut has_digits = false;
+
+    while i < bytes.len() && bytes[i] >= b'0' && bytes[i] <= b'9' {
+        int_part = int_part * 10.0 + (bytes[i] - b'0') as f64;
+        i += 1;
+        has_digits = true;
+    }
+
+    let mut frac_part: f64 = 0.0;
+    let mut scale: f64 = 1.0;
+
+    if i < bytes.len() && bytes[i] == b'.' {
+        i += 1;
+
+        while i < bytes.len() && bytes[i] >= b'0' && bytes[i] <= b'9' {
+            scale *= 10.0;
+            frac_part += (bytes[i] - b'0') as f64 / scale;
+            i += 1;
+            has_digits = true;
+        }
+    }
+
+    if !has_digits || i != bytes.len() {
+        panic!("invalid f64 literal");
+    }
+
+    sign * (int_part + frac_part)
+}
+
+#[inline(always)]
+const fn parse_strings(s: &str) -> &str {
+    s
+}
+
+#[inline]
+pub const fn parse_u8(s: &str) -> u8 {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    let mut val: u16 = 0;
+
+    if bytes.is_empty() {
+        panic!("empty string");
+    }
+
+    while i < bytes.len() {
+        let c = bytes[i];
+        if c < b'0' || c > b'9' {
+            panic!("invalid digit in u8");
+        }
+
+        val = val * 10 + (c - b'0') as u16;
+        if val > 255 {
+            panic!("u8 overflow");
+        }
+
+        i += 1;
+    }
+
+    val as u8
+}
+
+#[inline]
+pub const fn parse_u128(s: &str) -> u128 {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    let mut val: u128 = 0;
+
+    if bytes.is_empty() {
+        panic!("empty string");
+    }
+
+    while i < bytes.len() {
+        let c = bytes[i];
+        if c < b'0' || c > b'9' {
+            panic!("invalid digit in u128");
+        }
+
+        let digit = (c - b'0') as u128;
+
+        // Overflow check: val*10 + digit <= u128::MAX
+        // i.e. val <= (u128::MAX - digit) / 10
+        if val > (u128::MAX - digit) / 10 {
+            panic!("u128 overflow");
+        }
+
+        val = val * 10 + digit;
+        i += 1;
+    }
+
+    val
+}
+
 // ============================================================================
 //  Message metadata (element counts, data types, sizes)
 // ============================================================================
