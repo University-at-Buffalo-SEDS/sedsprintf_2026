@@ -1,0 +1,180 @@
+{
+  "endpoints": [
+    {
+      "rust": "SdCard",
+      "name": "SD_CARD",
+      "doc": "On-board storage (e.g. SD card / flash).",
+      "broadcast_mode": "Default"
+    },
+    {
+      "rust": "GroundStation",
+      "name": "GROUND_STATION",
+      "doc": "",
+      "broadcast_mode": "Default"
+    },
+    {
+      "rust": "FlightController",
+      "name": "FLIGHT_CONTROLLER",
+      "doc": "",
+      "broadcast_mode": "Default"
+    },
+    {
+      "rust": "ValveBoard",
+      "name": "VALVE_BOARD",
+      "doc": "",
+      "broadcast_mode": "Default"
+    },
+    {
+      "rust": "Abort",
+      "name": "ABORT",
+      "doc": "",
+      "broadcast_mode": "Always"
+    }
+  ],
+  "types": [
+    {
+      "rust": "TelemetryError",
+      "name": "TELEMETRY_ERROR",
+      "doc": "Telemetry Error: Dynamic string payload (human-readable error message).",
+      "class": "Error",
+      "element": { "kind": "Dynamic", "data_type": "String" },
+      "endpoints": ["SdCard", "GroundStation"]
+    },
+    {
+      "rust": "GenericError",
+      "name": "GENERIC_ERROR",
+      "doc": "Generic Error: Dynamic string payload (human-readable error message).",
+      "class": "Error",
+      "element": { "kind": "Dynamic", "data_type": "String" },
+      "endpoints": ["SdCard", "GroundStation"]
+    },
+    {
+      "rust": "GpsData",
+      "name": "GPS_DATA",
+      "doc": "GPS Data: 2 × float32 elements (latitude, longitude).",
+      "class": "Data",
+      "element": { "kind": "Static", "count": 2, "data_type": "Float32" },
+      "endpoints": ["GroundStation", "SdCard", "FlightController"]
+    },
+    {
+      "rust": "KalmanFilterData",
+      "name": "KALMAN_FILTER_DATA",
+      "doc": "Kalman Filter Data: 3 × float32 elements.",
+      "class": "Data",
+      "element": { "kind": "Static", "count": 3, "data_type": "Float32" },
+      "endpoints": ["GroundStation", "SdCard"]
+    },
+    {
+      "rust": "GyroData",
+      "name": "GYRO_DATA",
+      "doc": "Gyro Data: 3 × float32 elements (x, y, z).",
+      "class": "Data",
+      "element": { "kind": "Static", "count": 3, "data_type": "Float32" },
+      "endpoints": ["SdCard", "GroundStation"]
+    },
+    {
+      "rust": "AccelData",
+      "name": "ACCEL_DATA",
+      "doc": "Accel Data: 3 × float32 elements (x, y, z).",
+      "class": "Data",
+      "element": { "kind": "Static", "count": 3, "data_type": "Float32" },
+      "endpoints": ["GroundStation", "SdCard"]
+    },
+    {
+      "rust": "BatteryVoltage",
+      "name": "BATTERY_VOLTAGE",
+      "doc": "Battery Voltage: 1 × float32 element.",
+      "class": "Data",
+      "element": { "kind": "Static", "count": 1, "data_type": "Float32" },
+      "endpoints": ["GroundStation", "SdCard"]
+    },
+    {
+      "rust": "BatteryCurrent",
+      "name": "BATTERY_CURRENT",
+      "doc": "Battery Current: 1 × float32 element.",
+      "class": "Data",
+      "element": { "kind": "Static", "count": 1, "data_type": "Float32" },
+      "endpoints": ["GroundStation", "SdCard"]
+    },
+    {
+      "rust": "BarometerData",
+      "name": "BAROMETER_DATA",
+      "doc": "Barometer Data: 3 × float32 elements.",
+      "class": "Data",
+      "element": { "kind": "Static", "count": 3, "data_type": "Float32" },
+      "endpoints": ["GroundStation", "SdCard"]
+    },
+    {
+      "rust": "Abort",
+      "name": "ABORT",
+      "doc": "Abort: Dynamic string payload (reason / code / message).",
+      "class": "Error",
+      "element": { "kind": "Dynamic", "data_type": "String" },
+      "endpoints": ["Abort"]
+    },
+    {
+      "rust": "FuelFlow",
+      "name": "FUEL_FLOW",
+      "doc": "Fuel Flow: 1 × float32 element.",
+      "class": "Data",
+      "element": { "kind": "Static", "count": 1, "data_type": "Float32" },
+      "endpoints": ["GroundStation", "SdCard"]
+    },
+    {
+      "rust": "ValveCommand",
+      "name": "VALVE_COMMAND",
+      "doc": "Valve Command: 1 × uint8 element (command).",
+      "class": "Data",
+      "element": { "kind": "Static", "count": 1, "data_type": "UInt8" },
+      "endpoints": ["GroundStation", "SdCard", "ValveBoard"]
+    },
+    {
+      "rust": "FlightCommand",
+      "name": "FLIGHT_COMMAND",
+      "doc": "Flight Command: 1 × uint8 element (command).",
+      "class": "Data",
+      "element": { "kind": "Static", "count": 1, "data_type": "UInt8" },
+      "endpoints": ["GroundStation", "SdCard", "FlightController"]
+    },
+    {
+      "rust": "FuelTankPressure",
+      "name": "FUEL_TANK_PRESSURE",
+      "doc": "Fuel Tank Pressure: 1 × float32 element.",
+      "class": "Data",
+      "element": { "kind": "Static", "count": 1, "data_type": "Float32" },
+      "endpoints": ["GroundStation", "SdCard"]
+    },
+    {
+      "rust": "FlightState",
+      "name": "FLIGHT_STATE",
+      "doc": "Flight State: 1 × uint8 element.",
+      "class": "Data",
+      "element": { "kind": "Static", "count": 1, "data_type": "UInt8" },
+      "endpoints": ["GroundStation", "SdCard"]
+    },
+    {
+      "rust": "Heartbeat",
+      "name": "HEARTBEAT",
+      "doc": "Heartbeat: No payload.",
+      "class": "Data",
+      "element": { "kind": "Static", "count": 0, "data_type": "NoData" },
+      "endpoints": ["GroundStation", "SdCard"]
+    },
+    {
+      "rust": "Warning",
+      "name": "WARNING",
+      "doc": "Warning: Dynamic string payload (human-readable warning text).",
+      "class": "Warning",
+      "element": { "kind": "Dynamic", "data_type": "String" },
+      "endpoints": ["SdCard", "GroundStation"]
+    },
+    {
+      "rust": "MessageData",
+      "name": "MESSAGE_DATA",
+      "doc": "Message Data: Dynamic string payload (free-form log message).",
+      "class": "Data",
+      "element": { "kind": "Dynamic", "data_type": "String" },
+      "endpoints": ["SdCard", "GroundStation"]
+    }
+  ]
+}

@@ -29,18 +29,23 @@ def print_help(error: str | None = None) -> None:
   build.py [OPTIONS]
 
 Options (can be combined where it makes sense):
-  release             Build in release mode.
-  test                Run `cargo test` (and in test mode also validate embedded+python builds).
-  embedded            Build for the embedded target (enables `embedded` feature).
-  python              Build with Python bindings (enables `python` feature).
-  maturin-build       Run `maturin build` with the .pyi .gitignore hack.
-  maturin-develop     Run `maturin develop` with the .pyi .gitignore hack.
-  maturin-install     Build wheel and install it with `uv pip install`.
-  target=<triple>     Set Rust compilation target (e.g. target=thumbv7em-none-eabihf).
-  device_id=<id>      Set DEVICE_IDENTIFIER env var for the build.
+  release                 Build in release mode.
+  test                    Run `cargo test` (and in test mode also validate embedded+python builds).
+  embedded                Build for the embedded target (enables `embedded` feature).
+  python                  Build with Python bindings (enables `python` feature).
+  maturin-build           Run `maturin build` with the .pyi .gitignore hack.
+  maturin-develop         Run `maturin develop` with the .pyi .gitignore hack.
+  maturin-install         Build wheel and install it with `uv pip install`.
+  target=<triple>         Set Rust compilation target (e.g. target=thumbv7em-none-eabihf).
+  device_id=<id>          Set DEVICE_IDENTIFIER env var for the build.
+
+New (compile-time env vars):
+  max_stack_payload=<n>   Set MAX_STACK_PAYLOAD for define_stack_payload!(env="MAX_STACK_PAYLOAD", ...).
+  env:KEY=VALUE           Set arbitrary environment variable(s) for the build (repeatable).
+                          Example: env:MAX_QUEUE_SIZE=65536 env:QUEUE_GROW_STEP=2.0
 
 Special:
-  -h, --help, help    Show this help message and exit.
+  -h, --help, help        Show this help message and exit.
 
 Examples:
   build.py release
@@ -48,8 +53,8 @@ Examples:
   build.py python
   build.py test
   build.py test release
-  build.py maturin-build
-  build.py maturin-install
+  build.py maturin-build max_stack_payload=256
+  build.py maturin-install env:MAX_RECENT_RX_IDS=256 env:MAX_STACK_PAYLOAD=128
 """,
         file=out,
         end="",
@@ -161,6 +166,13 @@ def install_wheel_file(build_mode: list[str], env: dict | None = None) -> None:
     subprocess.run(cmd_install, check=True, env=env)
 
 
+def _apply_env_overrides(env: dict[str, str], overrides: dict[str, str]) -> None:
+    """Apply env overrides with a bit of logging."""
+    for k, v in overrides.items():
+        env[k] = v
+        print(f"info: env override: {k}={v}")
+
+
 def main(argv: list[str]) -> None:
     repo_root = Path(__file__).parent.resolve()
     os.chdir(repo_root)
@@ -176,41 +188,79 @@ def main(argv: list[str]) -> None:
     target = ""
     device_id = ""
 
+    # New: arbitrary env overrides and convenience aliases
+    env_overrides: dict[str, str] = {}
+
     for arg in argv:
         if arg in ("-h", "--help", "help"):
             print_help()
+
         elif arg == "release":
             print("Building release version.")
             release_build = True
+
         elif arg == "test":
             tests = True
+
         elif arg == "embedded":
             print("Building for Embedded target.")
             build_embedded = True
+
         elif arg == "python":
             print("Building Python bindings.")
             build_python = True
+
         elif arg == "maturin-build":
             print("Building Python wheel.")
             build_wheel = True
+
         elif arg == "maturin-develop":
             print("Building and installing Python wheel in development mode.")
             develop_wheel = True
+
         elif arg == "maturin-install":
             print("Installing Python wheel.")
             install_wheel = True
+
         elif arg.startswith("target="):
             target = arg.split("=", 1)[1]
             print(f"Target set to: {target}")
+
         elif arg.startswith("device_id="):
             device_id = arg.split("=", 1)[1]
             print(f"Device identifier set to: {device_id}")
+
+        # New: convenience for your macro env var
+        elif arg.startswith("max_stack_payload="):
+            v = arg.split("=", 1)[1].strip()
+            if not v:
+                print_help("max_stack_payload requires a value")
+            env_overrides["MAX_STACK_PAYLOAD"] = v
+
+        # New: generic env override(s)
+        # Usage: env:KEY=VALUE
+        elif arg.startswith("env:"):
+            rest = arg[4:]
+            if "=" not in rest:
+                print_help("env:KEY=VALUE requires '='")
+            k, v = rest.split("=", 1)
+            k = k.strip()
+            v = v.strip()
+            if not k:
+                print_help("env:KEY=VALUE requires a non-empty KEY")
+            env_overrides[k] = v
+
         else:
             print_help(f"Unknown option: {arg}")
 
     env = os.environ.copy()
+
+    # Existing mapping
     if device_id:
         env["DEVICE_IDENTIFIER"] = device_id
+
+    # New mappings
+    _apply_env_overrides(env, env_overrides)
 
     # Release mode flags (host builds)
     if release_build:
@@ -229,13 +279,14 @@ def main(argv: list[str]) -> None:
         print("--------------------------------------------")
         run_cmd(["cargo", "test"])
         print("--------------------------------------------")
-        # 2) host build (same feature) to ensure build passes even if tests were filtered
+
+        # 2) host python build
         print("Ensuring python build passes...")
         print("--------------------------------------------")
         run_cmd(["cargo", "build", "--features", "python"])
         print("--------------------------------------------")
 
-        # 3) embedded build (always validate)
+        # 3) embedded build
         print("Ensuring embedded build passes...")
         print("--------------------------------------------")
         embedded_target = target or "thumbv7em-none-eabihf"
@@ -243,7 +294,6 @@ def main(argv: list[str]) -> None:
 
         embedded_mode: list[str] = []
         if release_build:
-            # embedded uses its own profile when in "release" mode
             embedded_mode = ["--profile", "release-embedded"]
 
         run_cmd([
@@ -271,24 +321,18 @@ def main(argv: list[str]) -> None:
             target = "thumbv7em-none-eabihf"
         build_args = [
             "--no-default-features",
-            "--target",
-            target,
-            "--features",
-            "embedded",
+            "--target", target,
+            "--features", "embedded",
         ]
         if release_build:
             build_mode = ["--profile", "release-embedded"]
+
     elif build_python:
-        build_args = [
-            "--features",
-            "python",
-        ]
+        build_args = ["--features", "python"]
+
     else:
         if target:
-            build_args = [
-                "--target",
-                target,
-            ]
+            build_args = ["--target", target]
 
     if build_wheel:
         run_with_pyi_unignored(["maturin", "build", *build_mode], env=env)
