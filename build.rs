@@ -100,6 +100,20 @@ fn main() {
     // Discover schema json path by scanning config.rs for define_telemetry_schema!(path="...")
     let schema_path = find_schema_path_from_config_rs(&config_rs_path, &crate_dir);
     println!("cargo:rerun-if-changed={}", schema_path.display());
+    // Rebuild if the schema json changes
+    println!("cargo:rerun-if-changed={}", schema_path.display());
+
+    // Re-run if the override env vars change (so switching paths rebuilds)
+    println!("cargo:rerun-if-env-changed=SEDSPRINTF_RS_CONFIG_RS");
+    println!("cargo:rerun-if-env-changed=SEDSPRINTF_RS_LIB_RS");
+    println!("cargo:rerun-if-env-changed=SEDSPRINTF_RS_SKIP_ENUMGEN");
+
+    // Make the discovered JSON path available to the crate at compile time.
+    // Use in Rust as: env!("SEDSPRINTF_RS_SCHEMA_JSON")
+    println!(
+        "cargo:rustc-env=SEDSPRINTF_RS_SCHEMA_JSON={}",
+        schema_path.display()
+    );
 
     // Templates: rebuild if they change
     let header_tpl_path = crate_dir.join("header_templates/sedsprintf.h.txt");
