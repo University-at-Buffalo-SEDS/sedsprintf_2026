@@ -17,5 +17,6 @@ C-Headers/sedsprintf.h
 python-files/sedsprintf_rs/sedsprintf_rs.pyi
 
 *.so
+*.pyi
 /sedsprintf_macros/target/
 /sedsprintf_macros/Cargo.lock
