@@ -19,64 +19,117 @@
       "name": "TELEMETRY_ERROR",
       "doc": "Encoded telemetry error text (string payload).",
       "class": "Error",
-      "element": { "kind": "Dynamic", "data_type": "String" },
-      "endpoints": ["SdCard", "Radio"]
+      "element": {
+        "kind": "Dynamic",
+        "data_type": "String"
+      },
+      "endpoints": [
+        "SdCard",
+        "Radio"
+      ]
     },
     {
       "rust": "GpsData",
       "name": "GPS_DATA",
       "doc": "GPS data (typically 3× f32: latitude, longitude, altitude).",
       "class": "Data",
-      "element": { "kind": "Static", "count": 3, "data_type": "Float32" },
-      "endpoints": ["Radio", "SdCard"]
+      "element": {
+        "kind": "Static",
+        "count": 3,
+        "data_type": "Float32"
+      },
+      "endpoints": [
+        "Radio",
+        "SdCard"
+      ]
     },
     {
       "rust": "ImuData",
       "name": "IMU_DATA",
       "doc": "IMU data (typically 6× f32: accel/gyro vector).",
       "class": "Data",
-      "element": { "kind": "Static", "count": 6, "data_type": "Float32" },
-      "endpoints": ["Radio", "SdCard"]
+      "element": {
+        "kind": "Static",
+        "count": 6,
+        "data_type": "Float32"
+      },
+      "endpoints": [
+        "Radio",
+        "SdCard"
+      ]
     },
     {
       "rust": "BatteryStatus",
       "name": "BATTERY_STATUS",
       "doc": "Battery status (e.g. voltage, current, etc.).",
       "class": "Data",
-      "element": { "kind": "Static", "count": 2, "data_type": "Float32" },
-      "endpoints": ["Radio", "SdCard"]
+      "element": {
+        "kind": "Static",
+        "count": 2,
+        "data_type": "Float32"
+      },
+      "endpoints": [
+        "Radio",
+        "SdCard"
+      ]
     },
     {
       "rust": "SystemStatus",
       "name": "SYSTEM_STATUS",
       "doc": "Compact system status code (single u8).",
       "class": "Data",
-      "element": { "kind": "Static", "count": 1, "data_type": "Bool" },
-      "endpoints": ["SdCard"]
+      "element": {
+        "kind": "Static",
+        "count": 1,
+        "data_type": "Bool"
+      },
+      "endpoints": [
+        "SdCard"
+      ]
     },
     {
       "rust": "BarometerData",
       "name": "BAROMETER_DATA",
       "doc": "Barometric pressure sensor data.",
       "class": "Data",
-      "element": { "kind": "Static", "count": 3, "data_type": "Float32" },
-      "endpoints": ["Radio", "SdCard"]
+      "element": {
+        "kind": "Static",
+        "count": 3,
+        "data_type": "Float32"
+      },
+      "endpoints": [
+        "Radio",
+        "SdCard"
+      ]
     },
     {
       "rust": "MessageData",
       "name": "MESSAGE_DATA",
       "doc": "Generic string message payload.",
       "class": "Data",
-      "element": { "kind": "Dynamic", "data_type": "String" },
-      "endpoints": ["SdCard", "Radio"]
+      "element": {
+        "kind": "Dynamic",
+        "data_type": "String"
+      },
+      "endpoints": [
+        "SdCard",
+        "Radio"
+      ]
     },
     {
       "rust": "Heartbeat",
       "name": "HEARTBEAT",
       "doc": "Heartbeat message (no payload).",
       "class": "Data",
-      "element": { "kind": "Static", "count": 0, "data_type": "NoData" },
-      "endpoints": ["SdCard", "Radio"]
+      "element": {
+        "kind": "Static",
+        "count": 0,
+        "data_type": "NoData"
+      },
+      "endpoints": [
+        "SdCard",
+        "Radio"
+      ]
     }
   ]
 }
