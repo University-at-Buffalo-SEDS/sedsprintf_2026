@@ -274,7 +274,7 @@ fn parse_seds_result_from_lib_rs(lib_rs_path: &Path) -> SedsResultEnum {
     let text = fs::read_to_string(lib_rs_path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", lib_rs_path.display()));
 
-    let re_enum = Regex::new(r#"(?s)\bpub\s+enum\s+TelemetryErrorCode\s*\{(.*?)\}"#)
+    let re_enum = Regex::new(r#"(?s)\bpub\s+enum\s+TelemetryErrorCode\s*\{(.*?)}"#)
         .expect("regex compile failed");
 
     let caps = re_enum.captures(&text).unwrap_or_else(|| {
