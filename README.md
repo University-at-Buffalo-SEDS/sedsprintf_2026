@@ -135,11 +135,10 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/sedsprintf_rs sedsprintf_rs_build)
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE sedsprintf_rs::sedsprintf_rs)
 ```
 
-- Set up the config.rs to match your application needs. All config options are in the config.rs file and are very
-  self-explanatory.
-  NOTE: (ON EVERY SYSTEM THIS LIBRARY IS USED, THE CONFIG ENUMS MUST BE THE SAME OR UNDEFINED BEHAVIOR MAY OCCUR). So
-  for most
-  applications I would recommend making a fork and setting the config values you need for your application.
+- Configure telemetry schema via `telemetry_config.json` (endpoints + message types). The Rust enum metadata is generated
+  from this JSON by `define_telemetry_schema!` in `src/config.rs`.
+  NOTE: (ON EVERY SYSTEM THIS LIBRARY IS USED, THE CONFIG ENUMS MUST BE THE SAME OR UNDEFINED BEHAVIOR MAY OCCUR). So for
+  most applications I would recommend making a fork and setting the config values you need for your application.
 
 ---
 
@@ -206,6 +205,44 @@ set(SEDSPRINTF_RS_ENV_MAX_QUEUE_SIZE "65536" CACHE STRING "" FORCE)
 ./build.py release device_id=GROUND_STATION
 # Embedded build
 ./build.py embedded release target=thumbv7em-none-eabihf device_id=FC
+```
+
+---
+
+## Telemetry config (JSON + GUI editor)
+
+The telemetry schema lives in `telemetry_config.json` and drives the generated `DataEndpoint` and `DataType` enums.
+You can edit it directly or use the GUI editor:
+
+```bash
+./telemetry_config_editor.py
+```
+
+The editor auto-discovers the JSON path from `src/config.rs`, lets you add endpoints/types, and writes the schema back to
+`telemetry_config.json`.
+
+Note: The editor uses Tkinter. On some Linux distros you may need to install it
+(e.g. `sudo apt install python3-tk`).
+
+Example `telemetry_config.json`:
+
+```json
+{
+  "endpoints": [
+    { "rust": "Radio", "name": "RADIO", "doc": "Downlink radio", "broadcast_mode": "Default" },
+    { "rust": "SdCard", "name": "SD_CARD", "doc": "Onboard logging", "broadcast_mode": "Default" }
+  ],
+  "types": [
+    {
+      "rust": "GpsData",
+      "name": "GPS_DATA",
+      "doc": "Lat/Lon/Alt",
+      "class": "Data",
+      "element": { "kind": "Static", "data_type": "Float32", "count": 3 },
+      "endpoints": ["Radio", "SdCard"]
+    }
+  ]
+}
 ```
 
 ---
