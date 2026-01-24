@@ -86,17 +86,12 @@ def find_schema_json_from_config_rs(config_rs: Path, crate_root: Path) -> Option
     except Exception:
         return None
 
-    # allow whitespace/newlines inside invocation
-    rx = re.compile(
-        r'(?s)define_telemetry_schema!\s*\(\s*[^)]*?\bpath\s*=\s*"([^"]+)"'
-    )
+    rx = re.compile(r'(?s)define_telemetry_schema!\s*\(\s*[^)]*?\bpath\s*=\s*"([^"]+)"')
     caps = list(rx.finditer(text))
     if not caps:
         return None
     if len(caps) > 1:
-        raise RuntimeError(
-            f"Multiple define_telemetry_schema!(path=...) found in {config_rs}"
-        )
+        raise RuntimeError(f"Multiple define_telemetry_schema!(path=...) found in {config_rs}")
     rel = caps[0].group(1)
     return (crate_root / rel).resolve()
 
@@ -124,10 +119,6 @@ def safe_write_json(path: Path, data: Dict[str, Any]) -> None:
     tmp.replace(path)
 
 
-def ensure_caps_underscore(s: str) -> bool:
-    return bool(re.fullmatch(r"[A-Z0-9_]+", s or ""))
-
-
 def ensure_rust_ident(s: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", s or ""))
 
@@ -135,29 +126,17 @@ def ensure_rust_ident(s: str) -> bool:
 def rust_ident_to_schema_name(rust: str) -> str:
     """
     Convert Rust ident/PascalCase/camelCase/snake_case into SCREAMING_SNAKE_CASE.
-    Examples:
-      Radio -> RADIO
-      SdCard -> SD_CARD
-      gpsData -> GPS_DATA
-      GPSData -> GPS_DATA
-      gps_data -> GPS_DATA
-      FooBARBaz -> FOO_BAR_BAZ
     """
     s = (rust or "").strip()
     if not s:
         return ""
 
-    # Replace separators with underscores first
     s = re.sub(r"[\s\-]+", "_", s)
 
-    # If already snake-ish, just scream it
     if "_" in s:
         return re.sub(r"_+", "_", s).strip("_").upper()
 
-    # Insert underscores on transitions:
-    # - lower/digit -> upper  (aB, 1A)
     s = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s)
-    # - acronym boundary: ABCd -> AB_Cd  (so "GPSData" => GPS_Data before final upper)
     s = re.sub(r"([A-Z])([A-Z][a-z])", r"\1_\2", s)
 
     s = re.sub(r"_+", "_", s).strip("_")
@@ -238,7 +217,6 @@ class TelemetryConfigEditor(tk.Tk):
         top = ttk.Frame(self, padding=10)
         top.pack(fill="both", expand=True)
 
-        # Header/status
         hdr = ttk.Frame(top)
         hdr.pack(fill="x")
 
@@ -257,7 +235,6 @@ class TelemetryConfigEditor(tk.Tk):
             side="left", padx=(6, 14)
         )
 
-        # Notebook
         nb = ttk.Notebook(top)
         nb.pack(fill="both", expand=True, pady=(10, 0))
         self.nb = nb
@@ -270,7 +247,6 @@ class TelemetryConfigEditor(tk.Tk):
         self._build_endpoints_tab(self.endpoints_tab)
         self._build_types_tab(self.types_tab)
 
-        # Status bar
         status = ttk.Frame(self, padding=(10, 6))
         status.pack(fill="x", side="bottom")
         ttk.Label(status, textvariable=self.status_var).pack(side="left")
@@ -290,9 +266,7 @@ class TelemetryConfigEditor(tk.Tk):
         btns = ttk.Frame(left)
         btns.grid(row=0, column=0, sticky="ew")
         ttk.Button(btns, text="Add", command=self.add_endpoint).pack(side="left")
-        ttk.Button(btns, text="Delete", command=self.delete_endpoint).pack(
-            side="left", padx=6
-        )
+        ttk.Button(btns, text="Delete", command=self.delete_endpoint).pack(side="left", padx=6)
 
         self.endpoint_list = tk.Listbox(left, exportselection=False)
         self.endpoint_list.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
@@ -302,25 +276,17 @@ class TelemetryConfigEditor(tk.Tk):
         right.grid(row=0, column=1, sticky="nsew")
         right.columnconfigure(1, weight=1)
 
-        ttk.Label(right, text="Name (PascalCase):").grid(
-            row=0, column=0, sticky="w"
-        )
+        ttk.Label(right, text="Name (PascalCase):").grid(row=0, column=0, sticky="w")
         self.ep_rust_var = tk.StringVar()
         ttk.Entry(right, textvariable=self.ep_rust_var).grid(
             row=0, column=1, sticky="ew", padx=(10, 0)
         )
 
-        # Schema name is auto-generated (no UI field)
-
-        ttk.Label(right, text="Doc (optional):").grid(
-            row=1, column=0, sticky="w", pady=(10, 0)
-        )
+        ttk.Label(right, text="Doc (optional):").grid(row=1, column=0, sticky="w", pady=(10, 0))
         self.ep_doc_text = tk.Text(right, height=5)
         self.ep_doc_text.grid(row=1, column=1, sticky="ew", padx=(10, 0), pady=(10, 0))
 
-        ttk.Label(right, text="Broadcast mode:").grid(
-            row=2, column=0, sticky="w", pady=(10, 0)
-        )
+        ttk.Label(right, text="Broadcast mode:").grid(row=2, column=0, sticky="w", pady=(10, 0))
         self.ep_bm_var = tk.StringVar(value="Default")
         ttk.Combobox(
             right,
@@ -348,9 +314,7 @@ class TelemetryConfigEditor(tk.Tk):
         btns = ttk.Frame(left)
         btns.grid(row=0, column=0, sticky="ew")
         ttk.Button(btns, text="Add", command=self.add_type).pack(side="left")
-        ttk.Button(btns, text="Delete", command=self.delete_type).pack(
-            side="left", padx=6
-        )
+        ttk.Button(btns, text="Delete", command=self.delete_type).pack(side="left", padx=6)
 
         self.type_list = tk.Listbox(left, exportselection=False)
         self.type_list.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
@@ -367,8 +331,6 @@ class TelemetryConfigEditor(tk.Tk):
             row=0, column=1, sticky="ew", padx=(10, 0)
         )
 
-        # Schema name is auto-generated (no UI field)
-
         ttk.Label(right, text="Class:").grid(row=1, column=0, sticky="w", pady=(10, 0))
         self.ty_class_var = tk.StringVar(value="Data")
         ttk.Combobox(
@@ -377,34 +339,29 @@ class TelemetryConfigEditor(tk.Tk):
 
         ttk.Label(right, text="Element kind:").grid(row=2, column=0, sticky="w", pady=(10, 0))
         self.ty_kind_var = tk.StringVar(value="Static")
-        ttk.Combobox(
+        self.ty_kind_combo = ttk.Combobox(
             right, textvariable=self.ty_kind_var, values=ELEMENT_KIND_OPTIONS, state="readonly"
-        ).grid(row=2, column=1, sticky="w", padx=(10, 0), pady=(10, 0))
-
-        ttk.Label(right, text="Element data type:").grid(
-            row=3, column=0, sticky="w", pady=(10, 0)
         )
+        self.ty_kind_combo.grid(row=2, column=1, sticky="w", padx=(10, 0), pady=(10, 0))
+        self.ty_kind_combo.bind("<<ComboboxSelected>>", lambda _e: self._update_count_visibility())
+
+        ttk.Label(right, text="Element data type:").grid(row=3, column=0, sticky="w", pady=(10, 0))
         self.ty_dtype_var = tk.StringVar(value=DATA_TYPE_OPTIONS[0])
         ttk.Combobox(
             right, textvariable=self.ty_dtype_var, values=DATA_TYPE_OPTIONS, state="readonly"
         ).grid(row=3, column=1, sticky="w", padx=(10, 0), pady=(10, 0))
 
-        # Static count entry (only meaningful for Static)
-        ttk.Label(right, text="Static count (for Static only):").grid(
-            row=4, column=0, sticky="nw", pady=(10, 0)
-        )
+        # Static count widgets (we'll hide/show these based on kind)
+        self.ty_count_label = ttk.Label(right, text="Static count (for Static only):")
+        self.ty_count_label.grid(row=4, column=0, sticky="nw", pady=(10, 0))
         self.ty_count_var = tk.StringVar(value="1")
-        ttk.Entry(right, textvariable=self.ty_count_var, width=10).grid(
-            row=4, column=1, sticky="nw", padx=(10, 0), pady=(10, 0)
-        )
+        self.ty_count_entry = ttk.Entry(right, textvariable=self.ty_count_var, width=10)
+        self.ty_count_entry.grid(row=4, column=1, sticky="nw", padx=(10, 0), pady=(10, 0))
 
-        ttk.Label(right, text="Doc (optional):").grid(
-            row=5, column=0, sticky="w", pady=(10, 0)
-        )
+        ttk.Label(right, text="Doc (optional):").grid(row=5, column=0, sticky="w", pady=(10, 0))
         self.ty_doc_text = tk.Text(right, height=5)
         self.ty_doc_text.grid(row=5, column=1, sticky="ew", padx=(10, 0), pady=(10, 0))
 
-        # Endpoints dual list selector
         epbox = ttk.LabelFrame(right, text="Endpoints for this DataType", padding=8)
         epbox.grid(row=6, column=0, columnspan=2, sticky="nsew", pady=(12, 0))
         epbox.columnconfigure(0, weight=1)
@@ -434,6 +391,30 @@ class TelemetryConfigEditor(tk.Tk):
             row=7, column=0, columnspan=2, sticky="ew", pady=(16, 0)
         )
 
+        # Ensure initial visibility matches initial kind
+        self._update_count_visibility()
+
+    def _update_count_visibility(self):
+        kind = (self.ty_kind_var.get() or "Static").strip()
+        if kind == "Dynamic":
+            # hide count widgets
+            try:
+                self.ty_count_label.grid_remove()
+                self.ty_count_entry.grid_remove()
+            except Exception:
+                pass
+            # optional: clear the entry UI when dynamic
+            self.ty_count_var.set("")
+        else:
+            # show count widgets
+            try:
+                self.ty_count_label.grid()
+                self.ty_count_entry.grid()
+            except Exception:
+                pass
+            if (self.ty_count_var.get() or "").strip() == "":
+                self.ty_count_var.set("1")
+
     # ---------------- Menu actions ----------------
 
     def menu_open_json(self):
@@ -444,8 +425,7 @@ class TelemetryConfigEditor(tk.Tk):
         )
         if not p:
             return
-        path = Path(p).resolve()
-        self.load_from_path(path)
+        self.load_from_path(Path(p).resolve())
 
     def menu_save(self):
         if self.json_path is None:
@@ -485,12 +465,7 @@ class TelemetryConfigEditor(tk.Tk):
     # ---------------- Load / save ----------------
 
     def _normalize_schema_names(self) -> bool:
-        """
-        Ensure every endpoint/type has .name that matches the auto-generated value from .rust.
-        Returns True if any changes were made.
-        """
         changed = False
-
         for ep in self.config_obj.get("endpoints", []) or []:
             rust = str(ep.get("rust", "")).strip()
             expected = rust_ident_to_schema_name(rust)
@@ -504,7 +479,6 @@ class TelemetryConfigEditor(tk.Tk):
             if ty.get("name") != expected:
                 ty["name"] = expected
                 changed = True
-
         return changed
 
     def load_from_path(self, path: Path):
@@ -522,7 +496,6 @@ class TelemetryConfigEditor(tk.Tk):
         self.json_path = path
         self.json_path_var.set(str(path))
 
-        # Auto-normalize schema names now that they’re generated.
         normalized = self._normalize_schema_names()
         self.dirty = bool(normalized)
 
@@ -534,7 +507,6 @@ class TelemetryConfigEditor(tk.Tk):
         self.refresh_lists()
 
     def save_to_path(self, path: Path):
-        # Always normalize before save, so file stays consistent
         self._normalize_schema_names()
 
         try:
@@ -561,9 +533,7 @@ class TelemetryConfigEditor(tk.Tk):
 
     def on_close(self):
         if self.dirty:
-            if not messagebox.askyesno(
-                    "Unsaved changes", "You have unsaved changes. Quit anyway?"
-            ):
+            if not messagebox.askyesno("Unsaved changes", "You have unsaved changes. Quit anyway?"):
                 return
         self.destroy()
 
@@ -572,15 +542,13 @@ class TelemetryConfigEditor(tk.Tk):
         if "endpoints" not in obj or "types" not in obj:
             raise RuntimeError("JSON must contain top-level keys: endpoints, types")
 
-        # endpoints
         for i, ep in enumerate(obj["endpoints"]):
             rust = str(ep.get("rust", "")).strip()
-            name = str(ep.get("name", "")).strip()
-
             if not ensure_rust_ident(rust):
                 raise RuntimeError(f"endpoints[{i}].rust must be Rust ident/PascalCase, got {rust!r}")
 
             expected = rust_ident_to_schema_name(rust)
+            name = str(ep.get("name", "")).strip()
             if name != expected:
                 raise RuntimeError(
                     f"endpoints[{i}].name must match generated name from rust ({expected!r}), got {name!r}"
@@ -594,15 +562,13 @@ class TelemetryConfigEditor(tk.Tk):
 
         endpoint_rust_set = {ep.get("rust", "") for ep in obj["endpoints"]}
 
-        # types
         for i, ty in enumerate(obj["types"]):
             rust = str(ty.get("rust", "")).strip()
-            name = str(ty.get("name", "")).strip()
-
             if not ensure_rust_ident(rust):
                 raise RuntimeError(f"types[{i}].rust must be Rust ident/PascalCase, got {rust!r}")
 
             expected = rust_ident_to_schema_name(rust)
+            name = str(ty.get("name", "")).strip()
             if name != expected:
                 raise RuntimeError(
                     f"types[{i}].name must match generated name from rust ({expected!r}), got {name!r}"
@@ -612,10 +578,11 @@ class TelemetryConfigEditor(tk.Tk):
             if cls not in MESSAGE_CLASS_OPTIONS:
                 raise RuntimeError(f"types[{i}].class must be one of {MESSAGE_CLASS_OPTIONS}, got {cls!r}")
 
-            el = ty.get("element", {})
+            el = ty.get("element", {}) or {}
             kind = el.get("kind", "")
             if kind not in ELEMENT_KIND_OPTIONS:
                 raise RuntimeError(f"types[{i}].element.kind must be one of {ELEMENT_KIND_OPTIONS}, got {kind!r}")
+
             dt = el.get("data_type", "")
             if dt not in DATA_TYPE_OPTIONS:
                 raise RuntimeError(f"types[{i}].element.data_type must be one of DATA_TYPE_OPTIONS, got {dt!r}")
@@ -642,17 +609,14 @@ class TelemetryConfigEditor(tk.Tk):
                     )
 
     def refresh_lists(self):
-        # Endpoints list
         self.endpoint_list.delete(0, tk.END)
         for ep in self.config_obj.get("endpoints", []):
             self.endpoint_list.insert(tk.END, f"{ep.get('rust', '')}  [{ep.get('name', '')}]")
 
-        # Types list
         self.type_list.delete(0, tk.END)
         for ty in self.config_obj.get("types", []):
             self.type_list.insert(tk.END, f"{ty.get('rust', '')}  [{ty.get('name', '')}]")
 
-        # Rebuild "Available endpoints" list (selected list is per-type)
         self.ty_available_endpoints.delete(0, tk.END)
         for ep in self.config_obj.get("endpoints", []):
             r = ep.get("rust", "")
@@ -738,7 +702,6 @@ class TelemetryConfigEditor(tk.Tk):
         ep["doc"] = new_doc
         ep["broadcast_mode"] = new_bm
 
-        # If rust name changed, update any types referencing it
         if old_rust != new_rust:
             for ty in self.config_obj.get("types", []):
                 eps = ty.get("endpoints", []) or []
@@ -799,13 +762,14 @@ class TelemetryConfigEditor(tk.Tk):
         else:
             self.ty_count_var.set("")
 
+        self._update_count_visibility()
+
         self.ty_doc_text.delete("1.0", tk.END)
         self.ty_doc_text.insert("1.0", ty.get("doc", "") or "")
 
         selected = ty.get("endpoints", []) or []
         selected_set = set(selected)
 
-        # rebuild available + selected
         all_eps = [
             ep.get("rust", "")
             for ep in self.config_obj.get("endpoints", [])
@@ -943,8 +907,6 @@ def main():
         if len(sys.argv) >= 2:
             config_rs = Path(sys.argv[1]).resolve()
             crate_root = find_project_root(config_rs)
-        else:
-            pass
 
     json_path = None
     if config_rs.exists():
