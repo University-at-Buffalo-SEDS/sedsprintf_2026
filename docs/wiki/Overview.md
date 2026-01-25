@@ -1,0 +1,58 @@
+# Overview
+
+This page is the shortest path to understanding what the library does and how its pieces relate. It intentionally avoids implementation details and focuses on how you think about the system.
+
+## What problem this solves
+Sedsprintf_rs gives you a **shared telemetry schema**, a **compact wire format**, and a **router** that can deliver messages locally and/or forward them across links. It is designed to run on embedded devices and host machines with the **same schema** and compatible packets.
+
+Key outcomes:
+- Consistent message definitions across Rust, C/C++, and Python.
+- Small, predictable packets that are easy to send over low‑bandwidth links.
+- A central Router API that handles validation, dedupe, and dispatch.
+
+## The core concepts (in plain language)
+- **Schema**: A shared list of endpoints (where data goes) and types (what data looks like). It lives in `telemetry_config.json`.
+- **Telemetry packet**: One message, with a type, destination endpoints, sender ID, timestamp, and payload bytes.
+- **Router**: The switchboard. It receives packets, calls local handlers, and optionally forwards packets to other nodes.
+- **Relay**: A simpler fan‑out component that forwards packets between sides without knowing the schema.
+
+## A simple mental model
+Think of the router as a message bus with two kinds of consumers:
+- **Local handlers** (code that runs on the same device).
+- **Remote links** (radio, CAN, UART, TCP, etc.).
+
+A packet can go to both: local handlers run, and then the router may forward the packet to remote links depending on configuration and endpoint rules.
+
+## What happens when you send telemetry
+1) Your code calls a log/tx API with a type and payload.
+2) The router validates the payload against the schema.
+3) The packet is serialized into a compact byte format.
+4) The bytes are handed to a transport callback for sending.
+
+## What happens when you receive telemetry
+1) Raw bytes arrive from a link.
+2) The router decodes the header and payload.
+3) It drops duplicates to avoid loops.
+4) It calls any local handlers for the targeted endpoints.
+5) If configured to relay, it forwards the packet to other links.
+
+## Typical deployment shapes
+- **Single device**: router with only local handlers (no forwarding).
+- **Device + ground station**: device forwards to a link; ground station receives and dispatches.
+- **Multi‑hop**: routers in relay mode forward packets across several transport links.
+- **Star topology**: relay fans out from one ingress to many egress links.
+
+## A tiny example flow
+```
+Device A                 Link (UART)                 Device B
+--------                 -----------                 --------
+log(GPS_DATA)  ->  serialize -> bytes -> send -> bytes -> rx_serialized()
+  |                              |                        |
+  +-- local handler              |                        +-- local handler
+                                 +-- remote forward
+```
+
+## What to read next
+- If you want the concepts explained without code: docs/wiki/Concepts.md
+- If you want integration steps: docs/wiki/Build-and-Configure.md
+- If you want implementation details: docs/wiki/technical/Architecture.md

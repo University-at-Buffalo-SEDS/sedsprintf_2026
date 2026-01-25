@@ -1,0 +1,160 @@
+# Architecture
+
+This page explains how the core Rust library is organized, how telemetry moves through it, and why the data structures look the way they do. It assumes no prior knowledge of the codebase.
+
+## Goals and constraints
+- **Schema-first**: a shared schema defines endpoints, message types, and payload layouts for every language binding.
+- **Compact on-the-wire representation**: a small header, endpoint bitmaps, and optional compression minimize bandwidth.
+- **Embedded-friendly**: no_std support, bounded queues, and stack/heap tradeoffs.
+- **Multi-language**: C and Python bindings are generated from the same schema.
+- **Deterministic behavior**: validation and dedupe rules are consistent across languages.
+
+## Module map (what lives where)
+- `src/config.rs`: compile-time configuration values plus generated `DataType`/`DataEndpoint` enums.
+- `src/lib.rs`: schema metadata (`MessageMeta`, `MessageElement`, `MessageDataType`, `MessageClass`).
+- `src/telemetry_packet.rs`: `TelemetryPacket` validation, formatting, and packet IDs.
+- `src/small_payload.rs`: inline-optimized payload storage (`SmallPayload`).
+- `src/serialize.rs`: compact wire format, ULEB128 helpers, envelope peek, packet IDs from wire.
+- `src/router.rs`: router core, queues, endpoint handlers, LinkId plumbing.
+- `src/relay.rs`: schema-agnostic fanout relay between sides.
+- `src/queue.rs`: bounded deque used by router and relay.
+- `src/c_api.rs` and `src/python_api.rs`: FFI bindings (C ABI and pyo3).
+
+## Schema and metadata pipeline
+The schema is defined in `telemetry_config.json`. At build time:
+1) `build.rs` reads the schema to generate C headers and Python `.pyi` stubs.
+2) `define_telemetry_schema!` in `src/config.rs` expands into Rust enums and metadata tables.
+
+Core schema types:
+- `DataEndpoint`: enum generated from the `endpoints` list in `telemetry_config.json`.
+- `DataType`: enum generated from the `types` list in `telemetry_config.json`.
+- `MessageMeta`: per-`DataType` metadata (name, element layout, allowed endpoints).
+- `MessageElement`: `Static(count, MessageDataType, MessageClass)` or `Dynamic(MessageDataType, MessageClass)`.
+- `MessageDataType`: primitive element type (Float32, UInt16, String, Binary, etc.).
+- `MessageClass`: logical class (`Data`, `Warning`, `Error`).
+
+Why these structures exist:
+- **MessageMeta is static** so it can be used in `const fn` lookups (`message_meta`, `get_data_type`).
+- **MessageElement separates shape from data type** so the same primitive type can be used for static and dynamic payloads.
+- **MessageClass is tied to element layout** so formatting and error generation know the intent of the message.
+
+## TelemetryPacket (the core runtime type)
+`TelemetryPacket` is the validated, shareable container used by the router and FFI layers. It contains:
+- `ty: DataType` (logical message type).
+- `data_size: usize` (cached payload length; must match `payload.len()`).
+- `sender: Arc<str>` (logical sender identifier).
+- `endpoints: Arc<[DataEndpoint]>` (destinations; must be non-empty).
+- `timestamp: u64` (ms; treated as uptime below 1e12, or epoch ms otherwise).
+- `payload: StandardSmallPayload` (inline optimized; see below).
+
+Validation rules enforced by `TelemetryPacket::new` and `TelemetryPacket::validate`:
+- Endpoints list must be non-empty.
+- For static layouts, payload length must be exactly `count * data_type_size`.
+- For dynamic layouts:
+  - Numeric/bool types: payload length must be a multiple of element width.
+  - String types: trailing NULs are ignored and remaining bytes must be valid UTF-8.
+  - Binary types: no UTF-8 requirement (raw bytes).
+
+Packet IDs are **not** serialized. `TelemetryPacket::packet_id` hashes:
+- sender bytes
+- message name (`DataType` as string)
+- endpoint names (in order)
+- timestamp + data_size (little-endian)
+- payload bytes
+
+This produces the same ID across different links, which enables de-duplication.
+
+### SmallPayload and inline storage
+`SmallPayload<INLINE>` stores short payloads directly on the stack and spills to `Arc<[u8]>` when larger. The inline size is controlled by `MAX_STACK_PAYLOAD` via `define_stack_payload!`, and the default inline capacity is 64 bytes.
+
+Why this matters:
+- Small telemetry values avoid heap allocation and `Arc` traffic.
+- Larger payloads still have cheap clone semantics because they are `Arc`-backed.
+
+## Serialization and wire format
+The compact v2 wire format is implemented in `src/serialize.rs`. A packet is encoded as:
+
+```
+[FLAGS: u8]
+    bit0: payload compressed
+    bit1: sender compressed
+[NEP: u8]                      // number of endpoints (bits set)
+VARINT(ty: u32 as u64)          // ULEB128
+VARINT(data_size: u64)          // logical (uncompressed) payload size
+VARINT(timestamp_ms: u64)
+VARINT(sender_len: u64)         // logical sender length
+[VARINT(sender_wire_len: u64)]  // only if sender compressed
+ENDPOINTS_BITMAP               // 1 bit per DataEndpoint discriminant
+SENDER BYTES                   // raw or compressed
+PAYLOAD BYTES                  // raw or compressed
+```
+
+Design choices:
+- **ULEB128 varints** minimize size for small values.
+- **Endpoint bitmap** avoids repeated endpoint IDs; size is based on `MAX_VALUE_DATA_ENDPOINT`.
+- **Sender/payload compression** (deflate) is applied only when it makes the payload smaller.
+
+`packet_id_from_wire` parses only as much as needed to compute the same packet ID as `TelemetryPacket::packet_id`. It always hashes **decompressed** sender/payload bytes, so dedupe works across compressed and uncompressed links.
+
+`TelemetryEnvelope` is a header-only view that can be obtained by `peek_envelope` without copying the payload.
+
+## Queues and bounded memory
+Router and relay queues are built on `BoundedDeque<T>`:
+- Byte-budgeted: each item reports a `byte_cost` via the `ByteCost` trait.
+- Hard element cap: capacity never exceeds `max_elems` (computed from `size_of::<T>()`).
+- Eviction policy: pop from the front until new item fits in byte budget.
+- Growth policy: multiplicative growth controlled by `QUEUE_GROW_STEP`.
+
+This design keeps memory use bounded and avoids unbounded `VecDeque` growth in embedded targets.
+
+## Router architecture
+The router is the main API for logging, receiving, dispatching, and (optionally) relaying.
+
+Key structures:
+- `RouterConfig`: holds local `EndpointHandler` definitions in an `Arc<[EndpointHandler]>`.
+- `EndpointHandler`: packet or serialized handler for a specific `DataEndpoint`.
+- `LinkId`: identifies an ingress/egress link. Values 0 and 1 are reserved (default/local).
+- `QueueItem`: either `TelemetryPacket` or serialized bytes + `LinkId`.
+
+Receive flow:
+1) RX bytes or packet are processed immediately or queued (`rx_*` vs `rx_*_queue`).
+2) Packet ID is computed. For serialized bytes, the router tries `packet_id_from_wire` and falls back to hashing raw bytes if needed.
+3) If the packet ID is already in the recent cache, it is dropped.
+4) Local endpoint handlers are invoked.
+5) In `RouterMode::Relay`, the router forwards the packet **once** if any endpoint requires remote forwarding.
+
+Forwarding decision uses endpoint broadcast modes:
+- `Always`: always eligible for forward.
+- `Never`: never forwarded.
+- `Default`: forwarded only when there is no local handler for that endpoint.
+
+Transmit flow:
+- `log*` builds a new `TelemetryPacket` from typed data, validates sizes, and serializes it.
+- `tx*` sends a pre-built `TelemetryPacket` (validated) or serialized bytes.
+- Queue variants (`*_queue`) defer the work until `process_*_queue`.
+
+Error handling:
+- Local handler failures are retried (`MAX_HANDLER_RETRIES`).
+- If a handler ultimately fails, the packet ID is removed from the dedupe cache so a resend can be processed later.
+- The router emits a `TelemetryError` packet for local handlers when possible.
+
+## Relay architecture
+`Relay` is schema-agnostic and purely forwards packets between named sides (UART/CAN/RADIO/etc.).
+- Each side registers a TX handler for serialized bytes or full packets.
+- The relay maintains RX/TX queues and a recent-ID cache like the router.
+- Fanout clones the `Arc` for payload sharing; it does not decode unless needed for a handler.
+- Dedupe ignores the source side so duplicates from different links are dropped.
+
+## Thread safety and time
+Routers and relays use an internal `RouterMutex` so that most APIs can take `&self` while still protecting shared state. The clock source is injected via the `Clock` trait so embedded builds can supply their own timing source.
+
+## End-to-end lifecycle (summary)
+
+```
+Producer                      Router/Relay                         Consumer
+--------                      -------------                         --------
+log()/tx()  -> validate -> serialize -> tx(bytes, link) -> transport -> rx_serialized()
+rx(bytes)   -> deserialize -> dedupe -> handlers -> (optional) relay forward
+```
+
+If you need build-time or schema details, see docs/wiki/Build-and-Configure.md and docs/wiki/technical/Telemetry-Schema.md.

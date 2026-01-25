@@ -2,7 +2,7 @@
 
 This is the primary API and the source of truth for behavior.
 
-## Add as dependency
+## Add as a dependency
 If this repo is used as a submodule or subtree:
 
 ```
@@ -16,6 +16,12 @@ For a git dependency:
 # Cargo.toml
 sedsprintf_rs = { git = "https://github.com/Rylan-Meilutis/sedsprintf_rs.git", branch = "main" }
 ```
+
+## Feature selection
+Common patterns:
+- Default (host build): no extra features.
+- Embedded: `features = ["embedded"]`.
+- Disable compression: `default-features = false` and omit `compression`.
 
 ## Minimal router example
 
@@ -53,14 +59,46 @@ fn main() -> TelemetryResult<()> {
 }
 ```
 
+## Logging telemetry
+Common patterns:
+- `router.log(ty, &[T])`: uses the schema and validates sizes.
+- `router.log_ts(ty, &[T], timestamp_ms)`: explicit timestamp.
+- `router.log_queue(ty, &[T])`: enqueue for later transmit.
+
+If you already have raw bytes, use `router.tx_serialized` or `router.tx_serialized_queue`.
+
 ## Receiving packets
 - Synchronous: `router.rx_serialized(bytes)`
-- Queued: `router.rx_serialized_queue(bytes)` and then `router.process_rx_queue()`
+- Queued: `router.rx_serialized_queue(bytes)` then `router.process_rx_queue()`
 
-If you already built a TelemetryPacket, use `router.rx(&packet)` or `router.rx_queue(packet)`.
+If you already built a `TelemetryPacket`, use `router.rx(&packet)` or `router.rx_queue(packet)`.
 
-## Working with timestamps
-Use `log_ts` and `log_queue_ts` to provide explicit timestamps in ms.
+## LinkId handling
+If you are bridging multiple links, use the `*_from` variants to tag ingress links:
+- `rx_serialized_from(bytes, link_id)`
+- `rx_from(packet, link_id)`
+
+Your TX callback receives the `LinkId` of the ingress link so it can avoid echoing back on the same link.
+
+## Payload validation notes
+Payload size and type are validated against the schema:
+- Static layouts must match exactly.
+- Dynamic numeric payloads must be a multiple of element width.
+- Strings must be valid UTF-8 (trailing NULs ignored).
+
+If validation fails, the log or rx call returns a `TelemetryError`.
+
+## Queue processing
+Queues are bounded. If you enqueue frequently, call:
+- `process_rx_queue()`
+- `process_tx_queue()`
+- `process_all_queues()`
+
+to keep latency low and avoid evictions.
+
+## Error handling
+- Handler failures are retried up to `MAX_HANDLER_RETRIES`.
+- A permanent handler failure removes the packet ID from dedupe so a resend can be processed.
 
 ## Embedded notes
 - Use the `embedded` feature and provide `telemetryMalloc`, `telemetryFree`, and `seds_error_msg` symbols.
