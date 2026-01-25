@@ -5,7 +5,6 @@ Requires the wiki repos to exist (create the first wiki page in the UI first).
 """
 
 import argparse
-import os
 import shutil
 import subprocess
 from pathlib import Path
