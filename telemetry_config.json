@@ -17,7 +17,7 @@
     {
       "rust": "TelemetryError",
       "name": "TELEMETRY_ERROR",
-      "doc": "Encoded telemetry error text (string payload).",
+      "doc": "Encoded telemetry error text (string payload) (CRITICAL FOR SYSTEM FUNCTIONALITY, DO NOT REMOVE)",
       "class": "Error",
       "element": {
         "kind": "Dynamic",
@@ -31,12 +31,12 @@
     {
       "rust": "GpsData",
       "name": "GPS_DATA",
-      "doc": "GPS data (typically 3× f32: latitude, longitude, altitude).",
+      "doc": "GPS data (typically 3\u00d7 f32: latitude, longitude, altitude).",
       "class": "Data",
       "element": {
         "kind": "Static",
-        "count": 3,
-        "data_type": "Float32"
+        "data_type": "Float32",
+        "count": 3
       },
       "endpoints": [
         "Radio",
@@ -46,12 +46,12 @@
     {
       "rust": "ImuData",
       "name": "IMU_DATA",
-      "doc": "IMU data (typically 6× f32: accel/gyro vector).",
+      "doc": "IMU data (typically 6\u00d7 f32: accel/gyro vector).",
       "class": "Data",
       "element": {
         "kind": "Static",
-        "count": 6,
-        "data_type": "Float32"
+        "data_type": "Float32",
+        "count": 6
       },
       "endpoints": [
         "Radio",
@@ -65,8 +65,8 @@
       "class": "Data",
       "element": {
         "kind": "Static",
-        "count": 2,
-        "data_type": "Float32"
+        "data_type": "Float32",
+        "count": 2
       },
       "endpoints": [
         "Radio",
@@ -80,8 +80,8 @@
       "class": "Data",
       "element": {
         "kind": "Static",
-        "count": 1,
-        "data_type": "Bool"
+        "data_type": "Bool",
+        "count": 1
       },
       "endpoints": [
         "SdCard"
@@ -94,8 +94,8 @@
       "class": "Data",
       "element": {
         "kind": "Static",
-        "count": 3,
-        "data_type": "Float32"
+        "data_type": "Float32",
+        "count": 3
       },
       "endpoints": [
         "Radio",
@@ -123,8 +123,8 @@
       "class": "Data",
       "element": {
         "kind": "Static",
-        "count": 0,
-        "data_type": "NoData"
+        "data_type": "NoData",
+        "count": 0
       },
       "endpoints": [
         "SdCard",

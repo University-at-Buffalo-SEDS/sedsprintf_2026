@@ -20,3 +20,5 @@ python-files/sedsprintf_rs/sedsprintf_rs.pyi
 *.pyi
 /sedsprintf_macros/target/
 /sedsprintf_macros/Cargo.lock
+
+*..wiki/
