@@ -3,14 +3,17 @@
 This directory contains the in-repo wiki. Markdown renders in both GitHub and GitLab.
 
 Start here:
+
 - docs/wiki/Home.md
 
 ## Easy overview
+
 - docs/wiki/Overview.md
 - docs/wiki/Concepts.md
 - docs/wiki/Examples.md
 
 ## How-to guides
+
 - docs/wiki/Build-and-Configure.md
 - docs/wiki/Usage-Rust.md
 - docs/wiki/Usage-C-Cpp.md
@@ -18,6 +21,7 @@ Start here:
 - docs/wiki/Troubleshooting.md
 
 ## Technical reference
+
 - docs/wiki/technical/Index.md
 - docs/wiki/technical/Architecture.md
 - docs/wiki/technical/Telemetry-Schema.md

@@ -22,6 +22,7 @@ target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE sedsprintf_rs::sedsprintf_rs
 ```
 
 Important CMake variables:
+
 - `SEDSPRINTF_EMBEDDED_BUILD` (ON/OFF)
 - `SEDSPRINTF_RS_TARGET` (Rust target triple)
 - `SEDSPRINTF_RS_DEVICE_IDENTIFIER`
@@ -29,7 +30,9 @@ Important CMake variables:
 - `SEDSPRINTF_RS_ENV_<KEY>` for any config env var
 
 ## Manual build (no CMake)
+
 If you want to call Cargo directly:
+
 ```
 DEVICE_IDENTIFIER=FC26_MAIN cargo build --release
 ```
@@ -83,7 +86,9 @@ int main(void)
 See `c-example-code/` for a more complete example.
 
 ## Sending and receiving
+
 Common calls:
+
 - `seds_router_log` / `seds_router_log_ts`: log typed payloads.
 - `seds_router_tx_serialized`: send raw bytes.
 - `seds_router_rx_serialized`: receive bytes immediately.
@@ -91,12 +96,16 @@ Common calls:
 - `seds_router_process_all_queues`: process queued RX/TX.
 
 ## Payload layout expectations
-Payloads are little-endian. The schema defines element type and count. For dynamic payloads, sizes must be a multiple of element width.
+
+Payloads are little-endian. The schema defines element type and count. For dynamic payloads, sizes must be a multiple of
+element width.
 
 Strings must be valid UTF-8. For static strings, the payload is padded or truncated to `STATIC_STRING_LENGTH`.
 
 ## Embedded allocator hooks
+
 Bare-metal builds must provide:
+
 - `void *telemetryMalloc(size_t)`
 - `void telemetryFree(void *)`
 - `void seds_error_msg(const char *, size_t)`
@@ -104,4 +113,6 @@ Bare-metal builds must provide:
 A simple stub is shown in `README.md` and can be adapted for your platform.
 
 ## Threading and reentrancy
-The router uses internal locking, so the C API is safe to call from multiple threads if your platform supports it. In bare-metal contexts, you may still want to serialize access around interrupts.
+
+The router uses internal locking, so the C API is safe to call from multiple threads if your platform supports it. In
+bare-metal contexts, you may still want to serialize access around interrupts.

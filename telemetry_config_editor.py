@@ -220,8 +220,8 @@ class TelemetryConfigEditor(tk.Tk):
         self.json_path_var = tk.StringVar(value=self._json_path_display())
 
         # HASH-BASED dirty state
-        self._saved_hash: str = ""   # baseline (loaded/saved)
-        self._cur_hash: str = ""     # current
+        self._saved_hash: str = ""  # baseline (loaded/saved)
+        self._cur_hash: str = ""  # current
         self.dirty = False
 
         # Live-edit bookkeeping
@@ -323,15 +323,15 @@ class TelemetryConfigEditor(tk.Tk):
     # ---------------- Live editing wiring ----------------
 
     def _setup_live_edit_traces(self):
-        self.ep_rust_var.trace_add("write", lambda *_: self._schedule_live_endpoint_apply()) # type: ignore
-        self.ep_bm_var.trace_add("write", lambda *_: self._schedule_live_endpoint_apply()) # type: ignore
+        self.ep_rust_var.trace_add("write", lambda *_: self._schedule_live_endpoint_apply())  # type: ignore
+        self.ep_bm_var.trace_add("write", lambda *_: self._schedule_live_endpoint_apply())  # type: ignore
         self.ep_doc_text.bind("<<Modified>>", self._on_ep_doc_modified)
 
-        self.ty_rust_var.trace_add("write", lambda *_: self._schedule_live_type_apply()) # type: ignore
-        self.ty_class_var.trace_add("write", lambda *_: self._schedule_live_type_apply()) # type: ignore
-        self.ty_kind_var.trace_add("write", lambda *_: self._schedule_live_type_apply()) # type: ignore
-        self.ty_dtype_var.trace_add("write", lambda *_: self._schedule_live_type_apply()) # type: ignore
-        self.ty_count_var.trace_add("write", lambda *_: self._schedule_live_type_apply()) # type: ignore
+        self.ty_rust_var.trace_add("write", lambda *_: self._schedule_live_type_apply())  # type: ignore
+        self.ty_class_var.trace_add("write", lambda *_: self._schedule_live_type_apply())  # type: ignore
+        self.ty_kind_var.trace_add("write", lambda *_: self._schedule_live_type_apply())  # type: ignore
+        self.ty_dtype_var.trace_add("write", lambda *_: self._schedule_live_type_apply())  # type: ignore
+        self.ty_count_var.trace_add("write", lambda *_: self._schedule_live_type_apply())  # type: ignore
         self.ty_doc_text.bind("<<Modified>>", self._on_ty_doc_modified)
 
     def _on_ep_doc_modified(self, _e=None):

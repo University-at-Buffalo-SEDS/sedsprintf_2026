@@ -60,7 +60,7 @@ Examples:
 
 def _fmt_secs(s: float) -> str:
     if s < 1:
-        return f"{s*1000:.0f}ms"
+        return f"{s * 1000:.0f}ms"
     if s < 60:
         return f"{s:.2f}s"
     m = int(s // 60)
@@ -83,12 +83,12 @@ def _fail(msg: str) -> None:
 
 
 def output_hint_for_cmd(
-    cmd: list[str],
-    *,
-    repo_root: Path,
-    target: str = "",
-    release_build: bool = False,
-    embedded_profile: bool = False,
+        cmd: list[str],
+        *,
+        repo_root: Path,
+        target: str = "",
+        release_build: bool = False,
+        embedded_profile: bool = False,
 ) -> str | None:
     """
     Best-effort output location hint for common commands.
@@ -147,14 +147,14 @@ def output_hint_for_cmd(
 
 
 def run_cmd(
-    cmd: list[str],
-    *,
-    env: dict[str, str],
-    repo_root: Path,
-    title: str | None = None,
-    target: str = "",
-    release_build: bool = False,
-    embedded_profile: bool = False,
+        cmd: list[str],
+        *,
+        env: dict[str, str],
+        repo_root: Path,
+        title: str | None = None,
+        target: str = "",
+        release_build: bool = False,
+        embedded_profile: bool = False,
 ) -> None:
     """
     Run a command with nicer user feedback:
@@ -250,11 +250,11 @@ def _comment_out_pyi_ignore(gitignore: Path) -> None:
 
 
 def run_with_pyi_unignored(
-    cmd: list[str],
-    *,
-    env: dict[str, str],
-    repo_root: Path,
-    title: str | None = None,
+        cmd: list[str],
+        *,
+        env: dict[str, str],
+        repo_root: Path,
+        title: str | None = None,
 ) -> None:
     gitignore = Path(".gitignore")
     backup = None
