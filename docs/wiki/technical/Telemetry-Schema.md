@@ -21,8 +21,8 @@ deployed system will break decode compatibility.
 
 Built-ins:
 
-- `TelemetryError` data type is built-in and always occupies the first enum slot.
-- `TelemetryError` endpoint is built-in and is injected immediately after the first endpoint.
+- `TelemetryError` data type is built-in and is appended after all schema types.
+- `TelemetryError` endpoint is built-in and is appended after all schema endpoints.
 - Do not define `TelemetryError` in the JSON schema.
 
 Safe changes:

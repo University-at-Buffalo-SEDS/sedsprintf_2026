@@ -223,13 +223,6 @@ fn load_schema_absolute(path: &Path) -> TelemetryConfig {
 }
 
 fn validate_schema(cfg: &TelemetryConfig) {
-    if cfg.endpoints.is_empty() {
-        panic!("telemetry_config.json: endpoints is empty");
-    }
-    if cfg.types.is_empty() {
-        panic!("telemetry_config.json: types is empty");
-    }
-
     for ty in &cfg.types {
         if ty.rust == "TelemetryError" || ty.name == "TELEMETRY_ERROR" {
             panic!(
@@ -428,21 +421,24 @@ fn render_c_enum_datatype(cfg: &TelemetryConfig) -> String {
     let mut lines = Vec::new();
     lines.push("typedef enum SedsDataType {".to_string());
 
-    // Sequential discriminants from 0, built-ins then JSON order
-    lines.push("  /* Built-in TelemetryError */".to_string());
-    lines.push("  SEDS_DT_TELEMETRY_ERROR = 0,".to_string());
-
+    // Sequential discriminants from 0, JSON order then built-ins
     for (i, ty) in cfg.types.iter().enumerate() {
         // TELEMETRY_ERROR -> SEDS_DT_TELEMETRY_ERROR
         let name = format!("SEDS_DT_{}", ty.name);
         let doc = ty.doc.as_deref().unwrap_or("").trim();
-        let idx = i + 1;
+        let idx = i;
 
         if !doc.is_empty() {
             lines.push(format!("  /* {} */", sanitize_c_comment(doc)));
         }
         lines.push(format!("  {name} = {idx},"));
     }
+
+    lines.push("  /* Built-in TelemetryError */".to_string());
+    lines.push(format!(
+        "  SEDS_DT_TELEMETRY_ERROR = {},",
+        cfg.types.len()
+    ));
 
     lines.push("} SedsDataType;".to_string());
     lines.join("\n")
@@ -452,28 +448,22 @@ fn render_c_enum_endpoint(cfg: &TelemetryConfig) -> String {
     let mut lines = Vec::new();
     lines.push("typedef enum SedsDataEndpoint {".to_string());
 
-    if let Some(first) = cfg.endpoints.first() {
-        let name = format!("SEDS_EP_{}", first.name);
-        let doc = first.doc.as_deref().unwrap_or("").trim();
-        if !doc.is_empty() {
-            lines.push(format!("  /* {} */", sanitize_c_comment(doc)));
-        }
-        lines.push(format!("  {name} = 0,"));
-    }
-
-    lines.push("  /* Built-in TelemetryError endpoint */".to_string());
-    lines.push("  SEDS_EP_TELEMETRY_ERROR = 1,".to_string());
-
-    for (i, ep) in cfg.endpoints.iter().enumerate().skip(1) {
+    for (i, ep) in cfg.endpoints.iter().enumerate() {
         let name = format!("SEDS_EP_{}", ep.name);
         let doc = ep.doc.as_deref().unwrap_or("").trim();
-        let idx = i + 1;
+        let idx = i;
 
         if !doc.is_empty() {
             lines.push(format!("  /* {} */", sanitize_c_comment(doc)));
         }
         lines.push(format!("  {name} = {idx},"));
     }
+
+    lines.push("  /* Built-in TelemetryError endpoint */".to_string());
+    lines.push(format!(
+        "  SEDS_EP_TELEMETRY_ERROR = {},",
+        cfg.endpoints.len()
+    ));
 
     lines.push("} SedsDataEndpoint;".to_string());
     lines.join("\n")
@@ -502,41 +492,31 @@ fn render_pyi_enums(cfg: &TelemetryConfig, sr: &SedsResultEnum) -> String {
     let dt = render_python_intenum(
         "DataType",
         "Wire-level type tags (generated from telemetry_config.json).",
-        std::iter::once((
-            "TELEMETRY_ERROR",
-            0_i64,
-            "Built-in telemetry error text (string payload).",
-        ))
-        .chain(
-            cfg.types
-                .iter()
-                .enumerate()
-                .map(|(i, t)| (t.name.as_str(), (i + 1) as i64, t.doc.as_deref().unwrap_or(""))),
-        )
-        .collect::<Vec<_>>(),
+        cfg.types
+            .iter()
+            .enumerate()
+            .map(|(i, t)| (t.name.as_str(), i as i64, t.doc.as_deref().unwrap_or("")))
+            .chain(std::iter::once((
+                "TELEMETRY_ERROR",
+                cfg.types.len() as i64,
+                "Built-in telemetry error text (string payload).",
+            )))
+            .collect::<Vec<_>>(),
     );
 
     let ep = render_python_intenum(
         "DataEndpoint",
         "Routing endpoints for packets (generated from telemetry_config.json).",
-        std::iter::once((
-            cfg.endpoints[0].name.as_str(),
-            0_i64,
-            cfg.endpoints[0].doc.as_deref().unwrap_or(""),
-        ))
-        .chain(std::iter::once((
-            "TELEMETRY_ERROR",
-            1_i64,
-            "Built-in telemetry error endpoint.",
-        )))
-        .chain(
-            cfg.endpoints
-                .iter()
-                .enumerate()
-                .skip(1)
-                .map(|(i, e)| (e.name.as_str(), (i + 1) as i64, e.doc.as_deref().unwrap_or(""))),
-        )
-        .collect::<Vec<_>>(),
+        cfg.endpoints
+            .iter()
+            .enumerate()
+            .map(|(i, e)| (e.name.as_str(), i as i64, e.doc.as_deref().unwrap_or("")))
+            .chain(std::iter::once((
+                "TELEMETRY_ERROR",
+                cfg.endpoints.len() as i64,
+                "Built-in telemetry error endpoint.",
+            )))
+            .collect::<Vec<_>>(),
     );
 
     let sr_members = sr

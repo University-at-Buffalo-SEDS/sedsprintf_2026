@@ -96,8 +96,8 @@ SedsResult bus_send(SimBus * bus, const SimNode * from, const uint8_t * bytes, s
         node_rx(n, bytes, len);
     }
 
-    // NEW: forward into relay if this bus is linked to one
-    if (bus->relay)
+    // Forward into relay only for locally-originated sends.
+    if (bus->relay && from != NULL)
     {
         // Treat this as "incoming from this side"
         SedsResult r = seds_relay_rx_serialized_from_side(
@@ -203,6 +203,7 @@ SedsResult node_init(SimNode * n, SimBus * bus, const char * name, int radio, in
     n->name = name ? name : "node";
     n->has_radio = radio ? 1 : 0;
     n->has_sdcard = sdcard ? 1 : 0;
+    n->bus_side_id = 0;
 
     n->radio_hits = 0;
     n->sd_hits = 0;
@@ -240,13 +241,15 @@ SedsResult node_init(SimNode * n, SimBus * bus, const char * name, int radio, in
 
         return SEDS_ERR;
     }
-    if (seds_router_add_side_serialized(n->r, "BUS", 3, node_tx_send, n, true) < 0)
+    int32_t side_id = seds_router_add_side_serialized(n->r, "BUS", 3, node_tx_send, n, true);
+    if (side_id < 0)
     {
         fprintf(stderr, "[%s] Failed to add router side\n", n->name);
         seds_router_free(n->r);
         n->r = NULL;
         return SEDS_ERR;
     }
+    n->bus_side_id = (uint32_t) side_id;
 
     bus_register(bus, n);
 
@@ -269,7 +272,7 @@ void node_rx(SimNode * n, const uint8_t * bytes, const size_t len)
 {
     if (!n || !n->r || !bytes || !len) return;
     // LOCK();
-    seds_router_rx_serialized_packet_to_queue(n->r, bytes, len);
+    seds_router_rx_serialized_packet_to_queue_from_side(n->r, n->bus_side_id, bytes, len);
 }
 
 SedsResult node_log(

@@ -34,6 +34,7 @@ Options (can be combined where it makes sense):
   maturin-install         Build wheel and install it with `uv pip install`.
   target=<triple>         Set Rust compilation target (e.g. target=thumbv7em-none-eabihf).
   device_id=<id>          Set DEVICE_IDENTIFIER env var for the build.
+  schema_path=<path>      Set SEDSPRINTF_RS_SCHEMA_PATH for the build.
 
 New (compile-time env vars):
   max_stack_payload=<n>   Set MAX_STACK_PAYLOAD for define_stack_payload!(env="MAX_STACK_PAYLOAD", ...).
@@ -340,6 +341,7 @@ def main(argv: list[str]) -> None:
     install_wheel = False
     target = ""
     device_id = ""
+    schema_path = ""
 
     env_overrides: dict[str, str] = {}
 
@@ -381,6 +383,12 @@ def main(argv: list[str]) -> None:
         elif arg.startswith("device_id="):
             device_id = arg.split("=", 1)[1]
             print(f"Device identifier set to: {device_id}")
+
+        elif arg.startswith("schema_path="):
+            schema_path = arg.split("=", 1)[1]
+            if not schema_path:
+                print_help("schema_path requires a value")
+            env_overrides["SEDSPRINTF_RS_SCHEMA_PATH"] = schema_path
 
         elif arg.startswith("max_stack_payload="):
             v = arg.split("=", 1)[1].strip()

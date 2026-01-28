@@ -213,18 +213,11 @@ impl Debug for RouterTxHandlerFn {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct RouterSideOptions {
     pub reliable_enabled: bool,
 }
 
-impl Default for RouterSideOptions {
-    fn default() -> Self {
-        Self {
-            reliable_enabled: false,
-        }
-    }
-}
 
 /// One side of the router – a name + TX handler.
 #[derive(Clone, Debug)]

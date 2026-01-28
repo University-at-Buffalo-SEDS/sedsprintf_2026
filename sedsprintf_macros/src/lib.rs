@@ -472,17 +472,6 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
         Err(e) => return syn::Error::new(Span::call_site(), e).to_compile_error().into(),
     };
 
-    if cfg.endpoints.is_empty() {
-        return syn::Error::new(Span::call_site(), "telemetry config: endpoints is empty")
-            .to_compile_error()
-            .into();
-    }
-    if cfg.types.is_empty() {
-        return syn::Error::new(Span::call_site(), "telemetry config: types is empty")
-            .to_compile_error()
-            .into();
-    }
-
     for ty in &cfg.types {
         if ty.rust == "TelemetryError" || ty.name == "TELEMETRY_ERROR" {
             return syn::Error::new(
@@ -528,15 +517,13 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
         ep_bm.push(ep.broadcast_mode.clone().unwrap_or_else(|| "Default".to_string()));
     }
 
-    let insert_idx = 1.min(ep_idents.len());
-    ep_idents.insert(insert_idx, syn::Ident::new("TelemetryError", Span::call_site()));
-    ep_docs.insert(
-        insert_idx,
+    ep_idents.push(syn::Ident::new("TelemetryError", Span::call_site()));
+    ep_docs.push(
         "Encoded telemetry error text (string payload) (CRITICAL FOR SYSTEM FUNCTIONALITY, DO NOT REMOVE)"
             .to_string(),
     );
-    ep_names.insert(insert_idx, "TELEMETRY_ERROR".to_string());
-    ep_bm.insert(insert_idx, "Always".to_string());
+    ep_names.push("TELEMETRY_ERROR".to_string());
+    ep_bm.push("Always".to_string());
 
     let max_ep_value = cfg.endpoints.len() as u32;
 
@@ -588,13 +575,16 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
 
     let max_ty_value = cfg.types.len() as u32;
 
-    let ty_variants = std::iter::once((
-        syn::Ident::new("TelemetryError", Span::call_site()),
-        "Encoded telemetry error text (string payload) (CRITICAL FOR SYSTEM FUNCTIONALITY, DO NOT REMOVE)"
-            .to_string(),
-    ))
-    .chain(ty_idents.iter().cloned().zip(ty_docs.iter().cloned()))
-    .map(|(id, doc)| {
+    let ty_variants = ty_idents
+        .iter()
+        .cloned()
+        .zip(ty_docs.iter().cloned())
+        .chain(std::iter::once((
+            syn::Ident::new("TelemetryError", Span::call_site()),
+            "Encoded telemetry error text (string payload) (CRITICAL FOR SYSTEM FUNCTIONALITY, DO NOT REMOVE)"
+                .to_string(),
+        )))
+        .map(|(id, doc)| {
         if doc.is_empty() {
             quote!(#id,)
         } else {
