@@ -5,7 +5,7 @@ nodes that exchange telemetry must use the exact same schema (including ordering
 
 Location:
 
-- `telemetry_config.json`
+- `telemetry_config.json` (override path with `SEDSPRINTF_RS_SCHEMA_PATH`)
 
 Generated outputs:
 
@@ -15,8 +15,15 @@ Generated outputs:
 
 ## Why schema order matters
 
-The order of items in `telemetry_config.json` defines the enum discriminants. Those discriminants are sent on the wire
-and used in endpoint bitmaps. Reordering entries without updating every deployed system will break decode compatibility.
+The order of items in `telemetry_config.json` defines the enum discriminants (with built-ins inserted as noted below).
+Those discriminants are sent on the wire and used in endpoint bitmaps. Reordering entries without updating every
+deployed system will break decode compatibility.
+
+Built-ins:
+
+- `TelemetryError` data type is built-in and always occupies the first enum slot.
+- `TelemetryError` endpoint is built-in and is injected immediately after the first endpoint.
+- Do not define `TelemetryError` in the JSON schema.
 
 Safe changes:
 

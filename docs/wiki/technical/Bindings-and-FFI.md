@@ -30,8 +30,8 @@ Typical usage patterns:
 
 ## Schema consistency
 
-Both bindings are generated from `telemetry_config.json`. Any schema change requires regenerating and redeploying the
-bindings.
+Both bindings are generated from `telemetry_config.json`, plus built-in `TelemetryError` endpoint/type (which must not
+appear in the JSON). Any schema change requires regenerating and redeploying the bindings.
 
 ## Ownership and memory
 

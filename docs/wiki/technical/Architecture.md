@@ -25,15 +25,15 @@ look the way they do. It assumes no prior knowledge of the codebase.
 
 ## Schema and metadata pipeline
 
-The schema is defined in `telemetry_config.json`. At build time:
+The schema is defined in `telemetry_config.json` (plus built-in `TelemetryError` endpoint/type). At build time:
 
 1) `build.rs` reads the schema to generate C headers and Python `.pyi` stubs.
 2) `define_telemetry_schema!` in `src/config.rs` expands into Rust enums and metadata tables.
 
 Core schema types:
 
-- `DataEndpoint`: enum generated from the `endpoints` list in `telemetry_config.json`.
-- `DataType`: enum generated from the `types` list in `telemetry_config.json`.
+- `DataEndpoint`: enum generated from the `endpoints` list in `telemetry_config.json` plus built-ins.
+- `DataType`: enum generated from the `types` list in `telemetry_config.json` plus built-ins.
 - `MessageMeta`: per-`DataType` metadata (name, element layout, allowed endpoints).
 - `MessageElement`: `Static(count, MessageDataType, MessageClass)` or `Dynamic(MessageDataType, MessageClass)`.
 - `MessageDataType`: primitive element type (Float32, UInt16, String, Binary, etc.).

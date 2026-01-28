@@ -133,4 +133,5 @@ pub const RELIABLE_MAX_PENDING: usize = match option_env!("RELIABLE_MAX_PENDING"
 
 
 
+// Schema path can be overridden at build time via SEDSPRINTF_RS_SCHEMA_PATH.
 define_telemetry_schema!(path = "telemetry_config.json");

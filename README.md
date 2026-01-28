@@ -220,9 +220,10 @@ You can edit it directly or use the GUI editor:
 ./telemetry_config_editor.py
 ```
 
-The editor auto-discovers the JSON path from `src/config.rs`, lets you add endpoints/types, and writes the schema back
-to
-`telemetry_config.json`.
+The editor auto-discovers the JSON path from `src/config.rs` (or `SEDSPRINTF_RS_SCHEMA_PATH`), lets you add
+endpoints/types, and writes the schema back to `telemetry_config.json`.
+
+Note: `TelemetryError` (data type and endpoint) is built-in and must not appear in the JSON schema.
 
 Note: The editor uses Tkinter. On some Linux distros you may need to install it
 (e.g. `sudo apt install python3-tk`).

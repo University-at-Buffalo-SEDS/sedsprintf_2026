@@ -61,13 +61,10 @@ fn test_payload_len_for(ty: DataType) -> usize {
 ///
 /// Used by various queue/timeout and concurrency tests.
 fn get_handler(rx_count_c: Arc<AtomicUsize>) -> EndpointHandler {
-    EndpointHandler::new_packet_handler(
-        DataEndpoint::SdCard,
-        move |_pkt: &TelemetryPacket| {
-            rx_count_c.fetch_add(1, Ordering::SeqCst);
-            Ok(())
-        },
-    )
+    EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt: &TelemetryPacket| {
+        rx_count_c.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    })
 }
 
 /// Build a handler for `SD_CARD` that:
@@ -75,25 +72,22 @@ fn get_handler(rx_count_c: Arc<AtomicUsize>) -> EndpointHandler {
 /// - decodes the payload as little-endian `f32`,
 /// - stores `(DataType, Vec<f32>)` into the shared `Mutex`.
 fn get_sd_card_handler(sd_seen_c: SeenType) -> EndpointHandler {
-    EndpointHandler::new_packet_handler(
-        DataEndpoint::SdCard,
-        move |pkt: &TelemetryPacket| {
-            // sanity: element sizing must be 4 bytes (f32) for GPS_DATA
-            let elems = get_message_meta(pkt.data_type()).element.into().max(1);
-            let per_elem = get_needed_message_size(pkt.data_type()) / elems;
-            assert_eq!(pkt.data_type(), DataType::GpsData);
-            assert_eq!(per_elem, 4, "GPS_DATA expected f32 elements");
+    EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |pkt: &TelemetryPacket| {
+        // sanity: element sizing must be 4 bytes (f32) for GPS_DATA
+        let elems = get_message_meta(pkt.data_type()).element.into().max(1);
+        let per_elem = get_needed_message_size(pkt.data_type()) / elems;
+        assert_eq!(pkt.data_type(), DataType::GpsData);
+        assert_eq!(per_elem, 4, "GPS_DATA expected f32 elements");
 
-            // decode f32 little-endian
-            let mut vals = Vec::with_capacity(pkt.payload().len() / 4);
-            for chunk in pkt.payload().chunks_exact(4) {
-                vals.push(f32::from_le_bytes(chunk.try_into().unwrap()));
-            }
+        // decode f32 little-endian
+        let mut vals = Vec::with_capacity(pkt.payload().len() / 4);
+        for chunk in pkt.payload().chunks_exact(4) {
+            vals.push(f32::from_le_bytes(chunk.try_into().unwrap()));
+        }
 
-            *sd_seen_c.lock().unwrap() = Some((pkt.data_type(), vals));
-            Ok(())
-        },
-    )
+        *sd_seen_c.lock().unwrap() = Some((pkt.data_type(), vals));
+        Ok(())
+    })
 }
 
 /// Helper that asserts `result` is a [`TelemetryError::HandlerError`].
@@ -142,7 +136,7 @@ mod tests2 {
             endpoints,
             0,
         )
-            .unwrap();
+        .unwrap();
 
         pkt.validate().unwrap();
 
@@ -211,7 +205,11 @@ mod tests2 {
         let sd_handler = get_sd_card_handler(sd_seen_c);
         let box_clock = StepClock::new_default_box();
 
-        let router = Router::new(RouterMode::Sink, RouterConfig::new(vec![sd_handler]), box_clock);
+        let router = Router::new(
+            RouterMode::Sink,
+            RouterConfig::new(vec![sd_handler]),
+            box_clock,
+        );
         router.add_side_serialized("tx", transmit);
 
         // send GPS_DATA (3 * f32) using Router::log (uses default endpoints from schema)
@@ -399,7 +397,7 @@ unsafe fn copy_telemetry_packet_raw(
         s.timestamp(),
         payload_arc,
     )
-        .map_err(|_| "packet validation failed")?;
+    .map_err(|_| "packet validation failed")?;
 
     *d = new_pkt;
     Ok(())
@@ -440,7 +438,7 @@ fn helpers_copy_telemetry_packet() {
         src.timestamp(),
         Arc::from(src.payload()), // deep copy payload
     )
-        .expect("src packet should be valid");
+    .expect("src packet should be valid");
 
     let st = unsafe { copy_telemetry_packet_raw(&mut dest as *mut _, &src as *const _) };
     assert!(st.is_ok());
@@ -474,10 +472,6 @@ mod handler_failure_tests {
     use core::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
 
-    /// Helper: convert an index into a valid [`DataEndpoint`] for tests.
-    fn ep(idx: u32) -> DataEndpoint {
-        DataEndpoint::try_from_u32(idx).expect("Need endpoint present in enum for tests")
-    }
 
     /// Pick any valid [`DataType`] from the enum range for generic tests.
     fn pick_any_type() -> DataType {
@@ -502,8 +496,8 @@ mod handler_failure_tests {
     fn local_handler_failure_sends_error_packet_to_other_locals() {
         let ty = pick_any_type();
         let ts = 42_u64;
-        let failing_ep = ep(0);
-        let other_ep = ep(1);
+        let failing_ep = DataEndpoint::SdCard;
+        let other_ep = DataEndpoint::TelemetryError;
 
         // Capture the packets that reach the "other_ep" handler.
         let recv_count = Arc::new(AtomicUsize::new(0));
@@ -512,21 +506,18 @@ mod handler_failure_tests {
         let recv_count_c = recv_count.clone();
         let last_payload_c = last_payload.clone();
 
-        let failing =
-            EndpointHandler::new_packet_handler(failing_ep, |_pkt: &TelemetryPacket| {
-                Err(TelemetryError::BadArg)
-            });
+        let failing = EndpointHandler::new_packet_handler(failing_ep, |_pkt: &TelemetryPacket| {
+            Err(TelemetryError::BadArg)
+        });
 
-        let capturing = EndpointHandler::new_packet_handler(
-            other_ep,
-            move |pkt: &TelemetryPacket| {
+        let capturing =
+            EndpointHandler::new_packet_handler(other_ep, move |pkt: &TelemetryPacket| {
                 if pkt.data_type() == DataType::TelemetryError {
                     *last_payload_c.lock().unwrap() = pkt.as_string();
                 }
                 recv_count_c.fetch_add(1, Ordering::SeqCst);
                 Ok(())
-            },
-        );
+            });
 
         let box_clock = StepClock::new_default_box();
 
@@ -543,7 +534,7 @@ mod handler_failure_tests {
             ts,
             Arc::<[u8]>::from(payload_for(ty)),
         )
-            .unwrap();
+        .unwrap();
 
         handle_errors(router.tx(pkt));
 
@@ -555,7 +546,7 @@ mod handler_failure_tests {
 
         // Verify exact payload text produced by handle_callback_error(Some(dest), e)
         let expected = format!(
-            "{{Type: TELEMETRY_ERROR, Data Size: {:?}, Sender: TEST_PLATFORM, Endpoints: [RADIO], Timestamp: 0 (0s 000ms), Error: (\"Handler for endpoint {:?} failed on device {:?}: {:?}\")}}",
+            "{{Type: TELEMETRY_ERROR, Data Size: {:?}, Sender: TEST_PLATFORM, Endpoints: [TELEMETRY_ERROR], Timestamp: 0 (0s 000ms), Error: (\"Handler for endpoint {:?} failed on device {:?}: {:?}\")}}",
             68,
             failing_ep,
             DEVICE_IDENTIFIER,
@@ -575,31 +566,32 @@ mod handler_failure_tests {
         let ts = 31415_u64;
 
         // One local endpoint (to receive error), one "remote" endpoint (not in handlers)
-        let local_ep = ep(0);
-        let remote_ep = ep(1);
+        let local_ep = DataEndpoint::SdCard;
+        let remote_ep = DataEndpoint::Radio;
 
         let saw_error = Arc::new(AtomicUsize::new(0));
         let last_payload = Arc::new(Mutex::new(String::new()));
         let saw_error_c = saw_error.clone();
         let last_payload_c = last_payload.clone();
 
-        let capturing = EndpointHandler::new_packet_handler(
-            local_ep,
-            move |pkt: &TelemetryPacket| {
+        let capturing =
+            EndpointHandler::new_packet_handler(local_ep, move |pkt: &TelemetryPacket| {
                 if pkt.data_type() == DataType::TelemetryError {
                     *last_payload_c.lock().unwrap() = pkt.as_string();
                     saw_error_c.fetch_add(1, Ordering::SeqCst);
                 }
                 Ok(())
-            },
-        );
+            });
 
-        let tx_fail = |_bytes: &[u8]| -> crate::TelemetryResult<()> {
-            Err(TelemetryError::Io("boom"))
-        };
+        let tx_fail =
+            |_bytes: &[u8]| -> crate::TelemetryResult<()> { Err(TelemetryError::Io("boom")) };
         let box_clock = StepClock::new_default_box();
 
-        let router = Router::new(RouterMode::Sink, RouterConfig::new(vec![capturing]), box_clock);
+        let router = Router::new(
+            RouterMode::Sink,
+            RouterConfig::new(vec![capturing]),
+            box_clock,
+        );
         router.add_side_serialized("tx", tx_fail);
 
         let pkt = TelemetryPacket::new(
@@ -610,7 +602,7 @@ mod handler_failure_tests {
             ts,
             Arc::<[u8]>::from(payload_for(ty)),
         )
-            .unwrap();
+        .unwrap();
 
         handle_errors(router.tx(pkt));
 
@@ -691,7 +683,7 @@ mod timeout_tests {
             &[DataEndpoint::SdCard], // <- only local
             ts,
         )
-            .unwrap()
+        .unwrap()
     }
 
     /// Build a TX function that increments `counter` for each frame sent.
@@ -724,7 +716,11 @@ mod timeout_tests {
 
         let box_clock = StepClock::new_default_box();
 
-        let r = Router::new(RouterMode::Sink, RouterConfig::new(vec![handler]), box_clock);
+        let r = Router::new(
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
+            box_clock,
+        );
         r.add_side_serialized("tx", tx);
 
         // Enqueue TX (3) – make each payload slightly different to avoid dedup.
@@ -789,9 +785,9 @@ mod timeout_tests {
                     &[DataEndpoint::SdCard],
                     1 + i,
                 )
-                    .unwrap(),
+                .unwrap(),
             )
-                .unwrap();
+            .unwrap();
         }
 
         // Non-zero timeout: must do *some* work, but we no longer require
@@ -846,9 +842,9 @@ mod timeout_tests {
                     &[DataEndpoint::SdCard],
                     1 + i,
                 )
-                    .unwrap(),
+                .unwrap(),
             )
-                .unwrap();
+            .unwrap();
         }
 
         // Step is 5ms per call; timeout 10ms allows two iterations max
@@ -986,7 +982,7 @@ mod tests_extra {
             &[DataEndpoint::SdCard, DataEndpoint::Radio],
             123,
         )
-            .unwrap();
+        .unwrap();
 
         let wire = serialize::serialize_packet(&pkt);
         let hdr = serialize::header_size_bytes(&pkt);
@@ -1019,7 +1015,7 @@ mod tests_extra {
             &[DataEndpoint::SdCard, DataEndpoint::Radio],
             0,
         )
-            .unwrap();
+        .unwrap();
 
         let wire1 = serialize::serialize_packet(&pkt);
         let pkt2 = serialize::deserialize_packet(&wire1).unwrap();
@@ -1047,7 +1043,7 @@ mod tests_extra {
                 ts,
                 Arc::<[u8]>::from(payload),
             )
-                .unwrap()
+            .unwrap()
         }
 
         // Case 1: small (all varints fit in 1 byte)
@@ -1110,18 +1106,12 @@ mod tests_extra {
             123456,
             Arc::<[u8]>::from(payload),
         )
-            .unwrap();
+        .unwrap();
 
         let wire = serialize::serialize_packet(&pkt);
         let back = serialize::deserialize_packet(&wire).unwrap();
-        let has_all_endpoints = back
-            .endpoints()
-            .iter()
-            .all(|ep| endpoints.contains(ep));
-        assert!(
-            has_all_endpoints,
-            "endpoints must roundtrip 1:1"
-        );
+        let has_all_endpoints = back.endpoints().iter().all(|ep| endpoints.contains(ep));
+        assert!(has_all_endpoints, "endpoints must roundtrip 1:1");
         assert_eq!(back.data_type(), pkt.data_type());
         assert_eq!(back.timestamp(), pkt.timestamp());
         assert_eq!(back.payload(), pkt.payload());
@@ -1146,7 +1136,7 @@ mod tests_extra {
             ts,
             Arc::<[u8]>::from(payload),
         )
-            .unwrap();
+        .unwrap();
 
         let wire = serialize::serialize_packet(&pkt);
         let env = serialize::peek_envelope(&wire).unwrap();
@@ -1191,7 +1181,7 @@ mod tests_extra {
             &[DataEndpoint::SdCard],
             123,
         )
-            .unwrap();
+        .unwrap();
         let mut wire = serialize::serialize_packet(&pkt).to_vec();
 
         // Compute where endpoint bits start (right after header varints)
@@ -1234,7 +1224,7 @@ mod tests_extra {
             &[DataEndpoint::SdCard, DataEndpoint::Radio],
             999,
         )
-            .unwrap();
+        .unwrap();
 
         let wire = serialize::serialize_packet(&pkt);
         let hdr = serialize::header_size_bytes(&pkt);
@@ -1264,7 +1254,7 @@ mod tests_extra {
             0,
             Arc::<[u8]>::from(buf),
         )
-            .unwrap();
+        .unwrap();
 
         assert_eq!(pkt.data_as_utf8_ref(), Some("hello"));
     }
@@ -1294,7 +1284,11 @@ mod tests_extra {
             },
         );
 
-        let r = Router::new(RouterMode::Sink, RouterConfig::new(vec![handler]), zero_clock());
+        let r = Router::new(
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
+            zero_clock(),
+        );
         r.add_side_serialized("tx", tx);
 
         // Enqueue one TX and one RX
@@ -1304,14 +1298,14 @@ mod tests_extra {
             &[DataEndpoint::SdCard, DataEndpoint::Radio],
             0,
         )
-            .unwrap();
+        .unwrap();
         let pkt_rx = TelemetryPacket::from_f32_slice(
             DataType::GpsData,
             &[4.0_f32, 5.0, 6.0],
             &[DataEndpoint::SdCard], // only local to avoid extra TX during receive
             0,
         )
-            .unwrap();
+        .unwrap();
 
         r.tx_queue(pkt_tx).unwrap();
         r.rx_queue(pkt_rx).unwrap();
@@ -1355,7 +1349,11 @@ mod tests_extra {
         );
 
         // Router with no TX (we only care about local handler invocation count).
-        let r = Router::new(RouterMode::Sink, RouterConfig::new(vec![failing]), zero_clock());
+        let r = Router::new(
+            RouterMode::Sink,
+            RouterConfig::new(vec![failing]),
+            zero_clock(),
+        );
 
         // Build a valid packet addressed to the failing endpoint.
         let pkt = TelemetryPacket::from_f32_slice(
@@ -1364,7 +1362,7 @@ mod tests_extra {
             &[DataEndpoint::SdCard],
             0,
         )
-            .unwrap();
+        .unwrap();
 
         // Sending should surface a HandlerError after all retries.
         let res = r.tx(pkt);
@@ -1396,7 +1394,7 @@ mod tests_extra {
             &[DataEndpoint::SdCard],
             12345,
         )
-            .unwrap();
+        .unwrap();
 
         assert_eq!(pkt.payload().len(), 12);
         assert_eq!(pkt.data_size(), 12);
@@ -1431,7 +1429,7 @@ mod tests_extra {
             endpoints,
             42,
         )
-            .unwrap();
+        .unwrap();
         let wire = serialize::serialize_packet(&pkt);
 
         let env = serialize::peek_envelope(&wire).unwrap();
@@ -1456,9 +1454,7 @@ mod tests_extra {
     #[test]
     fn tx_failure_emits_error_to_local_endpoints() {
         // A transmitter that always fails.
-        let failing_tx = |_bytes: &[u8]| -> TelemetryResult<()> {
-            Err(TelemetryError::Io("boom"))
-        };
+        let failing_tx = |_bytes: &[u8]| -> TelemetryResult<()> { Err(TelemetryError::Io("boom")) };
 
         // Capture what the local endpoint sees (should include a TelemetryError).
         let last_payload = Arc::new(Mutex::new(String::new()));
@@ -1474,7 +1470,11 @@ mod tests_extra {
             },
         );
 
-        let r = Router::new(RouterMode::Sink, RouterConfig::new(vec![capturing]), zero_clock());
+        let r = Router::new(
+            RouterMode::Sink,
+            RouterConfig::new(vec![capturing]),
+            zero_clock(),
+        );
         r.add_side_serialized("tx", failing_tx);
 
         // Include both a local and a non-local endpoint to force remote TX.
@@ -1484,7 +1484,7 @@ mod tests_extra {
             &[DataEndpoint::SdCard, DataEndpoint::Radio],
             7,
         )
-            .unwrap();
+        .unwrap();
 
         let res = r.tx(pkt);
         match res {
@@ -1582,7 +1582,7 @@ mod tests_more {
             0,
             Arc::<[u8]>::from(vec![0u8; need + 1]),
         )
-            .unwrap_err();
+        .unwrap_err();
         assert!(matches!(err, TelemetryError::SizeMismatch { .. }));
     }
 
@@ -1640,21 +1640,23 @@ mod tests_more {
             &[DataEndpoint::SdCard],
             123,
         )
-            .unwrap();
+        .unwrap();
         let wire = serialize::serialize_packet(&pkt);
 
         let called = StdArc::new(AtomicUsize::new(0));
         let c = called.clone();
-        let handler = EndpointHandler::new_serialized_handler(
-            DataEndpoint::SdCard,
-            move |bytes: &[u8]| {
+        let handler =
+            EndpointHandler::new_serialized_handler(DataEndpoint::SdCard, move |bytes: &[u8]| {
                 assert!(bytes.len() >= serialize::header_size_bytes(&pkt));
                 c.fetch_add(1, Ordering::SeqCst);
                 Ok(())
-            },
-        );
+            });
 
-        let r = Router::new(RouterMode::Sink, RouterConfig::new(vec![handler]), zero_clock());
+        let r = Router::new(
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
+            zero_clock(),
+        );
         r.rx_serialized(&wire).unwrap();
         assert_eq!(called.load(Ordering::SeqCst), 1);
     }
@@ -1676,11 +1678,10 @@ mod tests_more {
         let ph = packet_called.clone();
         let sh = serialized_called.clone();
 
-        let packet_h =
-            EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt| {
-                ph.fetch_add(1, Ordering::SeqCst);
-                Ok(())
-            });
+        let packet_h = EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt| {
+            ph.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        });
 
         let serialized_h =
             EndpointHandler::new_serialized_handler(DataEndpoint::Radio, move |_b| {
@@ -1721,7 +1722,11 @@ mod tests_more {
             },
         );
 
-        let r = Router::new(RouterMode::Sink, RouterConfig::new(vec![handler]), zero_clock());
+        let r = Router::new(
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
+            zero_clock(),
+        );
         r.add_side_serialized("tx", tx);
         let pkt = TelemetryPacket::from_f32_slice(
             DataType::GpsData,
@@ -1729,7 +1734,7 @@ mod tests_more {
             &[DataEndpoint::SdCard],
             0,
         )
-            .unwrap();
+        .unwrap();
         r.tx(pkt).unwrap();
 
         assert_eq!(tx_called.load(Ordering::SeqCst), 0);
@@ -1742,20 +1747,23 @@ mod tests_more {
     fn receive_direct_packet_invokes_handlers() {
         let called = StdArc::new(AtomicUsize::new(0));
         let c = called.clone();
-        let handler =
-            EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt| {
-                c.fetch_add(1, Ordering::SeqCst);
-                Ok(())
-            });
+        let handler = EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt| {
+            c.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        });
 
-        let r = Router::new(RouterMode::Sink, RouterConfig::new(vec![handler]), zero_clock());
+        let r = Router::new(
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
+            zero_clock(),
+        );
         let pkt = TelemetryPacket::from_f32_slice(
             DataType::GpsData,
             &[0.5, 0.5, 0.5],
             &[DataEndpoint::SdCard],
             0,
         )
-            .unwrap();
+        .unwrap();
         r.rx(&pkt).unwrap();
 
         assert_eq!(called.load(Ordering::SeqCst), 1);
@@ -1769,21 +1777,22 @@ mod tests_more {
     /// and doesn’t grow without bound.
     #[test]
     fn error_payload_is_truncated_to_meta_size() {
-        let failing_tx = |_b: &[u8]| -> TelemetryResult<()> {
-            Err(TelemetryError::Io("boom"))
-        };
+        let failing_tx = |_b: &[u8]| -> TelemetryResult<()> { Err(TelemetryError::Io("boom")) };
 
         let captured = StdArc::new(Mutex::new(String::new()));
         let c = captured.clone();
-        let handler =
-            EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |pkt| {
-                if pkt.data_type() == DataType::TelemetryError {
-                    *c.lock().unwrap() = pkt.as_string();
-                }
-                Ok(())
-            });
+        let handler = EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |pkt| {
+            if pkt.data_type() == DataType::TelemetryError {
+                *c.lock().unwrap() = pkt.as_string();
+            }
+            Ok(())
+        });
 
-        let r = Router::new(RouterMode::Sink, RouterConfig::new(vec![handler]), zero_clock());
+        let r = Router::new(
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
+            zero_clock(),
+        );
         r.add_side_serialized("tx", failing_tx);
         let pkt = TelemetryPacket::from_f32_slice(
             DataType::GpsData,
@@ -1791,7 +1800,7 @@ mod tests_more {
             &[DataEndpoint::SdCard, DataEndpoint::Radio],
             1,
         )
-            .unwrap();
+        .unwrap();
         let _ = r.tx(pkt);
 
         let s = captured.lock().unwrap().clone();
@@ -1923,11 +1932,10 @@ mod tests_more {
 
         let rx_count = Arc::new(AtomicUsize::new(0));
         let rxc = rx_count.clone();
-        let handler =
-            EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt| {
-                rxc.fetch_add(1, Ordering::SeqCst);
-                Ok(())
-            });
+        let handler = EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt| {
+            rxc.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        });
 
         let router = Router::new(
             RouterMode::Sink,
@@ -1950,7 +1958,7 @@ mod tests_more {
                 &[DataEndpoint::SdCard],
                 i as u64,
             )
-                .unwrap();
+            .unwrap();
             router.rx_queue(pkt).unwrap();
         }
 
@@ -2024,7 +2032,11 @@ mod concurrency_tests {
             },
         );
 
-        let router = Router::new(RouterMode::Sink, RouterConfig::new(vec![handler]), zero_clock());
+        let router = Router::new(
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
+            zero_clock(),
+        );
         let r = Arc::new(router);
 
         let mut threads_vec = Vec::new();
@@ -2041,7 +2053,7 @@ mod concurrency_tests {
                         &[DataEndpoint::SdCard],
                         idx,
                     )
-                        .unwrap();
+                    .unwrap();
                     r_cloned.rx_queue(pkt).unwrap();
                 }
             }));
@@ -2083,7 +2095,11 @@ mod concurrency_tests {
             },
         );
 
-        let router = Router::new(RouterMode::Sink, RouterConfig::new(vec![handler]), zero_clock());
+        let router = Router::new(
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
+            zero_clock(),
+        );
         let r = Arc::new(router);
 
         let mut threads_vec = Vec::new();
@@ -2099,7 +2115,7 @@ mod concurrency_tests {
                         &[DataEndpoint::SdCard],
                         idx,
                     )
-                        .unwrap();
+                    .unwrap();
                     let wire = serialize::serialize_packet(&pkt);
                     r_cloned
                         .rx_serialized(&wire)
@@ -2254,7 +2270,7 @@ mod concurrency_tests {
                     &[DataEndpoint::SdCard],
                     i as u64,
                 )
-                    .unwrap();
+                .unwrap();
                 r_rx.rx_queue(pkt).expect("rx_packet_to_queue failed");
             }
         });
@@ -2406,7 +2422,7 @@ mod relay_tests {
     /// and never loop back to the source.
     #[test]
     fn relay_basic_fan_out() {
-        let relay = Relay::new(zero_clock());
+        let relay = Arc::new(Relay::new(zero_clock()));
 
         // Three sides: A, B, C
         let (bus_a, tx_a) = SideBus::new();
@@ -2650,7 +2666,11 @@ mod dedupe_tests {
         );
 
         // Router with no TX; only RX + local fan-out.
-        let r = Router::new(RouterMode::Sink, RouterConfig::new(vec![handler]), zero_clock());
+        let r = Router::new(
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
+            zero_clock(),
+        );
 
         // Build a single wire frame we will reuse.
         let pkt = TelemetryPacket::from_f32_slice(
@@ -2659,7 +2679,7 @@ mod dedupe_tests {
             &[DataEndpoint::SdCard],
             0,
         )
-            .unwrap();
+        .unwrap();
         let wire = serialize::serialize_packet(&pkt);
 
         // Feed the identical frame many times.
@@ -2699,7 +2719,7 @@ mod dedupe_tests {
             &[DataEndpoint::SdCard],
             0,
         )
-            .unwrap();
+        .unwrap();
         let wire = serialize::serialize_packet(&pkt);
 
         // First time → delivered.
@@ -2729,7 +2749,11 @@ mod dedupe_tests {
             },
         );
 
-        let r = Router::new(RouterMode::Sink, RouterConfig::new(vec![handler]), zero_clock());
+        let r = Router::new(
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
+            zero_clock(),
+        );
 
         // Frame A
         let pkt_a = TelemetryPacket::from_f32_slice(
@@ -2738,7 +2762,7 @@ mod dedupe_tests {
             &[DataEndpoint::SdCard],
             0,
         )
-            .unwrap();
+        .unwrap();
         let wire_a = serialize::serialize_packet(&pkt_a);
 
         // Frame B (different payload)
@@ -2748,7 +2772,7 @@ mod dedupe_tests {
             &[DataEndpoint::SdCard],
             0,
         )
-            .unwrap();
+        .unwrap();
         let wire_b = serialize::serialize_packet(&pkt_b);
 
         r.rx_serialized(&wire_a).unwrap();
@@ -2926,15 +2950,15 @@ mod relay_reliable_tests {
         relay.add_side_serialized_with_options(
             "DST",
             move |bytes: &[u8]| -> TelemetryResult<()> {
-            sent_c.lock().unwrap().push(bytes.to_vec());
+                sent_c.lock().unwrap().push(bytes.to_vec());
 
-            let frame = serialize::peek_frame_info(bytes)?;
-            if let Some(hdr) = frame.reliable {
-                let ack_bytes =
-                    serialize::serialize_reliable_ack("DST", frame.envelope.ty, 0, hdr.seq);
-                relay_c.rx_serialized_from_side(1, ack_bytes.as_ref())?;
-            }
-            Ok(())
+                let frame = serialize::peek_frame_info(bytes)?;
+                if let Some(hdr) = frame.reliable {
+                    let ack_bytes =
+                        serialize::serialize_reliable_ack("DST", frame.envelope.ty, 0, hdr.seq);
+                    relay_c.rx_serialized_from_side(1, ack_bytes.as_ref())?;
+                }
+                Ok(())
             },
             RelaySideOptions {
                 reliable_enabled: true,
@@ -2976,7 +3000,10 @@ mod relay_reliable_tests {
 
     #[test]
     fn relay_reliable_retransmit_across_chain_preserves_order() {
-        let relay1 = Arc::new(Relay::new(StepClock::new_box(0, RELIABLE_RETRANSMIT_MS + 1)));
+        let relay1 = Arc::new(Relay::new(StepClock::new_box(
+            0,
+            RELIABLE_RETRANSMIT_MS + 1,
+        )));
         let relay2 = Arc::new(Relay::new(zero_clock()));
 
         relay1.add_side_serialized_with_options(
@@ -2993,17 +3020,17 @@ mod relay_reliable_tests {
         let relay2_rx = relay2.clone();
         let link_sent: Arc<Mutex<Vec<u32>>> = Arc::new(Mutex::new(Vec::new()));
         let link_sent_c = link_sent.clone();
-        relay1.add_side_serialized_with_options(
+        let relay1_mid = relay1.add_side_serialized_with_options(
             "MID",
             move |bytes: &[u8]| -> TelemetryResult<()> {
                 let frame = serialize::peek_frame_info(bytes)?;
-                if let Some(hdr) = frame.reliable {
-                    if (hdr.flags & serialize::RELIABLE_FLAG_ACK_ONLY) == 0 {
-                        link_sent_c.lock().unwrap().push(hdr.seq);
-                        if hdr.seq == 1 && *drop_first_c.lock().unwrap() {
-                            *drop_first_c.lock().unwrap() = false;
-                            return Ok(());
-                        }
+                if let Some(hdr) = frame.reliable
+                    && (hdr.flags & serialize::RELIABLE_FLAG_ACK_ONLY) == 0
+                {
+                    link_sent_c.lock().unwrap().push(hdr.seq);
+                    if hdr.seq == 1 && *drop_first_c.lock().unwrap() {
+                        *drop_first_c.lock().unwrap() = false;
+                        return Ok(());
                     }
                 }
                 relay2_rx.rx_serialized_from_side(0, bytes)
@@ -3015,7 +3042,7 @@ mod relay_reliable_tests {
 
         // Link: relay2 -> relay1 (ACKs and reverse traffic)
         let relay1_rx = relay1.clone();
-        relay2.add_side_serialized_with_options(
+        let _relay2_mid = relay2.add_side_serialized_with_options(
             "MID",
             move |bytes: &[u8]| -> TelemetryResult<()> {
                 relay1_rx.rx_serialized_from_side(1, bytes)
@@ -3028,14 +3055,24 @@ mod relay_reliable_tests {
         // Destination capture on relay2
         let delivered: Arc<Mutex<Vec<u32>>> = Arc::new(Mutex::new(Vec::new()));
         let delivered_c = delivered.clone();
-        relay2.add_side_serialized_with_options(
+        let relay2_for_ack = relay2.clone();
+        let relay1_for_ack = relay1.clone();
+        let relay2_dst_id: Arc<Mutex<Option<usize>>> = Arc::new(Mutex::new(None));
+        let relay2_dst_id_c = relay2_dst_id.clone();
+        let relay2_dst = relay2.add_side_serialized_with_options(
             "DST",
             move |bytes: &[u8]| -> TelemetryResult<()> {
                 let frame = serialize::peek_frame_info(bytes)?;
-                if let Some(hdr) = frame.reliable {
-                    if (hdr.flags & serialize::RELIABLE_FLAG_ACK_ONLY) == 0 {
-                        delivered_c.lock().unwrap().push(hdr.seq);
+                if let Some(hdr) = frame.reliable
+                    && (hdr.flags & serialize::RELIABLE_FLAG_ACK_ONLY) == 0
+                {
+                    delivered_c.lock().unwrap().push(hdr.seq);
+                    let ack_bytes =
+                        serialize::serialize_reliable_ack("DST", frame.envelope.ty, 0, hdr.seq);
+                    if let Some(dst_id) = *relay2_dst_id_c.lock().unwrap() {
+                        relay2_for_ack.rx_serialized_from_side(dst_id, ack_bytes.as_ref())?;
                     }
+                    relay1_for_ack.rx_serialized_from_side(relay1_mid, ack_bytes.as_ref())?;
                 }
                 Ok(())
             },
@@ -3043,6 +3080,7 @@ mod relay_reliable_tests {
                 reliable_enabled: true,
             },
         );
+        *relay2_dst_id.lock().unwrap() = Some(relay2_dst);
 
         let pkt1 = TelemetryPacket::from_f32_slice(
             DataType::GpsData,
@@ -3083,7 +3121,7 @@ mod relay_reliable_tests {
 
     #[test]
     fn relay_reliable_reorders_out_of_order_frames() {
-        let relay = Relay::new(zero_clock());
+        let relay = Arc::new(Relay::new(zero_clock()));
 
         relay.add_side_serialized_with_options(
             "SRC",
@@ -3095,14 +3133,18 @@ mod relay_reliable_tests {
 
         let delivered: Arc<Mutex<Vec<u32>>> = Arc::new(Mutex::new(Vec::new()));
         let delivered_c = delivered.clone();
+        let relay_for_ack = relay.clone();
         relay.add_side_serialized_with_options(
             "DST",
             move |bytes: &[u8]| -> TelemetryResult<()> {
                 let frame = serialize::peek_frame_info(bytes)?;
-                if let Some(hdr) = frame.reliable {
-                    if (hdr.flags & serialize::RELIABLE_FLAG_ACK_ONLY) == 0 {
-                        delivered_c.lock().unwrap().push(hdr.seq);
-                    }
+                if let Some(hdr) = frame.reliable
+                    && (hdr.flags & serialize::RELIABLE_FLAG_ACK_ONLY) == 0
+                {
+                    delivered_c.lock().unwrap().push(hdr.seq);
+                    let ack_bytes =
+                        serialize::serialize_reliable_ack("DST", frame.envelope.ty, 0, hdr.seq);
+                    relay_for_ack.rx_serialized_from_side(1, ack_bytes.as_ref())?;
                 }
                 Ok(())
             },
@@ -3151,7 +3193,11 @@ mod relay_reliable_tests {
         relay.process_all_queues_with_timeout(0).unwrap();
 
         let delivered = delivered.lock().unwrap().clone();
-        assert_eq!(delivered, vec![1, 2], "out-of-order frames must be reordered");
+        assert_eq!(
+            delivered,
+            vec![1, 2],
+            "out-of-order frames must be reordered"
+        );
     }
 }
 
@@ -3336,11 +3382,10 @@ mod router_tests {
         // Local handler on SD_CARD so the router considers SD_CARD "local".
         let local_calls = Arc::new(AtomicUsize::new(0));
         let local_calls_c = local_calls.clone();
-        let sd_handler =
-            EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt| {
-                local_calls_c.fetch_add(1, Ordering::SeqCst);
-                Ok(())
-            });
+        let sd_handler = EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt| {
+            local_calls_c.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        });
 
         let router = Router::new(
             RouterMode::Relay,
@@ -3405,11 +3450,10 @@ mod router_tests {
 
         let hits = Arc::new(AtomicUsize::new(0));
         let hits_c = hits.clone();
-        let sd_handler =
-            EndpointHandler::new_serialized_handler(DataEndpoint::SdCard, move |_b| {
-                hits_c.fetch_add(1, Ordering::SeqCst);
-                Ok(())
-            });
+        let sd_handler = EndpointHandler::new_serialized_handler(DataEndpoint::SdCard, move |_b| {
+            hits_c.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        });
 
         let router = Router::new(
             RouterMode::Sink,
@@ -3437,11 +3481,10 @@ mod router_tests {
 
         let seen: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(None));
         let seen_c = seen.clone();
-        let sd_handler =
-            EndpointHandler::new_serialized_handler(DataEndpoint::SdCard, move |b| {
-                *seen_c.lock().unwrap() = Some(b.to_vec());
-                Ok(())
-            });
+        let sd_handler = EndpointHandler::new_serialized_handler(DataEndpoint::SdCard, move |b| {
+            *seen_c.lock().unwrap() = Some(b.to_vec());
+            Ok(())
+        });
 
         let router = Router::new(
             RouterMode::Sink,

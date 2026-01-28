@@ -429,8 +429,25 @@ impl Relay {
         match &item.data {
             RelayItem::Packet(pkt) => pkt.packet_id(),
             RelayItem::Serialized(bytes) => {
+                let reliable_seq = serialize::peek_frame_info(bytes.as_ref())
+                    .ok()
+                    .and_then(|frame| frame.reliable)
+                    .and_then(|hdr| {
+                        if (hdr.flags & serialize::RELIABLE_FLAG_ACK_ONLY) != 0 {
+                            None
+                        } else {
+                            Some(hdr.seq)
+                        }
+                    });
+
                 match serialize::packet_id_from_wire(bytes.as_ref()) {
-                    Ok(id) => id,
+                    Ok(id) => {
+                        if let Some(seq) = reliable_seq {
+                            hash_bytes_u64(id, &seq.to_le_bytes())
+                        } else {
+                            id
+                        }
+                    }
                     Err(_e) => {
                         // Fallback: if bytes are malformed (or compression feature mismatch),
                         // hash raw bytes so we can still dedupe identical network duplicates.
@@ -572,8 +589,6 @@ impl Relay {
     ///
     /// Fanout is cheap: the `RelayItem` is cloned (Arc bump) and reused across all destinations.
     fn process_rx_queue_item(&self, item: RelayRxItem) -> TelemetryResult<()> {
-        let mut skip_dedupe = false;
-
         if let RelayItem::Serialized(bytes) = &item.data {
             let (opts, handler_is_serialized) = {
                 let st = self.state.lock();
@@ -637,7 +652,6 @@ impl Relay {
 
                                 let ack = expected;
                                 let _ = self.send_reliable_ack(item.src, frame.envelope.ty, ack);
-                                skip_dedupe = true;
                             }
                         }
                     }
@@ -651,7 +665,7 @@ impl Relay {
             }
         }
 
-        if !skip_dedupe && self.is_duplicate_pkt(&item)? {
+        if self.is_duplicate_pkt(&item)? {
             // Already fanned out this packet recently; skip.
             return Ok(());
         }
