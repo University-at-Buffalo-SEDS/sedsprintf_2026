@@ -86,9 +86,8 @@ SedsResult init_telemetry_router(void)
 
     SedsRouter * r = seds_router_new(
         Seds_RM_Sink,
-        tx_send,
-        NULL, /* tx_user */
         host_now_ms, /* clock */
+        NULL, /* user */
         locals,
         sizeof(locals) / sizeof(locals[0])
     );
@@ -99,6 +98,15 @@ SedsResult init_telemetry_router(void)
         g_router.r = NULL;
         g_router.created = 0;
 
+        return SEDS_ERR;
+    }
+
+    /* Register a serialized side for TX */
+    if (seds_router_add_side_serialized(r, "TX", 2, tx_send, NULL, true) < 0) {
+        printf("Error: failed to add router side\n");
+        seds_router_free(r);
+        g_router.r = NULL;
+        g_router.created = 0;
         return SEDS_ERR;
     }
 

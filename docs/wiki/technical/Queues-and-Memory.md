@@ -27,7 +27,7 @@ Growth uses a rational multiplier instead of floats:
 
 `ByteCost` is used throughout:
 
-- `QueueItem::Packet` includes packet byte cost plus `LinkId` size.
+- `RouterTxItem::Broadcast` / `RouterTxItem::ToSide` include packet byte cost plus metadata.
 - `QueueItem::Serialized` includes `Arc<[u8]>` overhead and length.
 - `RelayRxItem` and `RelayTxItem` account for their payload sizes.
 - `SmallPayload` accounts for inline vs heap sizes.

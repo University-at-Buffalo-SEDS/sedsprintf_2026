@@ -334,6 +334,11 @@ struct JsonType {
     #[serde(default)]
     doc: Option<String>,
 
+    #[serde(default)]
+    reliable: Option<bool>,
+    #[serde(default)]
+    reliable_mode: Option<String>,
+
     element: JsonElement,
     class: String,
 
@@ -426,6 +431,21 @@ fn broadcast_mode_token(name: &str) -> proc_macro2::TokenStream {
     // Must match caller crate's EndpointsBroadcastMode variant names exactly.
     let id = syn::Ident::new(name, Span::call_site());
     quote!(EndpointsBroadcastMode::#id)
+}
+
+fn reliable_mode_token(mode: &str) -> Result<proc_macro2::TokenStream, String> {
+    let mode_lc = mode.to_ascii_lowercase();
+    let ts = match mode_lc.as_str() {
+        "none" => quote!(crate::ReliableMode::None),
+        "ordered" => quote!(crate::ReliableMode::Ordered),
+        "unordered" => quote!(crate::ReliableMode::Unordered),
+        _ => {
+            return Err(format!(
+                "invalid reliable_mode: {mode:?} (expected \"None\", \"Ordered\", or \"Unordered\")"
+            ))
+        }
+    };
+    Ok(ts)
 }
 
 #[proc_macro]
@@ -536,6 +556,19 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
     let ty_meta_arms = cfg.types.iter().map(|ty| {
         let rust_id = syn::Ident::new(&ty.rust, Span::call_site());
         let name = &ty.name;
+        let reliable_mode = match &ty.reliable_mode {
+            Some(mode) => match reliable_mode_token(mode) {
+                Ok(ts) => ts,
+                Err(e) => return syn::Error::new(Span::call_site(), e).to_compile_error(),
+            },
+            None => {
+                if ty.reliable.unwrap_or(false) {
+                    quote!(crate::ReliableMode::Ordered)
+                } else {
+                    quote!(crate::ReliableMode::None)
+                }
+            }
+        };
 
         let class_ts = msg_class_token(&ty.class);
 
@@ -564,6 +597,7 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
                 name: #name,
                 element: #element_ts,
                 endpoints: &[#(#endpoints_tokens),*],
+                reliable: #reliable_mode,
             },
         }
     });

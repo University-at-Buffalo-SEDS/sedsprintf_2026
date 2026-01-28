@@ -67,12 +67,12 @@ int main(void)
 
     SedsRouter *r = seds_router_new(
         Seds_RM_Sink,
-        tx_send,
-        NULL,
         now_ms,
+        NULL,
         locals,
         sizeof(locals) / sizeof(locals[0])
     );
+    seds_router_add_side_serialized(r, "TX", 2, tx_send, NULL, true);
 
     float data[3] = {1.0f, 2.0f, 3.0f};
     seds_router_log(r, SEDS_DT_GPS_DATA, data, sizeof(data));
@@ -90,9 +90,9 @@ See `c-example-code/` for a more complete example.
 Common calls:
 
 - `seds_router_log` / `seds_router_log_ts`: log typed payloads.
-- `seds_router_tx_serialized`: send raw bytes.
-- `seds_router_rx_serialized`: receive bytes immediately.
-- `seds_router_rx_serialized_queue`: enqueue for later processing.
+- `seds_router_transmit_serialized_message`: send raw bytes.
+- `seds_router_receive_serialized`: receive bytes immediately.
+- `seds_router_rx_serialized_packet_to_queue`: enqueue for later processing.
 - `seds_router_process_all_queues`: process queued RX/TX.
 
 ## Payload layout expectations

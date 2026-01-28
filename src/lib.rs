@@ -359,6 +359,17 @@ pub enum EndpointsBroadcastMode {
     Default,
 }
 
+/// Reliable delivery mode for a data type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub enum ReliableMode {
+    /// No reliable delivery/acknowledgement on the wire.
+    None,
+    /// Reliable delivery with strict ordering.
+    Ordered,
+    /// Reliable delivery without ordering guarantees.
+    Unordered,
+}
+
 /// Static metadata for a message type: element count and valid endpoints.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct MessageMeta {
@@ -367,6 +378,8 @@ pub struct MessageMeta {
     element: MessageElement,
     /// Allowed endpoints for this message type.
     endpoints: &'static [DataEndpoint],
+    /// Reliable delivery mode for this type.
+    reliable: ReliableMode,
 }
 
 impl DataType {
@@ -383,6 +396,18 @@ impl DataType {
 #[inline]
 pub fn message_meta(ty: DataType) -> MessageMeta {
     get_message_meta(ty)
+}
+
+/// Return whether the given [`DataType`] is configured for reliable delivery.
+#[inline]
+pub const fn is_reliable_type(ty: DataType) -> bool {
+    !matches!(get_message_meta(ty).reliable, ReliableMode::None)
+}
+
+/// Return the reliable delivery mode for the given [`DataType`].
+#[inline]
+pub const fn reliable_mode(ty: DataType) -> ReliableMode {
+    get_message_meta(ty).reliable
 }
 
 // ---- Convenience multiplication helpers ----

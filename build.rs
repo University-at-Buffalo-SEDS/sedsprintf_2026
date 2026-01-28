@@ -62,6 +62,9 @@ struct JsonType {
     #[serde(default)]
     doc: Option<String>,
 
+    #[serde(default)]
+    _reliable: Option<bool>,
+
     element: JsonElement,
     class: String,
 

@@ -24,6 +24,10 @@ VARINT(sender_len: u64)         // logical sender length
 [VARINT(sender_wire_len: u64)]  // only if sender compressed
 ENDPOINTS_BITMAP               // 1 bit per DataEndpoint discriminant
 SENDER BYTES                   // raw or compressed
+[RELIABLE HEADER]              // only for types marked `reliable`
+    REL_FLAGS: u8
+    SEQ: u32 (little-endian)
+    ACK: u32 (little-endian)
 PAYLOAD BYTES                  // raw or compressed
 ```
 
@@ -33,6 +37,23 @@ PAYLOAD BYTES                  // raw or compressed
 - `FLAG_COMPRESSED_SENDER` (0x02): sender bytes are compressed.
 
 When a field is compressed, the logical length is still transmitted so the receiver can validate the decompressed size.
+
+## Reliable header
+
+For data types configured with `reliable: true` in `telemetry_config.json`, the wire format includes a fixed 9‑byte
+reliable header between the sender bytes and payload:
+
+- `REL_FLAGS`:
+  - `ACK_ONLY` (0x01): ACK-only control frame (no payload).
+  - `UNORDERED` (0x02): reliable delivery without ordering (ACK/retransmit enabled).
+  - `UNSEQUENCED` (0x80): best‑effort frame without ordering/ACK semantics.
+- `SEQ`: sequence number used for reliable delivery.
+- `ACK`: acknowledgement of received reliable sequence(s).
+
+`ACK_ONLY` frames are used internally by the router’s reliable layer and are not valid `TelemetryPacket`s.
+
+For ordered mode, `ACK` is cumulative (last in-order sequence). For unordered mode, `ACK` acknowledges the specific
+received `SEQ`.
 
 ## Endpoint bitmap
 

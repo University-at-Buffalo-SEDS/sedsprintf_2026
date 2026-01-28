@@ -48,7 +48,7 @@ For dynamic layouts, the element width is derived from `MessageDataType`:
 - timestamp and logical size (little‑endian)
 - payload bytes
 
-Packet IDs are intentionally LinkId‑agnostic so duplicates on different links are dropped.
+Packet IDs are intentionally side‑agnostic so duplicates on different sides are dropped.
 
 ## Conversions and helpers
 

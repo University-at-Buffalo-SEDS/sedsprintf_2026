@@ -8,38 +8,49 @@ This page dives into the Router internals in `src/router.rs` and how routing dec
 
 - `RouterConfig::new(handlers)` stores an `Arc<[EndpointHandler]>`.
 - An endpoint is "local" if any handler targets it.
+- `RouterConfig::with_reliable_enabled(false)` disables reliable sequencing/ACKs for this router
+  (useful when the underlying transport is already reliable, e.g., TCP).
 
 Handlers are typed:
 
 - `EndpointHandlerFn::Packet`: receives `TelemetryPacket`.
 - `EndpointHandlerFn::Serialized`: receives raw bytes (already on wire).
 
-## LinkId model
+## Side model
 
-`LinkId` identifies the ingress/egress link. Reserved IDs:
+The router uses **named sides** (UART/CAN/RADIO/etc.) instead of LinkId.
 
-- `0`: default (used by legacy APIs)
-- `1`: local (used for packets generated on the device)
+- You register sides with `add_side_serialized(...)` or `add_side_packet(...)`.
+- RX functions can tag an ingress side: `rx_serialized_from_side` / `rx_from_side`.
+- In `RouterMode::Relay`, packets are forwarded **once** to all other sides (the ingress side is excluded).
 
-You must supply IDs >= 2 for real transport links.
-
-The TX callback signature is:
+Side TX handlers are either:
 
 ```
-Fn(&[u8], &LinkId) -> TelemetryResult<()>
+Fn(&[u8]) -> TelemetryResult<()>
+Fn(&TelemetryPacket) -> TelemetryResult<()>
 ```
 
-The callback must avoid sending bytes back out the same `LinkId` they came from to prevent echo loops.
+Reliable delivery (`reliable: true` / `reliable_mode` in the schema) is only applied when:
+
+- the router config enables reliable (`RouterConfig::with_reliable_enabled(true)`), and
+- the side is marked reliable (`RouterSideOptions { reliable_enabled: true }`), and
+- the side handler is **serialized** (ACK control frames are wire-level bytes).
+
+`RouterSideOptions` defaults to `reliable_enabled: false`, so reliability is opt-in per side.
+
+If a side is already reliable (e.g., TCP), disable reliability on that side to avoid redundant checks.
 
 ## Receive pipeline (rx*)
 
 1) Bytes or packets are accepted immediately or queued.
-2) Packet ID is computed for dedupe.
+2) For reliable types, sequence/ACK headers are processed first (ACK-only frames are consumed here).
+3) Packet ID is computed for dedupe (unreliable / unsequenced frames).
     - Serialized bytes use `packet_id_from_wire` when possible.
     - If wire parsing fails, raw bytes are hashed as fallback.
-3) Recent‑ID cache drops duplicates.
-4) Local handlers are invoked with retries.
-5) In `RouterMode::Relay`, packets that require remote forwarding are forwarded once.
+4) Recent‑ID cache drops duplicates.
+5) Local handlers are invoked with retries.
+6) In `RouterMode::Relay`, packets that require remote forwarding are forwarded once.
 
 ## Forwarding rules
 

@@ -18,6 +18,7 @@
       "rust": "TelemetryError",
       "name": "TELEMETRY_ERROR",
       "doc": "Encoded telemetry error text (string payload) (CRITICAL FOR SYSTEM FUNCTIONALITY, DO NOT REMOVE)",
+      "reliable_mode": "None",
       "class": "Error",
       "element": {
         "kind": "Dynamic",
@@ -32,6 +33,7 @@
       "rust": "GpsData",
       "name": "GPS_DATA",
       "doc": "GPS data (typically 3\u00d7 f32: latitude, longitude, altitude).",
+      "reliable_mode": "Ordered",
       "class": "Data",
       "element": {
         "kind": "Static",

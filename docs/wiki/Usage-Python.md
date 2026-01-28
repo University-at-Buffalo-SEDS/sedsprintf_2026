@@ -36,19 +36,20 @@ def now_ms():
     return 0
 
 
-def tx(bytes_buf, link_id=None):
+def tx(bytes_buf):
     # send bytes to transport
     pass
 
 
-def on_packet(pkt, link_id=None):
+def on_packet(pkt):
     print(pkt)
 
 handlers = [
     (int(EP.SD_CARD), on_packet, None),
 ]
 
-router = seds.Router(tx=tx, now_ms=now_ms, handlers=handlers, mode=RM.Sink)
+router = seds.Router(now_ms=now_ms, handlers=handlers, mode=RM.Sink)
+router.add_side_serialized("RADIO", tx)
 router.log_f32(ty=DT.GPS_DATA, values=[1.0, 2.0, 3.0])
 router.process_all_queues()
 ```
@@ -76,9 +77,7 @@ Handlers are registered as tuples:
 (endpoint_id, handler_fn, user)
 ```
 
-`handler_fn` receives `(packet, link_id)`.
-
-If you do not care about the link, ignore `link_id`.
+`handler_fn` receives `(packet)`.
 
 ## Queue processing
 
@@ -88,10 +87,17 @@ The router can queue RX/TX operations. If you use the queue variants, call:
 - `process_tx_queue()`
 - `process_all_queues()`
 
-## Link IDs
+## Sides
 
-If you receive data from multiple links, use the `*_from` variants to tag ingress. The router will pass the `link_id` to
-your handlers and TX callback so you can avoid echoing.
+Routers use **named sides** (UART/CAN/RADIO/etc.). Register sides with:
+
+- `add_side_serialized(name, tx_cb)`
+- `add_side_packet(name, tx_cb)`
+
+Tag ingress with:
+
+- `receive_serialized_from_side(side_id, bytes)`
+- `receive_packet_from_side(side_id, packet)`
 
 ## Debugging tips
 

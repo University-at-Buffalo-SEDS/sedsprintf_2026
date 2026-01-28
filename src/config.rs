@@ -113,6 +113,24 @@ pub const MAX_HANDLER_RETRIES: usize = match option_env!("MAX_HANDLER_RETRIES") 
     None => 3,
 };
 
+/// Reliable retransmit timeout in milliseconds.
+pub const RELIABLE_RETRANSMIT_MS: u64 = match option_env!("RELIABLE_RETRANSMIT_MS") {
+    Some(val) => parse_usize(val) as u64,
+    None => 200,
+};
+
+/// Maximum number of retransmit attempts before giving up.
+pub const RELIABLE_MAX_RETRIES: u32 = match option_env!("RELIABLE_MAX_RETRIES") {
+    Some(val) => parse_usize(val) as u32,
+    None => 8,
+};
+
+/// Maximum pending reliable packets per (link, data type) stream.
+pub const RELIABLE_MAX_PENDING: usize = match option_env!("RELIABLE_MAX_PENDING") {
+    Some(val) => parse_usize(val),
+    None => 16,
+};
+
 
 
 define_telemetry_schema!(path = "telemetry_config.json");

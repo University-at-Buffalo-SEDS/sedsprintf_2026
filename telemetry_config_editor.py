@@ -50,6 +50,7 @@ DATA_TYPE_OPTIONS = [
 MESSAGE_CLASS_OPTIONS = ["Data", "Error", "Warning"]
 BROADCAST_MODE_OPTIONS = ["Always", "Never", "Default"]
 ELEMENT_KIND_OPTIONS = ["Static", "Dynamic"]
+RELIABLE_MODE_OPTIONS = ["None", "Ordered", "Unordered"]
 
 TELEMETRY_ERROR_RUST = "TelemetryError"
 TELEMETRY_ERROR_DOC = (
@@ -59,6 +60,8 @@ TELEMETRY_ERROR_TEMPLATE: Dict[str, Any] = {
     "rust": TELEMETRY_ERROR_RUST,
     "name": "TELEMETRY_ERROR",
     "doc": TELEMETRY_ERROR_DOC,
+    "reliable": False,
+    "reliable_mode": "None",
     "class": "Error",
     "element": {"kind": "Dynamic", "data_type": "String"},
     "endpoints": [],
@@ -139,7 +142,12 @@ def _endpoint_row_text(ep: Dict[str, Any]) -> str:
 
 def _type_row_text(ty: Dict[str, Any]) -> str:
     tag = " (locked)" if str(ty.get("rust", "")).strip() == TELEMETRY_ERROR_RUST else ""
-    return f"{ty.get('rust', '')}  [{ty.get('name', '')}]{tag}"
+    rel_mode = ty.get("reliable_mode", "")
+    if not rel_mode or rel_mode == "None":
+        rel = " [R]" if bool(ty.get("reliable", False)) else ""
+    else:
+        rel = f" [Rel:{rel_mode}]"
+    return f"{ty.get('rust', '')}  [{ty.get('name', '')}]{rel}{tag}"
 
 
 def _update_listbox_row(lb: tk.Listbox, idx: int, text: str) -> None:
@@ -332,6 +340,7 @@ class TelemetryConfigEditor(tk.Tk):
         self.ty_kind_var.trace_add("write", lambda *_: self._schedule_live_type_apply())  # type: ignore
         self.ty_dtype_var.trace_add("write", lambda *_: self._schedule_live_type_apply())  # type: ignore
         self.ty_count_var.trace_add("write", lambda *_: self._schedule_live_type_apply())  # type: ignore
+        self.ty_reliable_mode_var.trace_add("write", lambda *_: self._schedule_live_type_apply())  # type: ignore
         self.ty_doc_text.bind("<<Modified>>", self._on_ty_doc_modified)
 
     def _on_ep_doc_modified(self, _e=None):
@@ -475,6 +484,7 @@ class TelemetryConfigEditor(tk.Tk):
         new_kind = (self.ty_kind_var.get() or "Static").strip()
         new_dtype = (self.ty_dtype_var.get() or DATA_TYPE_OPTIONS[0]).strip()
         new_doc = self.ty_doc_text.get("1.0", tk.END).strip()
+        new_reliable_mode = (self.ty_reliable_mode_var.get() or "None").strip()
 
         if new_rust and not ensure_rust_ident(new_rust):
             return
@@ -483,6 +493,8 @@ class TelemetryConfigEditor(tk.Tk):
         if new_kind not in ELEMENT_KIND_OPTIONS:
             return
         if new_dtype not in DATA_TYPE_OPTIONS:
+            return
+        if new_reliable_mode not in RELIABLE_MODE_OPTIONS:
             return
 
         element: Dict[str, Any] = {"kind": new_kind, "data_type": new_dtype}
@@ -502,6 +514,8 @@ class TelemetryConfigEditor(tk.Tk):
             ty["rust"] = new_rust
             ty["name"] = rust_ident_to_schema_name(new_rust)
         ty["doc"] = new_doc
+        ty["reliable_mode"] = new_reliable_mode
+        ty["reliable"] = new_reliable_mode != "None"
         ty["class"] = new_class
         ty["element"] = element
         ty["endpoints"] = [e for e in sel_eps if e in known_eps]
@@ -683,12 +697,24 @@ class TelemetryConfigEditor(tk.Tk):
         self.ty_count_entry = ttk.Entry(right, textvariable=self.ty_count_var, width=10)
         self.ty_count_entry.grid(row=4, column=1, sticky="nw", padx=(10, 0), pady=(10, 0))
 
-        ttk.Label(right, text="Doc (optional):").grid(row=5, column=0, sticky="w", pady=(10, 0))
+        ttk.Label(right, text="Reliable mode:").grid(row=5, column=0, sticky="w", pady=(10, 0))
+        self.ty_reliable_mode_var = tk.StringVar(value="None")
+        self.ty_reliable_mode_combo = ttk.Combobox(
+            right,
+            textvariable=self.ty_reliable_mode_var,
+            values=RELIABLE_MODE_OPTIONS,
+            state="readonly",
+        )
+        self.ty_reliable_mode_combo.grid(
+            row=5, column=1, sticky="w", padx=(10, 0), pady=(10, 0)
+        )
+
+        ttk.Label(right, text="Doc (optional):").grid(row=6, column=0, sticky="w", pady=(10, 0))
         self.ty_doc_text = tk.Text(right, height=5)
-        self.ty_doc_text.grid(row=5, column=1, sticky="ew", padx=(10, 0), pady=(10, 0))
+        self.ty_doc_text.grid(row=6, column=1, sticky="ew", padx=(10, 0), pady=(10, 0))
 
         epbox = ttk.LabelFrame(right, text="Endpoints for this DataType", padding=8)
-        epbox.grid(row=6, column=0, columnspan=2, sticky="nsew", pady=(12, 0))
+        epbox.grid(row=7, column=0, columnspan=2, sticky="nsew", pady=(12, 0))
         epbox.columnconfigure(0, weight=1)
         epbox.columnconfigure(1, weight=0)
         epbox.columnconfigure(2, weight=1)
@@ -718,7 +744,7 @@ class TelemetryConfigEditor(tk.Tk):
             right,
             text="Edits apply in-memory automatically. Use Ctrl/Cmd+S to write JSON.",
             foreground="gray",
-        ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(14, 0))
+        ).grid(row=8, column=0, columnspan=2, sticky="w", pady=(14, 0))
 
         self._type_lock_widgets = [
             self.ty_rust_entry,
@@ -726,6 +752,7 @@ class TelemetryConfigEditor(tk.Tk):
             self.ty_kind_combo,
             self.ty_dtype_combo,
             self.ty_count_entry,
+            self.ty_reliable_mode_combo,
         ]
 
         self._update_count_visibility()
@@ -859,6 +886,8 @@ class TelemetryConfigEditor(tk.Tk):
             "rust": TELEMETRY_ERROR_RUST,
             "name": rust_ident_to_schema_name(TELEMETRY_ERROR_RUST),
             "doc": TELEMETRY_ERROR_DOC,
+            "reliable": False,
+            "reliable_mode": "None",
             "class": "Error",
             "element": {"kind": "Dynamic", "data_type": "String"},
         }
@@ -1052,6 +1081,15 @@ class TelemetryConfigEditor(tk.Tk):
                 if cnti < 0:
                     raise RuntimeError(f"types[{i}].element.count must be >= 0, got {cnti}")
 
+            if "reliable" in ty and not isinstance(ty.get("reliable"), bool):
+                raise RuntimeError(f"types[{i}].reliable must be a boolean")
+            if "reliable_mode" in ty:
+                rm = ty.get("reliable_mode")
+                if not isinstance(rm, str) or rm not in RELIABLE_MODE_OPTIONS:
+                    raise RuntimeError(
+                        f"types[{i}].reliable_mode must be one of {RELIABLE_MODE_OPTIONS}, got {rm!r}"
+                    )
+
             eps = ty.get("endpoints", [])
             if not isinstance(eps, list):
                 raise RuntimeError(f"types[{i}].endpoints must be list of endpoint rust names")
@@ -1146,6 +1184,8 @@ class TelemetryConfigEditor(tk.Tk):
                 "rust": rust,
                 "name": rust_ident_to_schema_name(rust),
                 "doc": "",
+                "reliable": False,
+                "reliable_mode": "None",
                 "class": "Data",
                 "element": {"kind": "Static", "data_type": "Float32", "count": 1},
                 "endpoints": [],
@@ -1195,6 +1235,12 @@ class TelemetryConfigEditor(tk.Tk):
             dt = el.get("data_type", DATA_TYPE_OPTIONS[0]) or DATA_TYPE_OPTIONS[0]
             self.ty_kind_var.set(kind if kind in ELEMENT_KIND_OPTIONS else "Static")
             self.ty_dtype_var.set(dt if dt in DATA_TYPE_OPTIONS else DATA_TYPE_OPTIONS[0])
+            reliable_mode = ty.get("reliable_mode", "")
+            if not reliable_mode:
+                reliable_mode = "Ordered" if bool(ty.get("reliable", False)) else "None"
+            if reliable_mode not in RELIABLE_MODE_OPTIONS:
+                reliable_mode = "None"
+            self.ty_reliable_mode_var.set(reliable_mode)
 
             if kind == "Static":
                 self.ty_count_var.set(str(el.get("count", 1)))

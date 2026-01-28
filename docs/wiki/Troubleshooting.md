@@ -49,7 +49,7 @@ Check:
 
 If you see packets bouncing endlessly:
 
-- Ensure your TX callback does not send back on the same `LinkId`.
+- Ensure your side TX callback does not immediately re-inject back into the same side.
 - Confirm dedupe cache sizes are large enough for your traffic patterns.
 
 ## Dropped packets or queue evictions

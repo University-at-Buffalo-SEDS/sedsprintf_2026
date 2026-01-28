@@ -229,9 +229,8 @@ SedsResult node_init(SimNode * n, SimBus * bus, const char * name, int radio, in
 
     n->r = seds_router_new(
         Seds_RM_Sink,
-        node_tx_send,
-        n, // tx_user
         node_now_since_bus_ms,
+        n, /* user */
         (num ? locals : NULL),
         num
     );
@@ -239,6 +238,13 @@ SedsResult node_init(SimNode * n, SimBus * bus, const char * name, int radio, in
     {
         fprintf(stderr, "[%s] Failed to create router\n", n->name);
 
+        return SEDS_ERR;
+    }
+    if (seds_router_add_side_serialized(n->r, "BUS", 3, node_tx_send, n, true) < 0)
+    {
+        fprintf(stderr, "[%s] Failed to add router side\n", n->name);
+        seds_router_free(n->r);
+        n->r = NULL;
         return SEDS_ERR;
     }
 
