@@ -57,7 +57,7 @@ strum = { version = "0.27", default-features = false }
 # Optional dependencies enabled by features
 spin = { version = "0.10", optional = true }
 pyo3 = { version = "0.27", optional = true, features = ["auto-initialize", "extension-module", "multiple-pymethods"] }
-miniz_oxide = { version = "0.8", default-features = false, features = ["with-alloc"] }
+miniz_oxide = { version = "0.9.0", default-features = false, features = ["with-alloc"] }
 
 [build-dependencies]
 regex = "1.12"
