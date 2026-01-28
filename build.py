@@ -34,6 +34,7 @@ Options (can be combined where it makes sense):
   maturin-install         Build wheel and install it with `uv pip install`.
   target=<triple>         Set Rust compilation target (e.g. target=thumbv7em-none-eabihf).
   device_id=<id>          Set DEVICE_IDENTIFIER env var for the build.
+  schema_path=<path>      Set SEDSPRINTF_RS_SCHEMA_PATH for the build.
 
 New (compile-time env vars):
   max_stack_payload=<n>   Set MAX_STACK_PAYLOAD for define_stack_payload!(env="MAX_STACK_PAYLOAD", ...).
@@ -60,7 +61,7 @@ Examples:
 
 def _fmt_secs(s: float) -> str:
     if s < 1:
-        return f"{s*1000:.0f}ms"
+        return f"{s * 1000:.0f}ms"
     if s < 60:
         return f"{s:.2f}s"
     m = int(s // 60)
@@ -83,12 +84,12 @@ def _fail(msg: str) -> None:
 
 
 def output_hint_for_cmd(
-    cmd: list[str],
-    *,
-    repo_root: Path,
-    target: str = "",
-    release_build: bool = False,
-    embedded_profile: bool = False,
+        cmd: list[str],
+        *,
+        repo_root: Path,
+        target: str = "",
+        release_build: bool = False,
+        embedded_profile: bool = False,
 ) -> str | None:
     """
     Best-effort output location hint for common commands.
@@ -147,14 +148,14 @@ def output_hint_for_cmd(
 
 
 def run_cmd(
-    cmd: list[str],
-    *,
-    env: dict[str, str],
-    repo_root: Path,
-    title: str | None = None,
-    target: str = "",
-    release_build: bool = False,
-    embedded_profile: bool = False,
+        cmd: list[str],
+        *,
+        env: dict[str, str],
+        repo_root: Path,
+        title: str | None = None,
+        target: str = "",
+        release_build: bool = False,
+        embedded_profile: bool = False,
 ) -> None:
     """
     Run a command with nicer user feedback:
@@ -250,11 +251,11 @@ def _comment_out_pyi_ignore(gitignore: Path) -> None:
 
 
 def run_with_pyi_unignored(
-    cmd: list[str],
-    *,
-    env: dict[str, str],
-    repo_root: Path,
-    title: str | None = None,
+        cmd: list[str],
+        *,
+        env: dict[str, str],
+        repo_root: Path,
+        title: str | None = None,
 ) -> None:
     gitignore = Path(".gitignore")
     backup = None
@@ -340,6 +341,7 @@ def main(argv: list[str]) -> None:
     install_wheel = False
     target = ""
     device_id = ""
+    schema_path = ""
 
     env_overrides: dict[str, str] = {}
 
@@ -381,6 +383,12 @@ def main(argv: list[str]) -> None:
         elif arg.startswith("device_id="):
             device_id = arg.split("=", 1)[1]
             print(f"Device identifier set to: {device_id}")
+
+        elif arg.startswith("schema_path="):
+            schema_path = arg.split("=", 1)[1]
+            if not schema_path:
+                print_help("schema_path requires a value")
+            env_overrides["SEDSPRINTF_RS_SCHEMA_PATH"] = schema_path
 
         elif arg.startswith("max_stack_payload="):
             v = arg.split("=", 1)[1].strip()

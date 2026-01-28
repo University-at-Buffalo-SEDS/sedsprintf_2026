@@ -1,0 +1,159 @@
+#[cfg(test)]
+mod reliable_drop_tests {
+    use sedsprintf_rs::config::{DataEndpoint, DataType, RELIABLE_RETRANSMIT_MS};
+    use sedsprintf_rs::router::{
+        Clock, EndpointHandler, Router, RouterConfig, RouterMode, RouterSideOptions,
+    };
+    use sedsprintf_rs::serialize;
+    use sedsprintf_rs::telemetry_packet::TelemetryPacket;
+    use sedsprintf_rs::TelemetryResult;
+
+    use std::collections::VecDeque;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    fn shared_clock(now: Arc<AtomicU64>) -> Box<dyn Clock + Send + Sync> {
+        Box::new(move || now.load(Ordering::SeqCst))
+    }
+
+    fn drain_queue(q: &Arc<Mutex<VecDeque<Vec<u8>>>>) -> Vec<Vec<u8>> {
+        let mut out = Vec::new();
+        let mut guard = q.lock().expect("queue lock poisoned");
+        while let Some(frame) = guard.pop_front() {
+            out.push(frame);
+        }
+        out
+    }
+
+    #[test]
+    fn reliable_link_recovers_from_dropped_frames() {
+        let now = Arc::new(AtomicU64::new(0));
+
+        let received: Arc<Mutex<Vec<u32>>> = Arc::new(Mutex::new(Vec::new()));
+        let recv_sink = received.clone();
+        let handler = EndpointHandler::new_packet_handler(DataEndpoint::Radio, move |pkt| {
+            let vals = pkt.data_as_f32()?;
+            if let Some(first) = vals.first() {
+                recv_sink
+                    .lock()
+                    .expect("received lock poisoned")
+                    .push(*first as u32);
+            }
+            Ok(())
+        });
+
+        let router_a = Router::new(RouterMode::Sink, RouterConfig::default(), shared_clock(now.clone()));
+        let router_b = Router::new(
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
+            shared_clock(now.clone()),
+        );
+
+        let a_to_b: Arc<Mutex<VecDeque<Vec<u8>>>> = Arc::new(Mutex::new(VecDeque::new()));
+        let b_to_a: Arc<Mutex<VecDeque<Vec<u8>>>> = Arc::new(Mutex::new(VecDeque::new()));
+
+        let a_to_b_tx = a_to_b.clone();
+        let a_side = router_a.add_side_serialized_with_options(
+            "link",
+            move |bytes: &[u8]| -> TelemetryResult<()> {
+                a_to_b_tx
+                    .lock()
+                    .expect("a_to_b lock poisoned")
+                    .push_back(bytes.to_vec());
+                Ok(())
+            },
+            RouterSideOptions {
+                reliable_enabled: true,
+            },
+        );
+
+        let b_to_a_tx = b_to_a.clone();
+        let b_side = router_b.add_side_serialized_with_options(
+            "link",
+            move |bytes: &[u8]| -> TelemetryResult<()> {
+                b_to_a_tx
+                    .lock()
+                    .expect("b_to_a lock poisoned")
+                    .push_back(bytes.to_vec());
+                Ok(())
+            },
+            RouterSideOptions {
+                reliable_enabled: true,
+            },
+        );
+
+        const TOTAL: u32 = 6;
+        for i in 0..TOTAL {
+            let pkt = TelemetryPacket::from_f32_slice(
+                DataType::GpsData,
+                &[i as f32, 0.0, 0.0],
+                &[DataEndpoint::Radio],
+                i as u64,
+            )
+            .expect("failed to build packet");
+            router_a.tx(pkt).expect("tx failed");
+        }
+
+        let mut dropped_data_once = false;
+        let mut dropped_ack_once = false;
+
+        for _ in 0..200 {
+            router_a
+                .process_all_queues_with_timeout(0)
+                .expect("router_a process failed");
+            router_b
+                .process_all_queues_with_timeout(0)
+                .expect("router_b process failed");
+
+            for frame in drain_queue(&a_to_b) {
+                let info = serialize::peek_frame_info(&frame).expect("peek frame failed");
+                if info.envelope.ty == DataType::GpsData && !info.ack_only() {
+                    if let Some(hdr) = info.reliable {
+                        if hdr.seq == 1 && !dropped_data_once {
+                            dropped_data_once = true;
+                            continue; // drop first data frame for seq=1
+                        }
+                    }
+                }
+                router_b
+                    .rx_serialized_queue_from_side(&frame, b_side)
+                    .expect("router_b rx failed");
+            }
+
+            for frame in drain_queue(&b_to_a) {
+                let info = serialize::peek_frame_info(&frame).expect("peek ack failed");
+                if info.ack_only() {
+                    if let Some(hdr) = info.reliable {
+                        if hdr.ack == 1 && !dropped_ack_once {
+                            dropped_ack_once = true;
+                            continue; // drop first ack for seq=1
+                        }
+                    }
+                }
+                router_a
+                    .rx_serialized_queue_from_side(&frame, a_side)
+                    .expect("router_a rx failed");
+            }
+
+            router_a
+                .process_all_queues_with_timeout(0)
+                .expect("router_a process failed");
+            router_b
+                .process_all_queues_with_timeout(0)
+                .expect("router_b process failed");
+
+            if received.lock().expect("received lock poisoned").len() == TOTAL as usize {
+                break;
+            }
+
+            now.fetch_add(RELIABLE_RETRANSMIT_MS, Ordering::SeqCst);
+        }
+
+        let got = received.lock().expect("received lock poisoned").clone();
+        let expected: Vec<u32> = (0..TOTAL).collect();
+
+        assert!(dropped_data_once, "test did not drop a data frame");
+        assert!(dropped_ack_once, "test did not drop an ack frame");
+        assert_eq!(got, expected, "reliable delivery should recover from drops");
+    }
+}

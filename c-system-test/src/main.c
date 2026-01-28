@@ -185,14 +185,16 @@ int main(void)
         "bus1",
         4, // strlen("bus1")
         relay_side_tx_to_bus,
-        &bus1
+        &bus1,
+        true
     );
     int32_t side_bus2 = seds_relay_add_side_serialized(
         relay,
         "bus2",
         4, // strlen("bus2")
         relay_side_tx_to_bus,
-        &bus2
+        &bus2,
+        true
     );
     assert(side_bus1 >= 0 && side_bus2 >= 0);
 
@@ -293,4 +295,3 @@ int main(void)
 
     return 0;
 }
-

@@ -33,6 +33,7 @@ struct SimNode
     int has_radio;
 
     int has_sdcard;
+    uint32_t bus_side_id;
     // --- NEW: simple stats for tests ---
     unsigned radio_hits; // times RADIO handler ran
     unsigned sd_hits; // times SD handler ran

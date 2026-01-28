@@ -23,6 +23,7 @@
 //   - SEDSPRINTF_RS_SKIP_ENUMGEN=1          -> skip all enum generation
 //   - SEDSPRINTF_RS_CONFIG_RS=path/to.rs    -> override source file to scan (default: src/config.rs)
 //   - SEDSPRINTF_RS_LIB_RS=path/to.rs       -> override lib.rs to scan (default: src/lib.rs)
+//   - SEDSPRINTF_RS_SCHEMA_PATH=path        -> override telemetry_config.json path
 
 use regex::Regex;
 use serde::Deserialize;
@@ -30,6 +31,8 @@ use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+const SCHEMA_PATH_ENV: &str = "SEDSPRINTF_RS_SCHEMA_PATH";
 
 // ========================= JSON schema =========================
 
@@ -61,6 +64,9 @@ struct JsonType {
     name: String,
     #[serde(default)]
     doc: Option<String>,
+
+    #[serde(default)]
+    _reliable: Option<bool>,
 
     element: JsonElement,
     class: String,
@@ -98,7 +104,20 @@ fn main() {
     println!("cargo:rerun-if-changed={}", lib_rs_path.display());
 
     // Discover schema json path by scanning config.rs for define_telemetry_schema!(path="...")
-    let schema_path = find_schema_path_from_config_rs(&config_rs_path, &crate_dir);
+    let schema_path = match env::var(SCHEMA_PATH_ENV) {
+        Ok(val) => {
+            if val.trim().is_empty() {
+                panic!("{SCHEMA_PATH_ENV} is set but empty");
+            }
+            let p = PathBuf::from(val);
+            if p.is_absolute() {
+                p
+            } else {
+                crate_dir.join(p)
+            }
+        }
+        Err(_) => find_schema_path_from_config_rs(&config_rs_path, &crate_dir),
+    };
     println!("cargo:rerun-if-changed={}", schema_path.display());
     // Rebuild if the schema json changes
     println!("cargo:rerun-if-changed={}", schema_path.display());
@@ -107,6 +126,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=SEDSPRINTF_RS_CONFIG_RS");
     println!("cargo:rerun-if-env-changed=SEDSPRINTF_RS_LIB_RS");
     println!("cargo:rerun-if-env-changed=SEDSPRINTF_RS_SKIP_ENUMGEN");
+    println!("cargo:rerun-if-env-changed={SCHEMA_PATH_ENV}");
 
     // Make the discovered JSON path available to the crate at compile time.
     // Use in Rust as: env!("SEDSPRINTF_RS_SCHEMA_JSON")
@@ -203,11 +223,19 @@ fn load_schema_absolute(path: &Path) -> TelemetryConfig {
 }
 
 fn validate_schema(cfg: &TelemetryConfig) {
-    if cfg.endpoints.is_empty() {
-        panic!("telemetry_config.json: endpoints is empty");
+    for ty in &cfg.types {
+        if ty.rust == "TelemetryError" || ty.name == "TELEMETRY_ERROR" {
+            panic!(
+                "telemetry_config.json: TelemetryError is built-in and must not be defined in the schema"
+            );
+        }
     }
-    if cfg.types.is_empty() {
-        panic!("telemetry_config.json: types is empty");
+    for ep in &cfg.endpoints {
+        if ep.rust == "TelemetryError" || ep.name == "TELEMETRY_ERROR" {
+            panic!(
+                "telemetry_config.json: TelemetryError endpoint is built-in and must not be defined in the schema"
+            );
+        }
     }
 
     // Ensure schema names are ALL CAPS (or underscore/digit).
@@ -216,7 +244,8 @@ fn validate_schema(cfg: &TelemetryConfig) {
         ensure_all_caps(&ep.name, "endpoints[].name");
     }
 
-    let endpoint_set: HashSet<&str> = cfg.endpoints.iter().map(|e| e.rust.as_str()).collect();
+    let mut endpoint_set: HashSet<&str> = cfg.endpoints.iter().map(|e| e.rust.as_str()).collect();
+    endpoint_set.insert("TelemetryError");
 
     for ty in &cfg.types {
         ensure_rust_ident(&ty.rust, "types[].rust");
@@ -392,17 +421,24 @@ fn render_c_enum_datatype(cfg: &TelemetryConfig) -> String {
     let mut lines = Vec::new();
     lines.push("typedef enum SedsDataType {".to_string());
 
-    // Sequential discriminants from 0, in the JSON order
+    // Sequential discriminants from 0, JSON order then built-ins
     for (i, ty) in cfg.types.iter().enumerate() {
         // TELEMETRY_ERROR -> SEDS_DT_TELEMETRY_ERROR
         let name = format!("SEDS_DT_{}", ty.name);
         let doc = ty.doc.as_deref().unwrap_or("").trim();
+        let idx = i;
 
         if !doc.is_empty() {
             lines.push(format!("  /* {} */", sanitize_c_comment(doc)));
         }
-        lines.push(format!("  {name} = {i},"));
+        lines.push(format!("  {name} = {idx},"));
     }
+
+    lines.push("  /* Built-in TelemetryError */".to_string());
+    lines.push(format!(
+        "  SEDS_DT_TELEMETRY_ERROR = {},",
+        cfg.types.len()
+    ));
 
     lines.push("} SedsDataType;".to_string());
     lines.join("\n")
@@ -413,15 +449,21 @@ fn render_c_enum_endpoint(cfg: &TelemetryConfig) -> String {
     lines.push("typedef enum SedsDataEndpoint {".to_string());
 
     for (i, ep) in cfg.endpoints.iter().enumerate() {
-        // SD_CARD -> SEDS_EP_SD_CARD
         let name = format!("SEDS_EP_{}", ep.name);
         let doc = ep.doc.as_deref().unwrap_or("").trim();
+        let idx = i;
 
         if !doc.is_empty() {
             lines.push(format!("  /* {} */", sanitize_c_comment(doc)));
         }
-        lines.push(format!("  {name} = {i},"));
+        lines.push(format!("  {name} = {idx},"));
     }
+
+    lines.push("  /* Built-in TelemetryError endpoint */".to_string());
+    lines.push(format!(
+        "  SEDS_EP_TELEMETRY_ERROR = {},",
+        cfg.endpoints.len()
+    ));
 
     lines.push("} SedsDataEndpoint;".to_string());
     lines.join("\n")
@@ -454,6 +496,11 @@ fn render_pyi_enums(cfg: &TelemetryConfig, sr: &SedsResultEnum) -> String {
             .iter()
             .enumerate()
             .map(|(i, t)| (t.name.as_str(), i as i64, t.doc.as_deref().unwrap_or("")))
+            .chain(std::iter::once((
+                "TELEMETRY_ERROR",
+                cfg.types.len() as i64,
+                "Built-in telemetry error text (string payload).",
+            )))
             .collect::<Vec<_>>(),
     );
 
@@ -464,6 +511,11 @@ fn render_pyi_enums(cfg: &TelemetryConfig, sr: &SedsResultEnum) -> String {
             .iter()
             .enumerate()
             .map(|(i, e)| (e.name.as_str(), i as i64, e.doc.as_deref().unwrap_or("")))
+            .chain(std::iter::once((
+                "TELEMETRY_ERROR",
+                cfg.endpoints.len() as i64,
+                "Built-in telemetry error endpoint.",
+            )))
             .collect::<Vec<_>>(),
     );
 

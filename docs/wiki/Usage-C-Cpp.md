@@ -22,11 +22,22 @@ target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE sedsprintf_rs::sedsprintf_rs
 ```
 
 Important CMake variables:
+
 - `SEDSPRINTF_EMBEDDED_BUILD` (ON/OFF)
 - `SEDSPRINTF_RS_TARGET` (Rust target triple)
 - `SEDSPRINTF_RS_DEVICE_IDENTIFIER`
 - `SEDSPRINTF_RS_MAX_STACK_PAYLOAD`
 - `SEDSPRINTF_RS_ENV_<KEY>` for any config env var
+
+## Manual build (no CMake)
+
+If you want to call Cargo directly:
+
+```
+DEVICE_IDENTIFIER=FC26_MAIN cargo build --release
+```
+
+The static library will be under `target/release/` (or under `target/<triple>/release` for embedded targets).
 
 ## Minimal C example
 
@@ -56,12 +67,12 @@ int main(void)
 
     SedsRouter *r = seds_router_new(
         Seds_RM_Sink,
-        tx_send,
-        NULL,
         now_ms,
+        NULL,
         locals,
         sizeof(locals) / sizeof(locals[0])
     );
+    seds_router_add_side_serialized(r, "TX", 2, tx_send, NULL, true);
 
     float data[3] = {1.0f, 2.0f, 3.0f};
     seds_router_log(r, SEDS_DT_GPS_DATA, data, sizeof(data));
@@ -74,10 +85,34 @@ int main(void)
 
 See `c-example-code/` for a more complete example.
 
+## Sending and receiving
+
+Common calls:
+
+- `seds_router_log` / `seds_router_log_ts`: log typed payloads.
+- `seds_router_transmit_serialized_message`: send raw bytes.
+- `seds_router_receive_serialized`: receive bytes immediately.
+- `seds_router_rx_serialized_packet_to_queue`: enqueue for later processing.
+- `seds_router_process_all_queues`: process queued RX/TX.
+
+## Payload layout expectations
+
+Payloads are little-endian. The schema defines element type and count. For dynamic payloads, sizes must be a multiple of
+element width.
+
+Strings must be valid UTF-8. For static strings, the payload is padded or truncated to `STATIC_STRING_LENGTH`.
+
 ## Embedded allocator hooks
+
 Bare-metal builds must provide:
+
 - `void *telemetryMalloc(size_t)`
 - `void telemetryFree(void *)`
 - `void seds_error_msg(const char *, size_t)`
 
 A simple stub is shown in `README.md` and can be adapted for your platform.
+
+## Threading and reentrancy
+
+The router uses internal locking, so the C API is safe to call from multiple threads if your platform supports it. In
+bare-metal contexts, you may still want to serialize access around interrupts.

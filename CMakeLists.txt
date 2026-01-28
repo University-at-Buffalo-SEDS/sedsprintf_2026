@@ -21,6 +21,10 @@ set(SEDSPRINTF_RS_DEVICE_IDENTIFIER "" CACHE STRING
 set(SEDSPRINTF_RS_MAX_STACK_PAYLOAD "" CACHE STRING
     "Override MAX_STACK_PAYLOAD used by define_stack_payload! (empty = use macro default)")
 
+# Schema JSON path override (forwarded as SEDSPRINTF_RS_SCHEMA_PATH)
+set(SEDSPRINTF_RS_SCHEMA_PATH "" CACHE STRING
+    "Override telemetry_config.json path (empty = use default)")
+
 # For each env var you want to set, define a CMake var named:
 #   SEDSPRINTF_RS_ENV_<ENVKEY>
 # Example:
@@ -93,6 +97,9 @@ endif ()
 if (NOT SEDSPRINTF_RS_MAX_STACK_PAYLOAD STREQUAL "")
     set(RS_ARGS_STR "${RS_ARGS_STR} max_stack_payload=${SEDSPRINTF_RS_MAX_STACK_PAYLOAD}")
 endif ()
+if (NOT SEDSPRINTF_RS_SCHEMA_PATH STREQUAL "")
+    set(RS_ARGS_STR "${RS_ARGS_STR} schema_path=${SEDSPRINTF_RS_SCHEMA_PATH}")
+endif ()
 
 # Show release in log string
 set(RS_ARG_REL " $<$<CONFIG:Release>:release>")
@@ -124,6 +131,9 @@ endif ()
 # New: forward proc-macro env var
 if (NOT SEDSPRINTF_RS_MAX_STACK_PAYLOAD STREQUAL "")
     list(APPEND RS_ARGS_BOOTSTRAP "max_stack_payload=${SEDSPRINTF_RS_MAX_STACK_PAYLOAD}")
+endif ()
+if (NOT SEDSPRINTF_RS_SCHEMA_PATH STREQUAL "")
+    list(APPEND RS_ARGS_BOOTSTRAP "schema_path=${SEDSPRINTF_RS_SCHEMA_PATH}")
 endif ()
 
 # New: forward arbitrary option_env config vars: SEDSPRINTF_RS_ENV_<KEY> => env:KEY=VALUE

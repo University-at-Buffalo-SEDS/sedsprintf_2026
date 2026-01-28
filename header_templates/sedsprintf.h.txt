@@ -24,14 +24,6 @@ typedef struct SedsRouter SedsRouter;
 
 typedef struct SedsRelay SedsRelay;
 
-/* ======================================================================
-   LinkId (v2)
-   ====================================================================== */
-
-typedef struct SedsLinkId {
-    uint64_t raw;
-} SedsLinkId;
-
 
 typedef struct SedsPacketView
 {
@@ -63,37 +55,6 @@ typedef enum SedsRouterMode
     Seds_RM_Relay = 1,
 } SedsRouterMode;
 
-
-/* ======================================================================
-   v2 callbacks (WITH LinkId)
-   ====================================================================== */
-
-typedef SedsResult (*SedsTransmitFnV2)(
-    const uint8_t *bytes,
-    size_t len,
-    const SedsLinkId *link,
-    void *user
-);
-
-typedef SedsResult (*SedsEndpointHandlerFnV2)(
-    const SedsPacketView *pkt,
-    const SedsLinkId *link,
-    void *user
-);
-
-typedef SedsResult (*SedsSerializedHandlerFnV2)(
-    const uint8_t *bytes,
-    size_t len,
-    const SedsLinkId *link,
-    void *user
-);
-
-typedef struct SedsLocalEndpointDescV2 {
-    uint32_t endpoint;
-    SedsEndpointHandlerFnV2 packet_handler;
-    SedsSerializedHandlerFnV2 serialized_handler;
-    void *user;
-} SedsLocalEndpointDescV2;
 
 typedef SedsResult (* SedsTransmitFn)(const uint8_t * bytes, size_t len, void * user);
 
@@ -131,26 +92,35 @@ SedsResult seds_error_to_string(int32_t error_code, char * buf, size_t buf_len);
 
 SedsRouter * seds_router_new(
                              SedsRouterMode mode,
-                             SedsTransmitFn tx,
-                             void * tx_user,
                              SedsNowMsFn now_ms_cb,
+                             void * user,
                              const SedsLocalEndpointDesc * handlers,
                              size_t n_handlers
                              );
 
-
-/* v2 constructor (LinkId-aware callbacks) */
-SedsRouter *seds_router_new_v2(
-                               SedsRouterMode mode,
-                               SedsTransmitFnV2 tx,
-                               void *tx_user,
-                               SedsNowMsFn now_ms_cb,
-                               const SedsLocalEndpointDescV2 *handlers,
-                               size_t n_handlers
-                               );
-
-
 void seds_router_free(SedsRouter * r);
+
+/* ==============================
+   Router side registration
+   ============================== */
+
+int32_t seds_router_add_side_serialized(
+    SedsRouter * r,
+    const char * name,
+    size_t name_len,
+    SedsTransmitFn tx,
+    void * tx_user,
+    bool reliable_enabled
+);
+
+int32_t seds_router_add_side_packet(
+    SedsRouter * r,
+    const char * name,
+    size_t name_len,
+    SedsEndpointHandlerFn tx,
+    void * tx_user,
+    bool reliable_enabled
+);
 
 /* ==============================
    NEW: schema helper
@@ -209,15 +179,15 @@ SedsResult seds_router_receive_serialized(SedsRouter * r, const uint8_t * bytes,
 
 SedsResult seds_router_receive(SedsRouter * r, const SedsPacketView * view);
 
+SedsResult seds_router_transmit_message(SedsRouter * r, const SedsPacketView * view);
+
 SedsResult seds_router_process_tx_queue(SedsRouter * r);
 
 SedsResult seds_router_transmit_message_queue(SedsRouter * r, const SedsPacketView * view);
 
-SedsResult seds_router_transmit_serialized_message_queue(SedsRouter * r, const SedsPacketView * view);
+SedsResult seds_router_transmit_serialized_message_queue(SedsRouter * r, const uint8_t * bytes, size_t len);
 
 SedsResult seds_router_transmit_serialized_message(SedsRouter * r, const uint8_t * bytes, size_t len);
-
-SedsResult seds_router_transmit_message(SedsRouter * r, const uint8_t * bytes, size_t len);
 
 SedsResult seds_router_process_rx_queue(SedsRouter * r);
 
@@ -239,17 +209,17 @@ SedsResult seds_router_clear_rx_queue(SedsRouter * r);
 
 SedsResult seds_router_clear_tx_queue(SedsRouter * r);
 
-SedsResult seds_router_receive_serialized_v2(
-    SedsRouter* r, const SedsLinkId* link, const uint8_t* bytes, size_t len);
+SedsResult seds_router_receive_serialized_from_side(
+    SedsRouter* r, uint32_t side_id, const uint8_t* bytes, size_t len);
 
-SedsResult seds_router_receive_v2(
-    SedsRouter* r, const SedsLinkId* link, const SedsPacketView* view);
+SedsResult seds_router_receive_from_side(
+    SedsRouter* r, uint32_t side_id, const SedsPacketView* view);
 
-SedsResult seds_router_rx_serialized_packet_to_queue_v2(
-    SedsRouter* r, const SedsLinkId* link, const uint8_t* bytes, size_t len);
+SedsResult seds_router_rx_serialized_packet_to_queue_from_side(
+    SedsRouter* r, uint32_t side_id, const uint8_t* bytes, size_t len);
 
-SedsResult seds_router_rx_packet_to_queue_v2(
-    SedsRouter* r, const SedsLinkId* link, const SedsPacketView* view);
+SedsResult seds_router_rx_packet_to_queue_from_side(
+    SedsRouter* r, uint32_t side_id, const SedsPacketView* view);
 
 
 /* ==============================
@@ -373,6 +343,7 @@ void seds_relay_free(SedsRelay * r);
  * @param name_len  Length of @p name in bytes (0 if unused).
  * @param tx        TX callback for this side (must not be NULL).
  * @param tx_user   Opaque user pointer passed to @p tx.
+ * @param reliable_enabled  Enable reliable ACK/ordering on this side.
  *
  * @return On success: non-negative side ID.
  *         On error:   negative SedsResult error code.
@@ -381,7 +352,8 @@ int32_t seds_relay_add_side_serialized(SedsRelay * r,
                             const char * name,
                             size_t name_len,
                             SedsTransmitFn tx,
-                            void * tx_user);
+                            void * tx_user,
+                            bool reliable_enabled);
 
 /**
  * @brief Add a new side/network to the relay whose TX callback receives packets.
@@ -395,6 +367,7 @@ int32_t seds_relay_add_side_serialized(SedsRelay * r,
  * @param name_len  Length of @p name in bytes (0 if unused).
  * @param tx        TX callback for this side (packet-based, must not be NULL).
  * @param tx_user   Opaque user pointer passed to @p tx.
+ * @param reliable_enabled  Enable reliable ACK/ordering on this side.
  *
  * @return On success: non-negative side ID.
  *         On error:   negative SedsResult error code.
@@ -403,7 +376,8 @@ int32_t seds_relay_add_side_packet(SedsRelay *r,
                                    const char *name,
                                    size_t name_len,
                                    SedsEndpointHandlerFn tx,
-                                   void *tx_user);
+                                   void *tx_user,
+                                   bool reliable_enabled);
 
 
 /**

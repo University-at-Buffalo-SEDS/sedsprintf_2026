@@ -12,15 +12,13 @@ Key behavior:
     * We only prompt if current config hash != last-saved/loaded hash.
     * Switching tabs won't mark dirty unless it truly changes config.
 
-TelemetryError rules:
-- Always exists, cannot be removed.
-- Only editable field is its endpoints list.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import sys
 import tkinter as tk
@@ -50,19 +48,8 @@ DATA_TYPE_OPTIONS = [
 MESSAGE_CLASS_OPTIONS = ["Data", "Error", "Warning"]
 BROADCAST_MODE_OPTIONS = ["Always", "Never", "Default"]
 ELEMENT_KIND_OPTIONS = ["Static", "Dynamic"]
+RELIABLE_MODE_OPTIONS = ["None", "Ordered", "Unordered"]
 
-TELEMETRY_ERROR_RUST = "TelemetryError"
-TELEMETRY_ERROR_DOC = (
-    "Encoded telemetry error text (string payload) (CRITICAL FOR SYSTEM FUNCTIONALITY, DO NOT REMOVE)"
-)
-TELEMETRY_ERROR_TEMPLATE: Dict[str, Any] = {
-    "rust": TELEMETRY_ERROR_RUST,
-    "name": "TELEMETRY_ERROR",
-    "doc": TELEMETRY_ERROR_DOC,
-    "class": "Error",
-    "element": {"kind": "Dynamic", "data_type": "String"},
-    "endpoints": [],
-}
 
 
 def find_project_root(start: Path) -> Path:
@@ -78,6 +65,10 @@ def find_project_root(start: Path) -> Path:
 
 
 def find_schema_json_from_config_rs(config_rs: Path, crate_root: Path) -> Optional[Path]:
+    raw = os.environ.get("SEDSPRINTF_RS_SCHEMA_PATH", "").strip()
+    if raw:
+        p = Path(raw)
+        return (p if p.is_absolute() else (crate_root / p)).resolve()
     try:
         text = config_rs.read_text(encoding="utf-8")
     except Exception:
@@ -94,7 +85,7 @@ def find_schema_json_from_config_rs(config_rs: Path, crate_root: Path) -> Option
 
 
 def default_blank_config() -> Dict[str, Any]:
-    return {"endpoints": [], "types": [json.loads(json.dumps(TELEMETRY_ERROR_TEMPLATE))]}
+    return {"endpoints": [], "types": []}
 
 
 def safe_read_json(path: Path) -> Optional[Dict[str, Any]]:
@@ -138,8 +129,12 @@ def _endpoint_row_text(ep: Dict[str, Any]) -> str:
 
 
 def _type_row_text(ty: Dict[str, Any]) -> str:
-    tag = " (locked)" if str(ty.get("rust", "")).strip() == TELEMETRY_ERROR_RUST else ""
-    return f"{ty.get('rust', '')}  [{ty.get('name', '')}]{tag}"
+    rel_mode = ty.get("reliable_mode", "")
+    if not rel_mode or rel_mode == "None":
+        rel = " [R]" if bool(ty.get("reliable", False)) else ""
+    else:
+        rel = f" [Rel:{rel_mode}]"
+    return f"{ty.get('rust', '')}  [{ty.get('name', '')}]{rel}"
 
 
 def _update_listbox_row(lb: tk.Listbox, idx: int, text: str) -> None:
@@ -220,8 +215,8 @@ class TelemetryConfigEditor(tk.Tk):
         self.json_path_var = tk.StringVar(value=self._json_path_display())
 
         # HASH-BASED dirty state
-        self._saved_hash: str = ""   # baseline (loaded/saved)
-        self._cur_hash: str = ""     # current
+        self._saved_hash: str = ""  # baseline (loaded/saved)
+        self._cur_hash: str = ""  # current
         self.dirty = False
 
         # Live-edit bookkeeping
@@ -248,7 +243,6 @@ class TelemetryConfigEditor(tk.Tk):
         if self.json_path and self.json_path.exists():
             self.load_from_path(self.json_path)
         else:
-            self._ensure_telemetry_error_invariants(mark_hash=False)
             self.refresh_lists()
             # baseline = current (no "unsaved changes" just for being open)
             self._reset_saved_hash_to_current()
@@ -323,15 +317,16 @@ class TelemetryConfigEditor(tk.Tk):
     # ---------------- Live editing wiring ----------------
 
     def _setup_live_edit_traces(self):
-        self.ep_rust_var.trace_add("write", lambda *_: self._schedule_live_endpoint_apply()) # type: ignore
-        self.ep_bm_var.trace_add("write", lambda *_: self._schedule_live_endpoint_apply()) # type: ignore
+        self.ep_rust_var.trace_add("write", lambda *_: self._schedule_live_endpoint_apply())  # type: ignore
+        self.ep_bm_var.trace_add("write", lambda *_: self._schedule_live_endpoint_apply())  # type: ignore
         self.ep_doc_text.bind("<<Modified>>", self._on_ep_doc_modified)
 
-        self.ty_rust_var.trace_add("write", lambda *_: self._schedule_live_type_apply()) # type: ignore
-        self.ty_class_var.trace_add("write", lambda *_: self._schedule_live_type_apply()) # type: ignore
-        self.ty_kind_var.trace_add("write", lambda *_: self._schedule_live_type_apply()) # type: ignore
-        self.ty_dtype_var.trace_add("write", lambda *_: self._schedule_live_type_apply()) # type: ignore
-        self.ty_count_var.trace_add("write", lambda *_: self._schedule_live_type_apply()) # type: ignore
+        self.ty_rust_var.trace_add("write", lambda *_: self._schedule_live_type_apply())  # type: ignore
+        self.ty_class_var.trace_add("write", lambda *_: self._schedule_live_type_apply())  # type: ignore
+        self.ty_kind_var.trace_add("write", lambda *_: self._schedule_live_type_apply())  # type: ignore
+        self.ty_dtype_var.trace_add("write", lambda *_: self._schedule_live_type_apply())  # type: ignore
+        self.ty_count_var.trace_add("write", lambda *_: self._schedule_live_type_apply())  # type: ignore
+        self.ty_reliable_mode_var.trace_add("write", lambda *_: self._schedule_live_type_apply())  # type: ignore
         self.ty_doc_text.bind("<<Modified>>", self._on_ty_doc_modified)
 
     def _on_ep_doc_modified(self, _e=None):
@@ -426,12 +421,11 @@ class TelemetryConfigEditor(tk.Tk):
         ep["doc"] = new_doc
         ep["broadcast_mode"] = new_bm
 
+        rename_map = None
         if old_rust and new_rust and old_rust != new_rust:
-            for ty in self.config_obj.get("types", []):
-                ty_eps = ty.get("endpoints", []) or []
-                ty["endpoints"] = [new_rust if e == old_rust else e for e in ty_eps]
+            rename_map = {old_rust: new_rust}
+        self._sync_type_endpoints_to_known(rename_map=rename_map)
 
-        self._ensure_telemetry_error_invariants(mark_hash=False)
 
         after = self._compute_hash()
         if after != before:
@@ -454,26 +448,15 @@ class TelemetryConfigEditor(tk.Tk):
         ty = tys[idx]
         before = self._compute_hash()
 
-        is_te = str(ty.get("rust", "")).strip() == TELEMETRY_ERROR_RUST
         sel_eps = _lb_all(self.ty_selected_endpoints)
-
-        if is_te:
-            known = {ep.get("rust", "") for ep in self.config_obj.get("endpoints", [])}
-            ty["endpoints"] = [e for e in sel_eps if e in known]
-            self._ensure_telemetry_error_invariants(mark_hash=False)
-
-            after = self._compute_hash()
-            if after != before:
-                self._mark_changed()
-
-            _update_listbox_row(self.type_list, idx, _type_row_text(ty))
-            return
+        known_eps = {ep.get("rust", "") for ep in self.config_obj.get("endpoints", []) if ep.get("rust", "")}
 
         new_rust = self.ty_rust_var.get().strip()
         new_class = (self.ty_class_var.get() or "Data").strip()
         new_kind = (self.ty_kind_var.get() or "Static").strip()
         new_dtype = (self.ty_dtype_var.get() or DATA_TYPE_OPTIONS[0]).strip()
         new_doc = self.ty_doc_text.get("1.0", tk.END).strip()
+        new_reliable_mode = (self.ty_reliable_mode_var.get() or "None").strip()
 
         if new_rust and not ensure_rust_ident(new_rust):
             return
@@ -482,6 +465,8 @@ class TelemetryConfigEditor(tk.Tk):
         if new_kind not in ELEMENT_KIND_OPTIONS:
             return
         if new_dtype not in DATA_TYPE_OPTIONS:
+            return
+        if new_reliable_mode not in RELIABLE_MODE_OPTIONS:
             return
 
         element: Dict[str, Any] = {"kind": new_kind, "data_type": new_dtype}
@@ -501,11 +486,12 @@ class TelemetryConfigEditor(tk.Tk):
             ty["rust"] = new_rust
             ty["name"] = rust_ident_to_schema_name(new_rust)
         ty["doc"] = new_doc
+        ty["reliable_mode"] = new_reliable_mode
+        ty["reliable"] = new_reliable_mode != "None"
         ty["class"] = new_class
         ty["element"] = element
-        ty["endpoints"] = sel_eps
+        ty["endpoints"] = [e for e in sel_eps if e in known_eps]
 
-        self._ensure_telemetry_error_invariants(mark_hash=False)
 
         after = self._compute_hash()
         if after != before:
@@ -682,12 +668,24 @@ class TelemetryConfigEditor(tk.Tk):
         self.ty_count_entry = ttk.Entry(right, textvariable=self.ty_count_var, width=10)
         self.ty_count_entry.grid(row=4, column=1, sticky="nw", padx=(10, 0), pady=(10, 0))
 
-        ttk.Label(right, text="Doc (optional):").grid(row=5, column=0, sticky="w", pady=(10, 0))
+        ttk.Label(right, text="Reliable mode:").grid(row=5, column=0, sticky="w", pady=(10, 0))
+        self.ty_reliable_mode_var = tk.StringVar(value="None")
+        self.ty_reliable_mode_combo = ttk.Combobox(
+            right,
+            textvariable=self.ty_reliable_mode_var,
+            values=RELIABLE_MODE_OPTIONS,
+            state="readonly",
+        )
+        self.ty_reliable_mode_combo.grid(
+            row=5, column=1, sticky="w", padx=(10, 0), pady=(10, 0)
+        )
+
+        ttk.Label(right, text="Doc (optional):").grid(row=6, column=0, sticky="w", pady=(10, 0))
         self.ty_doc_text = tk.Text(right, height=5)
-        self.ty_doc_text.grid(row=5, column=1, sticky="ew", padx=(10, 0), pady=(10, 0))
+        self.ty_doc_text.grid(row=6, column=1, sticky="ew", padx=(10, 0), pady=(10, 0))
 
         epbox = ttk.LabelFrame(right, text="Endpoints for this DataType", padding=8)
-        epbox.grid(row=6, column=0, columnspan=2, sticky="nsew", pady=(12, 0))
+        epbox.grid(row=7, column=0, columnspan=2, sticky="nsew", pady=(12, 0))
         epbox.columnconfigure(0, weight=1)
         epbox.columnconfigure(1, weight=0)
         epbox.columnconfigure(2, weight=1)
@@ -717,7 +715,7 @@ class TelemetryConfigEditor(tk.Tk):
             right,
             text="Edits apply in-memory automatically. Use Ctrl/Cmd+S to write JSON.",
             foreground="gray",
-        ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(14, 0))
+        ).grid(row=8, column=0, columnspan=2, sticky="w", pady=(14, 0))
 
         self._type_lock_widgets = [
             self.ty_rust_entry,
@@ -725,6 +723,7 @@ class TelemetryConfigEditor(tk.Tk):
             self.ty_kind_combo,
             self.ty_dtype_combo,
             self.ty_count_entry,
+            self.ty_reliable_mode_combo,
         ]
 
         self._update_count_visibility()
@@ -747,31 +746,6 @@ class TelemetryConfigEditor(tk.Tk):
                 pass
             if (self.ty_count_var.get() or "").strip() == "":
                 self.ty_count_var.set("1")
-
-    def _set_type_editor_locked_for_telemetry_error(self, locked: bool):
-        try:
-            self.type_delete_btn.configure(state="disabled" if locked else "normal")
-        except Exception:
-            pass
-
-        for w in self._type_lock_widgets:
-            try:
-                w.configure(state="disabled" if locked else "normal")
-            except Exception:
-                pass
-
-        if not locked:
-            try:
-                self.ty_class_combo.configure(state="readonly")
-                self.ty_kind_combo.configure(state="readonly")
-                self.ty_dtype_combo.configure(state="readonly")
-            except Exception:
-                pass
-
-        try:
-            self.ty_doc_text.configure(state="disabled" if locked else "normal")
-        except Exception:
-            pass
 
     # ---------------- Menu actions ----------------
 
@@ -824,60 +798,6 @@ class TelemetryConfigEditor(tk.Tk):
 
     # ---------------- Load / save ----------------
 
-    def _ensure_telemetry_error_invariants(self, mark_hash: bool) -> bool:
-        changed = False
-        types = self.config_obj.setdefault("types", [])
-
-        idxs = [i for i, t in enumerate(types) if str(t.get("rust", "")).strip() == TELEMETRY_ERROR_RUST]
-        if not idxs:
-            types.insert(0, json.loads(json.dumps(TELEMETRY_ERROR_TEMPLATE)))
-            changed = True
-        elif len(idxs) > 1:
-            first = idxs[0]
-            all_eps: List[str] = []
-            for i in idxs:
-                eps = types[i].get("endpoints", []) or []
-                if isinstance(eps, list):
-                    for e in eps:
-                        if isinstance(e, str) and e not in all_eps:
-                            all_eps.append(e)
-            keep = types[first]
-            keep["endpoints"] = all_eps
-            for i in reversed(idxs[1:]):
-                del types[i]
-            changed = True
-
-        te = next(t for t in self.config_obj["types"] if str(t.get("rust", "")).strip() == TELEMETRY_ERROR_RUST)
-
-        eps = te.get("endpoints", []) or []
-        if not isinstance(eps, list):
-            eps = []
-            changed = True
-
-        fixed = {
-            "rust": TELEMETRY_ERROR_RUST,
-            "name": rust_ident_to_schema_name(TELEMETRY_ERROR_RUST),
-            "doc": TELEMETRY_ERROR_DOC,
-            "class": "Error",
-            "element": {"kind": "Dynamic", "data_type": "String"},
-        }
-        for k, v in fixed.items():
-            if te.get(k) != v:
-                te[k] = json.loads(json.dumps(v))
-                changed = True
-
-        dedup_eps: List[str] = []
-        for e in eps:
-            if isinstance(e, str) and e not in dedup_eps:
-                dedup_eps.append(e)
-        if te.get("endpoints") != dedup_eps:
-            te["endpoints"] = dedup_eps
-            changed = True
-
-        if changed and mark_hash:
-            self._mark_changed()
-        return changed
-
     def _normalize_schema_names(self) -> bool:
         changed = False
         for ep in self.config_obj.get("endpoints", []) or []:
@@ -895,6 +815,27 @@ class TelemetryConfigEditor(tk.Tk):
                 changed = True
         return changed
 
+    def _sync_type_endpoints_to_known(self, rename_map: Optional[Dict[str, str]] = None) -> bool:
+        known = {ep.get("rust", "") for ep in self.config_obj.get("endpoints", []) if ep.get("rust", "")}
+        changed = False
+        for ty in self.config_obj.get("types", []) or []:
+            eps = ty.get("endpoints", []) or []
+            if not isinstance(eps, list):
+                ty["endpoints"] = []
+                changed = True
+                continue
+            new_eps: List[str] = []
+            for e in eps:
+                if not isinstance(e, str):
+                    continue
+                mapped = rename_map.get(e, e) if rename_map else e
+                if mapped in known and mapped not in new_eps:
+                    new_eps.append(mapped)
+            if new_eps != eps:
+                ty["endpoints"] = new_eps
+                changed = True
+        return changed
+
     def load_from_path(self, path: Path):
         self._flush_all_pending()
         obj = safe_read_json(path)
@@ -902,7 +843,6 @@ class TelemetryConfigEditor(tk.Tk):
             self.config_obj = default_blank_config()
             self.json_path = path
             self.json_path_var.set(str(path))
-            self._ensure_telemetry_error_invariants(mark_hash=False)
             self.refresh_lists()
             self._reset_saved_hash_to_current()
             self._set_status(f"File does not exist: {path}. Starting with blank config.")
@@ -914,7 +854,7 @@ class TelemetryConfigEditor(tk.Tk):
 
         # normalize/enforce (may change config)
         self._normalize_schema_names()
-        self._ensure_telemetry_error_invariants(mark_hash=False)
+        self._sync_type_endpoints_to_known()
 
         self.refresh_lists()
 
@@ -936,8 +876,8 @@ class TelemetryConfigEditor(tk.Tk):
 
     def save_to_path(self, path: Path):
         self._flush_all_pending()
-        self._ensure_telemetry_error_invariants(mark_hash=False)
         self._normalize_schema_names()
+        self._sync_type_endpoints_to_known()
 
         try:
             self.validate_current_config()
@@ -967,8 +907,6 @@ class TelemetryConfigEditor(tk.Tk):
         self.destroy()
 
     def validate_current_config(self):
-        self._ensure_telemetry_error_invariants(mark_hash=False)
-
         obj = self.config_obj
         if "endpoints" not in obj or "types" not in obj:
             raise RuntimeError("JSON must contain top-level keys: endpoints, types")
@@ -977,6 +915,8 @@ class TelemetryConfigEditor(tk.Tk):
             rust = str(ep.get("rust", "")).strip()
             if not ensure_rust_ident(rust):
                 raise RuntimeError(f"endpoints[{i}].rust must be Rust ident/PascalCase, got {rust!r}")
+            if rust == "TelemetryError":
+                raise RuntimeError("TelemetryError endpoint is built-in and must not be defined in the schema")
 
             expected = rust_ident_to_schema_name(rust)
             name = str(ep.get("name", "")).strip()
@@ -984,6 +924,8 @@ class TelemetryConfigEditor(tk.Tk):
                 raise RuntimeError(
                     f"endpoints[{i}].name must match generated name from rust ({expected!r}), got {name!r}"
                 )
+            if name == "TELEMETRY_ERROR":
+                raise RuntimeError("TelemetryError endpoint is built-in and must not be defined in the schema")
 
             bm = ep.get("broadcast_mode", "Default")
             if bm not in BROADCAST_MODE_OPTIONS:
@@ -992,11 +934,14 @@ class TelemetryConfigEditor(tk.Tk):
                 )
 
         endpoint_rust_set = {ep.get("rust", "") for ep in obj["endpoints"]}
+        endpoint_rust_set.add("TelemetryError")
 
         for i, ty in enumerate(obj["types"]):
             rust = str(ty.get("rust", "")).strip()
             if not ensure_rust_ident(rust):
                 raise RuntimeError(f"types[{i}].rust must be Rust ident/PascalCase, got {rust!r}")
+            if rust == "TelemetryError":
+                raise RuntimeError("TelemetryError is built-in and must not be defined in the schema")
 
             expected = rust_ident_to_schema_name(rust)
             name = str(ty.get("name", "")).strip()
@@ -1004,6 +949,8 @@ class TelemetryConfigEditor(tk.Tk):
                 raise RuntimeError(
                     f"types[{i}].name must match generated name from rust ({expected!r}), got {name!r}"
                 )
+            if name == "TELEMETRY_ERROR":
+                raise RuntimeError("TelemetryError is built-in and must not be defined in the schema")
 
             cls = ty.get("class", "")
             if cls not in MESSAGE_CLASS_OPTIONS:
@@ -1026,6 +973,15 @@ class TelemetryConfigEditor(tk.Tk):
                 if cnti < 0:
                     raise RuntimeError(f"types[{i}].element.count must be >= 0, got {cnti}")
 
+            if "reliable" in ty and not isinstance(ty.get("reliable"), bool):
+                raise RuntimeError(f"types[{i}].reliable must be a boolean")
+            if "reliable_mode" in ty:
+                rm = ty.get("reliable_mode")
+                if not isinstance(rm, str) or rm not in RELIABLE_MODE_OPTIONS:
+                    raise RuntimeError(
+                        f"types[{i}].reliable_mode must be one of {RELIABLE_MODE_OPTIONS}, got {rm!r}"
+                    )
+
             eps = ty.get("endpoints", [])
             if not isinstance(eps, list):
                 raise RuntimeError(f"types[{i}].endpoints must be list of endpoint rust names")
@@ -1036,9 +992,6 @@ class TelemetryConfigEditor(tk.Tk):
                         f"Known endpoints: {sorted(endpoint_rust_set)}"
                     )
 
-        te_count = sum(1 for t in obj["types"] if str(t.get("rust", "")).strip() == TELEMETRY_ERROR_RUST)
-        if te_count != 1:
-            raise RuntimeError("Invariant failed: TelemetryError must exist exactly once")
 
     def refresh_lists(self):
         self.endpoint_list.delete(0, tk.END)
@@ -1082,11 +1035,7 @@ class TelemetryConfigEditor(tk.Tk):
         removed_rust = ep.get("rust", "")
         del self.config_obj["endpoints"][idx]
 
-        for ty in self.config_obj.get("types", []):
-            eps = ty.get("endpoints", []) or []
-            ty["endpoints"] = [e for e in eps if e != removed_rust]
-
-        self._ensure_telemetry_error_invariants(mark_hash=False)
+        self._sync_type_endpoints_to_known(rename_map={removed_rust: ""})
         self.refresh_lists()
         self._mark_changed()
         self._refresh_type_editor_if_selected()
@@ -1122,6 +1071,8 @@ class TelemetryConfigEditor(tk.Tk):
                 "rust": rust,
                 "name": rust_ident_to_schema_name(rust),
                 "doc": "",
+                "reliable": False,
+                "reliable_mode": "None",
                 "class": "Data",
                 "element": {"kind": "Static", "data_type": "Float32", "count": 1},
                 "endpoints": [],
@@ -1139,13 +1090,9 @@ class TelemetryConfigEditor(tk.Tk):
         if idx is None:
             return
         ty = self.config_obj["types"][idx]
-        if str(ty.get("rust", "")).strip() == TELEMETRY_ERROR_RUST:
-            messagebox.showinfo("Protected type", "TelemetryError is required and cannot be removed.")
-            return
         if not messagebox.askyesno("Delete type", f"Delete type {ty.get('rust')}?"):
             return
         del self.config_obj["types"][idx]
-        self._ensure_telemetry_error_invariants(mark_hash=False)
         self.refresh_lists()
         self._mark_changed()
 
@@ -1159,7 +1106,6 @@ class TelemetryConfigEditor(tk.Tk):
 
         self._ty_edit_idx = idx
         ty = self.config_obj["types"][idx]
-        is_te = str(ty.get("rust", "")).strip() == TELEMETRY_ERROR_RUST
 
         self._suspend_live = True
         try:
@@ -1171,6 +1117,12 @@ class TelemetryConfigEditor(tk.Tk):
             dt = el.get("data_type", DATA_TYPE_OPTIONS[0]) or DATA_TYPE_OPTIONS[0]
             self.ty_kind_var.set(kind if kind in ELEMENT_KIND_OPTIONS else "Static")
             self.ty_dtype_var.set(dt if dt in DATA_TYPE_OPTIONS else DATA_TYPE_OPTIONS[0])
+            reliable_mode = ty.get("reliable_mode", "")
+            if not reliable_mode:
+                reliable_mode = "Ordered" if bool(ty.get("reliable", False)) else "None"
+            if reliable_mode not in RELIABLE_MODE_OPTIONS:
+                reliable_mode = "None"
+            self.ty_reliable_mode_var.set(reliable_mode)
 
             if kind == "Static":
                 self.ty_count_var.set(str(el.get("count", 1)))
@@ -1197,7 +1149,6 @@ class TelemetryConfigEditor(tk.Tk):
             for e in selected:
                 self.ty_selected_endpoints.insert(tk.END, e)
 
-            self._set_type_editor_locked_for_telemetry_error(is_te)
         finally:
             self._suspend_live = False
 
