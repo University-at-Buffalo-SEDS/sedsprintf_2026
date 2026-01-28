@@ -40,6 +40,11 @@ path = "tests/rust-system-test/single_threaded_test.rs"
 required-features = ["std", "compression"]
 
 [[test]]
+name = "reliable_drop_test"
+path = "tests/rust-system-test/reliable_drop_test.rs"
+required-features = ["std", "compression"]
+
+[[test]]
 name = "c-system-test"
 path = "tests/c-system-test/c_system_test.rs"
 required-features = ["std", "compression"]
