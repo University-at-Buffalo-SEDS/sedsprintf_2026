@@ -35,6 +35,12 @@
       "name": "FLIGHT_STATE",
       "doc": "Flight state updates",
       "broadcast_mode": "Default"
+    },
+    {
+      "rust": "HeartBeat",
+      "name": "HEART_BEAT",
+      "doc": "Endpoint for heartbeat messages",
+      "broadcast_mode": "Always"
     }
   ],
   "types": [
@@ -272,8 +278,7 @@
         "count": 0
       },
       "endpoints": [
-        "GroundStation",
-        "SdCard"
+        "HeartBeat"
       ]
     },
     {
