@@ -426,10 +426,10 @@ class TelemetryConfigEditor(tk.Tk):
         ep["doc"] = new_doc
         ep["broadcast_mode"] = new_bm
 
+        rename_map = None
         if old_rust and new_rust and old_rust != new_rust:
-            for ty in self.config_obj.get("types", []):
-                ty_eps = ty.get("endpoints", []) or []
-                ty["endpoints"] = [new_rust if e == old_rust else e for e in ty_eps]
+            rename_map = {old_rust: new_rust}
+        self._sync_type_endpoints_to_known(rename_map=rename_map)
 
         self._ensure_telemetry_error_invariants(mark_hash=False)
 
@@ -456,6 +456,7 @@ class TelemetryConfigEditor(tk.Tk):
 
         is_te = str(ty.get("rust", "")).strip() == TELEMETRY_ERROR_RUST
         sel_eps = _lb_all(self.ty_selected_endpoints)
+        known_eps = {ep.get("rust", "") for ep in self.config_obj.get("endpoints", []) if ep.get("rust", "")}
 
         if is_te:
             known = {ep.get("rust", "") for ep in self.config_obj.get("endpoints", [])}
@@ -503,7 +504,7 @@ class TelemetryConfigEditor(tk.Tk):
         ty["doc"] = new_doc
         ty["class"] = new_class
         ty["element"] = element
-        ty["endpoints"] = sel_eps
+        ty["endpoints"] = [e for e in sel_eps if e in known_eps]
 
         self._ensure_telemetry_error_invariants(mark_hash=False)
 
@@ -895,6 +896,29 @@ class TelemetryConfigEditor(tk.Tk):
                 changed = True
         return changed
 
+    def _sync_type_endpoints_to_known(self, rename_map: Optional[Dict[str, str]] = None) -> bool:
+        known = {ep.get("rust", "") for ep in self.config_obj.get("endpoints", []) if ep.get("rust", "")}
+        changed = False
+        for ty in self.config_obj.get("types", []) or []:
+            eps = ty.get("endpoints", []) or []
+            if not isinstance(eps, list):
+                ty["endpoints"] = []
+                changed = True
+                continue
+            new_eps: List[str] = []
+            for e in eps:
+                if not isinstance(e, str):
+                    continue
+                mapped = rename_map.get(e, e) if rename_map else e
+                if mapped in known and mapped not in new_eps:
+                    new_eps.append(mapped)
+            if new_eps != eps:
+                ty["endpoints"] = new_eps
+                changed = True
+        if changed:
+            self._ensure_telemetry_error_invariants(mark_hash=False)
+        return changed
+
     def load_from_path(self, path: Path):
         self._flush_all_pending()
         obj = safe_read_json(path)
@@ -915,6 +939,7 @@ class TelemetryConfigEditor(tk.Tk):
         # normalize/enforce (may change config)
         self._normalize_schema_names()
         self._ensure_telemetry_error_invariants(mark_hash=False)
+        self._sync_type_endpoints_to_known()
 
         self.refresh_lists()
 
@@ -938,6 +963,7 @@ class TelemetryConfigEditor(tk.Tk):
         self._flush_all_pending()
         self._ensure_telemetry_error_invariants(mark_hash=False)
         self._normalize_schema_names()
+        self._sync_type_endpoints_to_known()
 
         try:
             self.validate_current_config()
@@ -1082,9 +1108,7 @@ class TelemetryConfigEditor(tk.Tk):
         removed_rust = ep.get("rust", "")
         del self.config_obj["endpoints"][idx]
 
-        for ty in self.config_obj.get("types", []):
-            eps = ty.get("endpoints", []) or []
-            ty["endpoints"] = [e for e in eps if e != removed_rust]
+        self._sync_type_endpoints_to_known(rename_map={removed_rust: ""})
 
         self._ensure_telemetry_error_invariants(mark_hash=False)
         self.refresh_lists()
