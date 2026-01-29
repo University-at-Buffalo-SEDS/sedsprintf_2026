@@ -42,7 +42,11 @@ mod reliable_drop_tests {
             Ok(())
         });
 
-        let router_a = Router::new(RouterMode::Sink, RouterConfig::default(), shared_clock(now.clone()));
+        let router_a = Router::new(
+            RouterMode::Sink,
+            RouterConfig::default(),
+            shared_clock(now.clone()),
+        );
         let router_b = Router::new(
             RouterMode::Sink,
             RouterConfig::new(vec![handler]),
@@ -107,13 +111,14 @@ mod reliable_drop_tests {
 
             for frame in drain_queue(&a_to_b) {
                 let info = serialize::peek_frame_info(&frame).expect("peek frame failed");
-                if info.envelope.ty == DataType::GpsData && !info.ack_only() {
-                    if let Some(hdr) = info.reliable {
-                        if hdr.seq == 1 && !dropped_data_once {
-                            dropped_data_once = true;
-                            continue; // drop first data frame for seq=1
-                        }
-                    }
+                if info.envelope.ty == DataType::GpsData
+                    && !info.ack_only()
+                    && let Some(hdr) = info.reliable
+                    && hdr.seq == 1
+                    && !dropped_data_once
+                {
+                    dropped_data_once = true;
+                    continue; // drop first data frame for seq=1
                 }
                 router_b
                     .rx_serialized_queue_from_side(&frame, b_side)
@@ -122,13 +127,13 @@ mod reliable_drop_tests {
 
             for frame in drain_queue(&b_to_a) {
                 let info = serialize::peek_frame_info(&frame).expect("peek ack failed");
-                if info.ack_only() {
-                    if let Some(hdr) = info.reliable {
-                        if hdr.ack == 1 && !dropped_ack_once {
-                            dropped_ack_once = true;
-                            continue; // drop first ack for seq=1
-                        }
-                    }
+                if info.ack_only()
+                    && let Some(hdr) = info.reliable
+                    && hdr.ack == 1
+                    && !dropped_ack_once
+                {
+                    dropped_ack_once = true;
+                    continue; // drop first ack for seq=1
                 }
                 router_a
                     .rx_serialized_queue_from_side(&frame, a_side)
