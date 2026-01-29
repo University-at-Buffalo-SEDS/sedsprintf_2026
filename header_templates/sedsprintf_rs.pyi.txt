@@ -33,26 +33,17 @@ class RouterMode(IntEnum):
 # Callback protocols (informal)
 # ==============================
 
-TxCallback = Union[
-    Callable[[bytes], None],
-    Callable[[bytes, LinkId], None],
-]
-"""Transmit callback. May be called as tx(bytes) or tx(bytes, link_id)."""
+TxCallback = Callable[[bytes], None]
+"""Transmit callback. Called as tx(bytes)."""
 
 NowMsCallback = Callable[[], int]
 """Clock callback returning monotonic milliseconds."""
 
-PacketHandler = Union[
-    Callable[["Packet"], None],
-    Callable[["Packet", LinkId], None],
-]
-"""Endpoint handler invoked with (Packet) or (Packet, link_id)."""
+PacketHandler = Callable[["Packet"], None]
+"""Endpoint handler invoked with (Packet)."""
 
-SerializedHandler = Union[
-    Callable[[bytes], None],
-    Callable[[bytes, LinkId], None],
-]
-"""Endpoint handler invoked with (bytes) or (bytes, link_id)."""
+SerializedHandler = Callable[[bytes], None]
+"""Endpoint handler invoked with (bytes)."""
 
 SideId = int
 """Logical relay side index (e.g. CAN, UART, RADIO)."""
@@ -116,7 +107,6 @@ class Packet:
 class Router:
     @staticmethod
     def new_singleton(
-        tx: Optional[TxCallback] = ...,
         now_ms: Optional[NowMsCallback] = ...,
         handlers: Optional[
             Sequence[Tuple[int, Optional[PacketHandler], Optional[SerializedHandler]]]
@@ -126,17 +116,16 @@ class Router:
     """
         Create or retrieve a per-process singleton Router.
 
-        The first call creates the singleton with the given `tx` callback
-        (no clock and no endpoint handlers). Subsequent calls return another
+        The first call creates the singleton with the given `now_ms`/`handlers`.
+        Subsequent calls return another
         Router object wrapping the same underlying singleton instance.
 
-        Passing a non-None `tx` after the singleton has already been created
+        Passing non-None arguments after the singleton has already been created
         will raise a RuntimeError.
         """
 
     def __init__(
         self,
-        tx: Optional[TxCallback] = ...,
         now_ms: Optional[NowMsCallback] = ...,
         handlers: Optional[
             Sequence[Tuple[int, Optional[PacketHandler], Optional[SerializedHandler]]]
@@ -170,22 +159,24 @@ class Router:
         queue: bool = ...,
     ) -> None: ...
 
-    # Legacy/default-link methods (still supported)
+    def add_side_serialized(self, name: str, tx: Callable[[bytes], None], reliable_enabled: bool = ...) -> SideId: ...
+    def add_side_packet(self, name: str, tx: Callable[[Packet], None], reliable_enabled: bool = ...) -> SideId: ...
+
+    # Broadcast methods
     def transmit_message_queue(self, packet: Packet) -> None: ...
     def transmit_message(self, packet: Packet) -> None: ...
     def transmit_serialized_message(self, data: Buffer | bytes | bytearray | memoryview) -> None: ...
     def transmit_serialized_message_queue(self, data: Buffer | bytes | bytearray | memoryview) -> None: ...
     def receive_serialized(self, data: Buffer | bytes | bytearray | memoryview) -> None: ...
-
-    # NEW: link-aware methods
-    def transmit_message_from(self, link_id: LinkId, packet: Packet) -> None: ...
-    def transmit_message_queue_from(self, link_id: LinkId, packet: Packet) -> None: ...
-    def transmit_serialized_message_from(self, link_id: LinkId, data: Buffer | bytes | bytearray | memoryview) -> None: ...
-    def transmit_serialized_message_queue_from(self, link_id: LinkId, data: Buffer | bytes | bytearray | memoryview) -> None: ...
-
-    def receive_serialized_from(self, link_id: LinkId, data: Buffer | bytes | bytearray | memoryview) -> None: ...
+    def receive_packet(self, packet: Packet) -> None: ...
     def receive_serialized_queue(self, data: Buffer | bytes | bytearray | memoryview) -> None: ...
-    def receive_serialized_queue_from(self, link_id: LinkId, data: Buffer | bytes | bytearray | memoryview) -> None: ...
+    def receive_packet_queue(self, packet: Packet) -> None: ...
+
+    # Side-aware receive methods
+    def receive_serialized_from_side(self, side_id: SideId, data: Buffer | bytes | bytearray | memoryview) -> None: ...
+    def receive_packet_from_side(self, side_id: SideId, packet: Packet) -> None: ...
+    def receive_serialized_queue_from_side(self, side_id: SideId, data: Buffer | bytes | bytearray | memoryview) -> None: ...
+    def receive_packet_queue_from_side(self, side_id: SideId, packet: Packet) -> None: ...
 
     # Queue processing
     def process_send_queue(self) -> None: ...
@@ -224,7 +215,7 @@ class Relay:
             If None, timeouts are based on a default clock that returns 0.
         """
 
-    def add_side_serialized(self, name: str, tx: Callable[[bytes], None]) -> SideId: ...
+    def add_side_serialized(self, name: str, tx: Callable[[bytes], None], reliable_enabled: bool = ...) -> SideId: ...
     """
         Add a new relay side (e.g. 'CAN', 'UART', 'RADIO').
 
@@ -241,7 +232,7 @@ class Relay:
         SideId
             Integer side id to use with ``rx_serialized_from_side``.
         """
-    def add_side_packet(self, name: str, tx: Callable[[Packet], None]) -> SideId: ...
+    def add_side_packet(self, name: str, tx: Callable[[Packet], None], reliable_enabled: bool = ...) -> SideId: ...
     """
         Add a new side with a packet-based TX callback.
 

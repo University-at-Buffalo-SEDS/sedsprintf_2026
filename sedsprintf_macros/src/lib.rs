@@ -334,6 +334,11 @@ struct JsonType {
     #[serde(default)]
     doc: Option<String>,
 
+    #[serde(default)]
+    reliable: Option<bool>,
+    #[serde(default)]
+    reliable_mode: Option<String>,
+
     element: JsonElement,
     class: String,
 
@@ -392,14 +397,29 @@ fn caller_manifest_dir() -> Result<std::path::PathBuf, String> {
     Ok(std::path::PathBuf::from(m))
 }
 
+fn resolve_schema_path(path_rel: &str) -> Result<std::path::PathBuf, String> {
+    let root = caller_manifest_dir()?;
+    if let Ok(override_path) = std::env::var("SEDSPRINTF_RS_SCHEMA_PATH") {
+        if override_path.trim().is_empty() {
+            return Err("SEDSPRINTF_RS_SCHEMA_PATH is set but empty".to_string());
+        }
+        let p = std::path::PathBuf::from(override_path);
+        if p.is_absolute() {
+            return Ok(p);
+        }
+        return Ok(root.join(p));
+    }
+    Ok(root.join(path_rel))
+}
+
 fn load_schema(path_rel: &str) -> Result<TelemetryConfig, String> {
     let root = caller_manifest_dir()?;
-    let path = root.join(path_rel);
+    let path = resolve_schema_path(path_rel)?;
 
     let bytes = std::fs::read(&path).map_err(|e| {
         format!(
             "failed to read telemetry schema at {}: {e}\n\
-             note: path is resolved as CARGO_MANIFEST_DIR ({}) + {:?}",
+             note: path is resolved as CARGO_MANIFEST_DIR ({}) + {:?} (override with SEDSPRINTF_RS_SCHEMA_PATH)",
             path.display(),
             root.display(),
             path_rel
@@ -428,6 +448,21 @@ fn broadcast_mode_token(name: &str) -> proc_macro2::TokenStream {
     quote!(EndpointsBroadcastMode::#id)
 }
 
+fn reliable_mode_token(mode: &str) -> Result<proc_macro2::TokenStream, String> {
+    let mode_lc = mode.to_ascii_lowercase();
+    let ts = match mode_lc.as_str() {
+        "none" => quote!(crate::ReliableMode::None),
+        "ordered" => quote!(crate::ReliableMode::Ordered),
+        "unordered" => quote!(crate::ReliableMode::Unordered),
+        _ => {
+            return Err(format!(
+                "invalid reliable_mode: {mode:?} (expected \"None\", \"Ordered\", or \"Unordered\")"
+            ))
+        }
+    };
+    Ok(ts)
+}
+
 #[proc_macro]
 pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
     let SchemaArgs { path } = parse_macro_input!(input as SchemaArgs);
@@ -437,15 +472,25 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
         Err(e) => return syn::Error::new(Span::call_site(), e).to_compile_error().into(),
     };
 
-    if cfg.endpoints.is_empty() {
-        return syn::Error::new(Span::call_site(), "telemetry_config.json: endpoints is empty")
+    for ty in &cfg.types {
+        if ty.rust == "TelemetryError" || ty.name == "TELEMETRY_ERROR" {
+            return syn::Error::new(
+                Span::call_site(),
+                "telemetry_config.json: TelemetryError is built-in and must not be defined in the schema",
+            )
             .to_compile_error()
             .into();
+        }
     }
-    if cfg.types.is_empty() {
-        return syn::Error::new(Span::call_site(), "telemetry_config.json: types is empty")
+    for ep in &cfg.endpoints {
+        if ep.rust == "TelemetryError" || ep.name == "TELEMETRY_ERROR" {
+            return syn::Error::new(
+                Span::call_site(),
+                "telemetry_config.json: TelemetryError endpoint is built-in and must not be defined in the schema",
+            )
             .to_compile_error()
             .into();
+        }
     }
 
     // ----------------------------
@@ -472,7 +517,15 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
         ep_bm.push(ep.broadcast_mode.clone().unwrap_or_else(|| "Default".to_string()));
     }
 
-    let max_ep_value = (cfg.endpoints.len() - 1) as u32;
+    ep_idents.push(syn::Ident::new("TelemetryError", Span::call_site()));
+    ep_docs.push(
+        "Encoded telemetry error text (string payload) (CRITICAL FOR SYSTEM FUNCTIONALITY, DO NOT REMOVE)"
+            .to_string(),
+    );
+    ep_names.push("TELEMETRY_ERROR".to_string());
+    ep_bm.push("Always".to_string());
+
+    let max_ep_value = cfg.endpoints.len() as u32;
 
     let ep_variants = ep_idents.iter().zip(ep_docs.iter()).map(|(id, doc)| {
         if doc.is_empty() {
@@ -520,9 +573,18 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
         ty_docs.push(ty.doc.clone().unwrap_or_default());
     }
 
-    let max_ty_value = (cfg.types.len() - 1) as u32;
+    let max_ty_value = cfg.types.len() as u32;
 
-    let ty_variants = ty_idents.iter().zip(ty_docs.iter()).map(|(id, doc)| {
+    let ty_variants = ty_idents
+        .iter()
+        .cloned()
+        .zip(ty_docs.iter().cloned())
+        .chain(std::iter::once((
+            syn::Ident::new("TelemetryError", Span::call_site()),
+            "Encoded telemetry error text (string payload) (CRITICAL FOR SYSTEM FUNCTIONALITY, DO NOT REMOVE)"
+                .to_string(),
+        )))
+        .map(|(id, doc)| {
         if doc.is_empty() {
             quote!(#id,)
         } else {
@@ -533,9 +595,35 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
         }
     });
 
+    let builtin_ty_meta = {
+        let endpoints_tokens: Vec<proc_macro2::TokenStream> =
+            vec![quote!(DataEndpoint::TelemetryError)];
+        quote! {
+            DataType::TelemetryError => MessageMeta {
+                name: "TELEMETRY_ERROR",
+                element: MessageElement::Dynamic(MessageDataType::String, MessageClass::Error),
+                endpoints: &[#(#endpoints_tokens),*],
+                reliable: crate::ReliableMode::Ordered,
+            },
+        }
+    };
+
     let ty_meta_arms = cfg.types.iter().map(|ty| {
         let rust_id = syn::Ident::new(&ty.rust, Span::call_site());
         let name = &ty.name;
+        let reliable_mode = match &ty.reliable_mode {
+            Some(mode) => match reliable_mode_token(mode) {
+                Ok(ts) => ts,
+                Err(e) => return syn::Error::new(Span::call_site(), e).to_compile_error(),
+            },
+            None => {
+                if ty.reliable.unwrap_or(false) {
+                    quote!(crate::ReliableMode::Ordered)
+                } else {
+                    quote!(crate::ReliableMode::None)
+                }
+            }
+        };
 
         let class_ts = msg_class_token(&ty.class);
 
@@ -564,6 +652,7 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
                 name: #name,
                 element: #element_ts,
                 endpoints: &[#(#endpoints_tokens),*],
+                reliable: #reliable_mode,
             },
         }
     });
@@ -603,6 +692,7 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
 
         pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
             match data_type {
+                #builtin_ty_meta
                 #(#ty_meta_arms)*
             }
         }

@@ -8,11 +8,11 @@
 //! - Fixed-size schema queries
 //! - Typed payload extraction
 //!
-//! It also provides **v2** entry points that include LinkId in callbacks,
-//! while preserving the old ABI exactly.
+//! Router sides are registered explicitly (like the Relay), and RX can specify
+//! an ingress side for relay-style behavior.
 
 use crate::{
-    config::DataEndpoint, do_vec_log_typed, get_needed_message_size, message_meta, router::{Clock, LeBytes, LinkId},
+    config::DataEndpoint, do_vec_log_typed, get_needed_message_size, message_meta, router::{Clock, LeBytes, RouterSideOptions},
     router::{EndpointHandler, Router, RouterConfig},
     serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet}, telemetry_packet::TelemetryPacket, DataType,
     MessageElement,
@@ -24,8 +24,7 @@ use crate::{get_data_type, MessageDataType::NoData};
 use alloc::{boxed::Box, string::String, sync::Arc, vec, vec::Vec};
 use core::{ffi::c_char, ffi::c_void, mem::size_of, ptr, slice, str::from_utf8};
 
-use crate::relay::{Relay, RelaySideId};
-use crate::router::DEFAULT_LINK_ID;
+use crate::relay::{Relay, RelaySideId, RelaySideOptions};
 // ============================================================================
 //  Constants / basic types shared with the C side
 // ============================================================================
@@ -45,16 +44,6 @@ enum SedsResult {
     SedsErr = 1,
 }
 
-/// Link id wrapper exposed to C (v2 callbacks).
-#[repr(C)]
-pub struct SedsLinkId {
-    raw: u64,
-}
-
-#[inline]
-fn seds_link_id_from(link: &LinkId) -> SedsLinkId {
-    SedsLinkId { raw: link.id() }
-}
 
 /// Opaque owned packet for C. Keeps Rust allocations alive across calls.
 #[repr(C)]
@@ -102,17 +91,6 @@ fn ok_or_status(r: TelemetryResult<()>) -> i32 {
     match r {
         Ok(()) => status_from_result_code(SedsResult::SedsOk),
         Err(e) => status_from_err(e),
-    }
-}
-
-#[inline]
-fn link_id_from_ptr(link: *const SedsLinkId) -> TelemetryResult<LinkId> {
-    if link.is_null() {
-        Ok(DEFAULT_LINK_ID)
-    } else {
-        // SAFETY: caller promises `link` points to a valid SedsLinkId.
-        let raw = unsafe { (*link).raw };
-        LinkId::new(raw)
     }
 }
 
@@ -190,35 +168,6 @@ pub struct SedsLocalEndpointDesc {
     serialized_handler: CSerializedHandler, // optional
     user: *mut c_void,
 }
-
-/// -------- v2 callbacks (include LinkId) --------
-type CTransmitV2 = Option<
-    extern "C" fn(bytes: *const u8, len: usize, link: *const SedsLinkId, user: *mut c_void) -> i32,
->;
-
-type CEndpointHandlerV2 = Option<
-    extern "C" fn(pkt: *const SedsPacketView, link: *const SedsLinkId, user: *mut c_void) -> i32,
->;
-
-type CSerializedHandlerV2 = Option<
-    extern "C" fn(bytes: *const u8, len: usize, link: *const SedsLinkId, user: *mut c_void) -> i32,
->;
-
-#[repr(C)]
-pub struct SedsLocalEndpointDescV2 {
-    endpoint: u32,                            // DataEndpoint as u32
-    packet_handler: CEndpointHandlerV2,       // optional
-    serialized_handler: CSerializedHandlerV2, // optional
-    user: *mut c_void,
-}
-
-#[derive(Copy, Clone)]
-struct TxCtx {
-    user_addr: usize,
-}
-
-unsafe impl Send for TxCtx {}
-unsafe impl Sync for TxCtx {}
 
 // ============================================================================
 //  Internal helpers: view_to_packet, string buffer writing, clock adapter
@@ -422,33 +371,15 @@ pub extern "C" fn seds_error_to_string(error_code: i32, buf: *mut c_char, buf_le
 //  FFI: Router lifecycle (new / free)
 // ============================================================================
 
-/// Legacy router constructor (NO LinkId in callbacks, but works with new Router::new)
+/// Router constructor (no TX callback; sides are added separately).
 #[unsafe(no_mangle)]
 pub extern "C" fn seds_router_new(
     mode: u8,
-    tx: CTransmit,
-    tx_user: *mut c_void,
     now_ms_cb: CNowMs,
+    user: *mut c_void,
     handlers: *const SedsLocalEndpointDesc,
     n_handlers: usize,
 ) -> *mut SedsRouter {
-    // Build transmit closure (legacy ignores link id)
-    let tx_ctx = TxCtx {
-        user_addr: tx_user as usize,
-    };
-
-    let transmit = tx.map(move |f| {
-        let ctx = tx_ctx;
-        move |bytes: &[u8], _link_id: &LinkId| -> TelemetryResult<()> {
-            let code = f(bytes.as_ptr(), bytes.len(), ctx.user_addr as *mut c_void);
-            if code == status_from_result_code(SedsResult::SedsOk) {
-                Ok(())
-            } else {
-                Err(TelemetryError::Io("tx error"))
-            }
-        }
-    });
-
     // Build handler vector
     let mut v: Vec<EndpointHandler> = Vec::new();
     if n_handlers > 0 && !handlers.is_null() {
@@ -465,69 +396,63 @@ pub extern "C" fn seds_router_new(
 
             // If a PACKET handler is provided, register it
             if let Some(cb_fn) = desc.packet_handler {
-                let eh = EndpointHandler::new_packet_handler(
-                    endpoint,
-                    move |pkt: &TelemetryPacket, _link_id: &LinkId| {
-                        // Fast path: up to STACK_EPS endpoints, no heap allocation
-                        let mut stack_eps: [u32; STACK_EPS] = [0; STACK_EPS];
+                let eh = EndpointHandler::new_packet_handler(endpoint, move |pkt: &TelemetryPacket| {
+                    // Fast path: up to STACK_EPS endpoints, no heap allocation
+                    let mut stack_eps: [u32; STACK_EPS] = [0; STACK_EPS];
 
-                        let (endpoints_ptr, num_endpoints, _owned_vec): (
-                            *const u32,
-                            usize,
-                            Option<Vec<u32>>,
-                        ) = if pkt.endpoints().len() <= STACK_EPS {
-                            for (i, e) in pkt.endpoints().iter().enumerate() {
-                                stack_eps[i] = *e as u32;
-                            }
-                            (stack_eps.as_ptr(), pkt.endpoints().len(), None)
-                        } else {
-                            let mut eps_u32 = Vec::with_capacity(pkt.endpoints().len());
-                            for e in pkt.endpoints().iter() {
-                                eps_u32.push(*e as u32);
-                            }
-                            let ptr = eps_u32.as_ptr();
-                            let len = eps_u32.len();
-                            (ptr, len, Some(eps_u32))
-                        };
-
-                        let sender_bytes = pkt.sender().as_bytes();
-                        let view = SedsPacketView {
-                            ty: pkt.data_type() as u32,
-                            data_size: pkt.data_size(),
-                            sender: sender_bytes.as_ptr() as *const c_char,
-                            sender_len: sender_bytes.len(),
-                            endpoints: endpoints_ptr,
-                            num_endpoints,
-                            timestamp: pkt.timestamp(),
-                            payload: pkt.payload().as_ptr(),
-                            payload_len: pkt.payload().len(),
-                        };
-
-                        let code = cb_fn(&view as *const _, user_addr as *mut c_void);
-                        if code == status_from_result_code(SedsResult::SedsOk) {
-                            Ok(())
-                        } else {
-                            Err(TelemetryError::Io("handler error"))
+                    let (endpoints_ptr, num_endpoints, _owned_vec): (
+                        *const u32,
+                        usize,
+                        Option<Vec<u32>>,
+                    ) = if pkt.endpoints().len() <= STACK_EPS {
+                        for (i, e) in pkt.endpoints().iter().enumerate() {
+                            stack_eps[i] = *e as u32;
                         }
-                    },
-                );
+                        (stack_eps.as_ptr(), pkt.endpoints().len(), None)
+                    } else {
+                        let mut eps_u32 = Vec::with_capacity(pkt.endpoints().len());
+                        for e in pkt.endpoints().iter() {
+                            eps_u32.push(*e as u32);
+                        }
+                        let ptr = eps_u32.as_ptr();
+                        let len = eps_u32.len();
+                        (ptr, len, Some(eps_u32))
+                    };
+
+                    let sender_bytes = pkt.sender().as_bytes();
+                    let view = SedsPacketView {
+                        ty: pkt.data_type() as u32,
+                        data_size: pkt.data_size(),
+                        sender: sender_bytes.as_ptr() as *const c_char,
+                        sender_len: sender_bytes.len(),
+                        endpoints: endpoints_ptr,
+                        num_endpoints,
+                        timestamp: pkt.timestamp(),
+                        payload: pkt.payload().as_ptr(),
+                        payload_len: pkt.payload().len(),
+                    };
+
+                    let code = cb_fn(&view as *const _, user_addr as *mut c_void);
+                    if code == status_from_result_code(SedsResult::SedsOk) {
+                        Ok(())
+                    } else {
+                        Err(TelemetryError::Io("handler error"))
+                    }
+                });
 
                 v.push(eh);
             }
 
             // If a SERIALIZED handler is provided, register it
             if let Some(cb_fn) = desc.serialized_handler {
-                let eh = EndpointHandler::new_serialized_handler(
-                    endpoint,
-                    move |bytes: &[u8], _link_id: &LinkId| {
-                        let code = cb_fn(bytes.as_ptr(), bytes.len(), user_addr as *mut c_void);
-                        if code == status_from_result_code(SedsResult::SedsOk) {
-                            Ok(())
-                        } else {
-                            Err(TelemetryError::Io("handler error"))
-                        }
-                    },
-                );
+                let eh = EndpointHandler::new_serialized_handler(endpoint, move |bytes: &[u8]| {
+                    let code = cb_fn(bytes.as_ptr(), bytes.len(), user_addr as *mut c_void);
+                    if code == status_from_result_code(SedsResult::SedsOk) {
+                        Ok(())
+                    } else {
+                        Err(TelemetryError::Io("handler error"))
+                    }
+                });
 
                 v.push(eh);
             }
@@ -536,7 +461,7 @@ pub extern "C" fn seds_router_new(
 
     let clock = FfiClock {
         cb: now_ms_cb,
-        user_addr: tx_user as usize,
+        user_addr: user as usize,
     };
 
     let box_clock = Box::new(clock);
@@ -547,151 +472,7 @@ pub extern "C" fn seds_router_new(
         _ => return ptr::null_mut(),
     };
 
-    let router = Router::new(transmit, mode, cfg, box_clock);
-    Box::into_raw(Box::new(SedsRouter {
-        inner: Arc::from(router),
-    }))
-}
-
-/// v2 router constructor (LinkId aware callbacks).
-#[unsafe(no_mangle)]
-pub extern "C" fn seds_router_new_v2(
-    mode: u8,
-    tx: CTransmitV2,
-    tx_user: *mut c_void,
-    now_ms_cb: CNowMs,
-    handlers: *const SedsLocalEndpointDescV2,
-    n_handlers: usize,
-) -> *mut SedsRouter {
-    // Build transmit closure (v2 passes link id)
-    let tx_ctx = TxCtx {
-        user_addr: tx_user as usize,
-    };
-
-    let transmit = tx.map(move |f| {
-        let ctx = tx_ctx;
-        move |bytes: &[u8], link_id: &LinkId| -> TelemetryResult<()> {
-            let sid = seds_link_id_from(link_id);
-            let code = f(
-                bytes.as_ptr(),
-                bytes.len(),
-                &sid as *const _,
-                ctx.user_addr as *mut c_void,
-            );
-            if code == status_from_result_code(SedsResult::SedsOk) {
-                Ok(())
-            } else {
-                Err(TelemetryError::Io("tx error"))
-            }
-        }
-    });
-
-    // Build handler vector
-    let mut v: Vec<EndpointHandler> = Vec::new();
-    if n_handlers > 0 && !handlers.is_null() {
-        v.reserve(n_handlers.saturating_mul(2));
-        let slice = unsafe { slice::from_raw_parts(handlers, n_handlers) };
-        for desc in slice {
-            let endpoint = match endpoint_from_u32(desc.endpoint) {
-                Ok(e) => e,
-                Err(_) => return ptr::null_mut(),
-            };
-
-            let user_addr = desc.user as usize;
-
-            if let Some(cb_fn) = desc.packet_handler {
-                let eh = EndpointHandler::new_packet_handler(
-                    endpoint,
-                    move |pkt: &TelemetryPacket, link_id: &LinkId| {
-                        let sid = seds_link_id_from(link_id);
-
-                        let mut stack_eps: [u32; STACK_EPS] = [0; STACK_EPS];
-                        let (endpoints_ptr, num_endpoints, _owned_vec): (
-                            *const u32,
-                            usize,
-                            Option<Vec<u32>>,
-                        ) = if pkt.endpoints().len() <= STACK_EPS {
-                            for (i, e) in pkt.endpoints().iter().enumerate() {
-                                stack_eps[i] = *e as u32;
-                            }
-                            (stack_eps.as_ptr(), pkt.endpoints().len(), None)
-                        } else {
-                            let mut eps_u32 = Vec::with_capacity(pkt.endpoints().len());
-                            for e in pkt.endpoints().iter() {
-                                eps_u32.push(*e as u32);
-                            }
-                            let ptr = eps_u32.as_ptr();
-                            let len = eps_u32.len();
-                            (ptr, len, Some(eps_u32))
-                        };
-
-                        let sender_bytes = pkt.sender().as_bytes();
-                        let view = SedsPacketView {
-                            ty: pkt.data_type() as u32,
-                            data_size: pkt.data_size(),
-                            sender: sender_bytes.as_ptr() as *const c_char,
-                            sender_len: sender_bytes.len(),
-                            endpoints: endpoints_ptr,
-                            num_endpoints,
-                            timestamp: pkt.timestamp(),
-                            payload: pkt.payload().as_ptr(),
-                            payload_len: pkt.payload().len(),
-                        };
-
-                        let code = cb_fn(
-                            &view as *const _,
-                            &sid as *const _,
-                            user_addr as *mut c_void,
-                        );
-                        if code == status_from_result_code(SedsResult::SedsOk) {
-                            Ok(())
-                        } else {
-                            Err(TelemetryError::Io("handler error"))
-                        }
-                    },
-                );
-
-                v.push(eh);
-            }
-
-            if let Some(cb_fn) = desc.serialized_handler {
-                let eh = EndpointHandler::new_serialized_handler(
-                    endpoint,
-                    move |bytes: &[u8], link_id: &LinkId| {
-                        let sid = seds_link_id_from(link_id);
-                        let code = cb_fn(
-                            bytes.as_ptr(),
-                            bytes.len(),
-                            &sid as *const _,
-                            user_addr as *mut c_void,
-                        );
-                        if code == status_from_result_code(SedsResult::SedsOk) {
-                            Ok(())
-                        } else {
-                            Err(TelemetryError::Io("handler error"))
-                        }
-                    },
-                );
-
-                v.push(eh);
-            }
-        }
-    }
-
-    let clock = FfiClock {
-        cb: now_ms_cb,
-        user_addr: tx_user as usize,
-    };
-
-    let box_clock = Box::new(clock);
-    let cfg = RouterConfig::new(v);
-    let mode = match mode {
-        0 => crate::router::RouterMode::Sink,
-        1 => crate::router::RouterMode::Relay,
-        _ => return ptr::null_mut(),
-    };
-
-    let router = Router::new(transmit, mode, cfg, box_clock);
+    let router = Router::new(mode, cfg, box_clock);
     Box::into_raw(Box::new(SedsRouter {
         inner: Arc::from(router),
     }))
@@ -705,6 +486,143 @@ pub extern "C" fn seds_router_free(r: *mut SedsRouter) {
     unsafe {
         drop(Box::from_raw(r));
     }
+}
+
+// ============================================================================
+//  FFI: Router side registration
+// ============================================================================
+
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_add_side_serialized(
+    r: *mut SedsRouter,
+    name: *const c_char,
+    name_len: usize,
+    tx: CTransmit,
+    tx_user: *mut c_void,
+    reliable_enabled: bool,
+) -> i32 {
+    if r.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+
+    let side_name: &'static str = if name.is_null() || name_len == 0 {
+        ""
+    } else {
+        let bytes = unsafe { slice::from_raw_parts(name as *const u8, name_len) };
+        match from_utf8(bytes) {
+            Ok(s) => {
+                let owned = String::from(s);
+                Box::leak(owned.into_boxed_str())
+            }
+            Err(_) => "",
+        }
+    };
+
+    let router = unsafe { &(*r).inner };
+
+    let tx_closure = tx.map(|f| {
+        let user_addr = tx_user as usize;
+        move |bytes: &[u8]| -> TelemetryResult<()> {
+            let code = f(bytes.as_ptr(), bytes.len(), user_addr as *mut c_void);
+            if code == status_from_result_code(SedsResult::SedsOk) {
+                Ok(())
+            } else {
+                Err(TelemetryError::Io("router side tx error"))
+            }
+        }
+    });
+
+    let Some(tx_fn) = tx_closure else {
+        return status_from_err(TelemetryError::BadArg);
+    };
+
+    let opts = RouterSideOptions {
+        reliable_enabled,
+    };
+
+    let side_id = router.add_side_serialized_with_options(side_name, tx_fn, opts);
+    side_id as i32
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_add_side_packet(
+    r: *mut SedsRouter,
+    name: *const c_char,
+    name_len: usize,
+    tx: CEndpointHandler,
+    tx_user: *mut c_void,
+    reliable_enabled: bool,
+) -> i32 {
+    if r.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+
+    let side_name: &'static str = if name.is_null() || name_len == 0 {
+        ""
+    } else {
+        let bytes = unsafe { slice::from_raw_parts(name as *const u8, name_len) };
+        match from_utf8(bytes) {
+            Ok(s) => {
+                let owned = String::from(s);
+                Box::leak(owned.into_boxed_str())
+            }
+            Err(_) => "",
+        }
+    };
+
+    let router = unsafe { &(*r).inner };
+
+    let Some(cb_fn) = tx else {
+        return status_from_err(TelemetryError::BadArg);
+    };
+
+    let user_addr = tx_user as usize;
+
+    let tx_closure = move |pkt: &TelemetryPacket| -> TelemetryResult<()> {
+        let mut stack_eps: [u32; STACK_EPS] = [0; STACK_EPS];
+        let (endpoints_ptr, num_endpoints, _owned_vec): (*const u32, usize, Option<Vec<u32>>) =
+            if pkt.endpoints().len() <= STACK_EPS {
+                for (i, e) in pkt.endpoints().iter().enumerate() {
+                    stack_eps[i] = *e as u32;
+                }
+                (stack_eps.as_ptr(), pkt.endpoints().len(), None)
+            } else {
+                let mut eps_u32 = Vec::with_capacity(pkt.endpoints().len());
+                for e in pkt.endpoints().iter() {
+                    eps_u32.push(*e as u32);
+                }
+                let ptr = eps_u32.as_ptr();
+                let len = eps_u32.len();
+                (ptr, len, Some(eps_u32))
+            };
+
+        let sender_bytes = pkt.sender().as_bytes();
+        let view = SedsPacketView {
+            ty: pkt.data_type() as u32,
+            data_size: pkt.data_size(),
+            sender: sender_bytes.as_ptr() as *const c_char,
+            sender_len: sender_bytes.len(),
+            endpoints: endpoints_ptr,
+            num_endpoints,
+            timestamp: pkt.timestamp(),
+            payload: pkt.payload().as_ptr(),
+            payload_len: pkt.payload().len(),
+        };
+
+        let code = cb_fn(&view as *const _, user_addr as *mut c_void);
+        if code == status_from_result_code(SedsResult::SedsOk) {
+            Ok(())
+        } else {
+            Err(TelemetryError::Io("router side tx error"))
+        }
+    };
+
+    let opts = RouterSideOptions {
+        reliable_enabled,
+    };
+
+    let side_id = router.add_side_packet_with_options(side_name, tx_closure, opts);
+    side_id as i32
 }
 
 // ============================================================================
@@ -762,6 +680,7 @@ pub extern "C" fn seds_relay_add_side_serialized(
     name_len: usize,
     tx: CTransmit,
     tx_user: *mut c_void,
+    reliable_enabled: bool,
 ) -> i32 {
     if r.is_null() {
         return status_from_err(TelemetryError::BadArg);
@@ -798,7 +717,10 @@ pub extern "C" fn seds_relay_add_side_serialized(
         return status_from_err(TelemetryError::BadArg);
     };
 
-    let side_id: RelaySideId = relay.add_side_serialized(side_name, tx_fn);
+    let opts = RelaySideOptions {
+        reliable_enabled,
+    };
+    let side_id: RelaySideId = relay.add_side_serialized_with_options(side_name, tx_fn, opts);
     side_id as i32
 }
 
@@ -809,6 +731,7 @@ pub extern "C" fn seds_relay_add_side_packet(
     name_len: usize,
     tx: CEndpointHandler,
     tx_user: *mut c_void,
+    reliable_enabled: bool,
 ) -> i32 {
     if r.is_null() {
         return status_from_err(TelemetryError::BadArg);
@@ -874,7 +797,10 @@ pub extern "C" fn seds_relay_add_side_packet(
         }
     };
 
-    let side_id: RelaySideId = relay.add_side_packet(side_name, tx_closure);
+    let opts = RelaySideOptions {
+        reliable_enabled,
+    };
+    let side_id: RelaySideId = relay.add_side_packet_with_options(side_name, tx_closure, opts);
     side_id as i32
 }
 
@@ -1539,13 +1465,13 @@ pub extern "C" fn seds_router_process_all_queues_with_timeout(
 }
 
 // ============================================================================
-//  FFI: Receive / queue RX (v2: explicit ingress LinkId)
+//  FFI: Receive / queue RX (explicit ingress side)
 // ============================================================================
 
 #[unsafe(no_mangle)]
-pub extern "C" fn seds_router_receive_serialized_v2(
+pub extern "C" fn seds_router_receive_serialized_from_side(
     r: *mut SedsRouter,
-    link: *const SedsLinkId,
+    side_id: u32,
     bytes: *const u8,
     len: usize,
 ) -> i32 {
@@ -1554,19 +1480,13 @@ pub extern "C" fn seds_router_receive_serialized_v2(
     }
     let router = unsafe { &(*r).inner };
     let slice = unsafe { slice::from_raw_parts(bytes, len) };
-
-    let link_id = match link_id_from_ptr(link) {
-        Ok(lid) => lid,
-        Err(e) => return status_from_err(e),
-    };
-
-    ok_or_status(router.rx_serialized_from(slice, link_id))
+    ok_or_status(router.rx_serialized_from_side(slice, side_id as usize))
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn seds_router_receive_v2(
+pub extern "C" fn seds_router_receive_from_side(
     r: *mut SedsRouter,
-    link: *const SedsLinkId,
+    side_id: u32,
     view: *const SedsPacketView,
 ) -> i32 {
     if r.is_null() || view.is_null() {
@@ -1577,18 +1497,13 @@ pub extern "C" fn seds_router_receive_v2(
         Ok(p) => p,
         Err(_) => return status_from_err(TelemetryError::InvalidType),
     };
-
-    let link_id = match link_id_from_ptr(link) {
-        Ok(lid) => lid,
-        Err(e) => return status_from_err(e),
-    };
-    ok_or_status(router.rx_from(&pkt, link_id))
+    ok_or_status(router.rx_from_side(&pkt, side_id as usize))
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn seds_router_rx_serialized_packet_to_queue_v2(
+pub extern "C" fn seds_router_rx_serialized_packet_to_queue_from_side(
     r: *mut SedsRouter,
-    link: *const SedsLinkId,
+    side_id: u32,
     bytes: *const u8,
     len: usize,
 ) -> i32 {
@@ -1597,18 +1512,13 @@ pub extern "C" fn seds_router_rx_serialized_packet_to_queue_v2(
     }
     let router = unsafe { &(*r).inner };
     let slice = unsafe { slice::from_raw_parts(bytes, len) };
-
-    let link_id = match link_id_from_ptr(link) {
-        Ok(lid) => lid,
-        Err(e) => return status_from_err(e),
-    };
-    ok_or_status(router.rx_serialized_queue_from(slice, link_id))
+    ok_or_status(router.rx_serialized_queue_from_side(slice, side_id as usize))
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn seds_router_rx_packet_to_queue_v2(
+pub extern "C" fn seds_router_rx_packet_to_queue_from_side(
     r: *mut SedsRouter,
-    link: *const SedsLinkId,
+    side_id: u32,
     view: *const SedsPacketView,
 ) -> i32 {
     if r.is_null() || view.is_null() {
@@ -1619,12 +1529,7 @@ pub extern "C" fn seds_router_rx_packet_to_queue_v2(
         Ok(p) => p,
         Err(_) => return status_from_err(TelemetryError::InvalidType),
     };
-
-    let link_id = match link_id_from_ptr(link) {
-        Ok(lid) => lid,
-        Err(e) => return status_from_err(e),
-    };
-    ok_or_status(router.rx_queue_from(pkt, link_id))
+    ok_or_status(router.rx_queue_from_side(pkt, side_id as usize))
 }
 
 // ============================================================================

@@ -2,15 +2,14 @@
 mod mega_library_system_tests {
     use sedsprintf_rs_2026::config::{DataEndpoint, DataType};
     use sedsprintf_rs_2026::relay::Relay;
-    use sedsprintf_rs_2026::router::{Clock, EndpointHandler, LinkId, Router, RouterConfig, RouterMode};
+    use sedsprintf_rs_2026::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
     use sedsprintf_rs_2026::telemetry_packet::TelemetryPacket;
-    use sedsprintf_rs_2026::{TelemetryError, TelemetryResult};
+    use sedsprintf_rs_2026::TelemetryResult;
 
     use sedsprintf_rs_2026::serialize::serialize_packet;
-    use std::collections::{HashMap, HashSet};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::mpsc;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
     use std::thread;
     use std::time::{Duration, Instant};
 
@@ -18,18 +17,11 @@ mod mega_library_system_tests {
         Box::new(|| 0u64)
     }
 
-    type BusMsg = (&'static str, LinkId, Vec<u8>);
+    type BusMsg = (&'static str, Vec<u8>);
 
     fn mk_counter_handler(endpoint: DataEndpoint, counter: Arc<AtomicUsize>) -> EndpointHandler {
-        EndpointHandler::new_packet_handler(endpoint, move |_pkt: &TelemetryPacket, _link_id: &LinkId| {
+        EndpointHandler::new_packet_handler(endpoint, move |_pkt: &TelemetryPacket| {
             counter.fetch_add(1, Ordering::SeqCst);
-            Ok(())
-        })
-    }
-
-    fn mk_seen_link_handler(endpoint: DataEndpoint, seen: Arc<Mutex<HashSet<u64>>>) -> EndpointHandler {
-        EndpointHandler::new_packet_handler(endpoint, move |_pkt: &TelemetryPacket, link_id: &LinkId| {
-            seen.lock().unwrap().insert(link_id.id());
             Ok(())
         })
     }
@@ -48,13 +40,6 @@ mod mega_library_system_tests {
     #[test]
     fn multibus_relay_and_router_relay_mode_both_endpoints_exercised() {
         // -------------------------------
-        // 0) Define link IDs per bus
-        // -------------------------------
-        let link_a = LinkId::new(10).expect("LinkId::new failed");
-        let link_b = LinkId::new(20).expect("LinkId::new failed");
-        let link_c = LinkId::new(30).expect("LinkId::new failed");
-
-        // -------------------------------
         // 1) Create the 3 buses
         // -------------------------------
         let (bus_a_tx, bus_a_rx) = mpsc::channel::<BusMsg>();
@@ -68,19 +53,19 @@ mod mega_library_system_tests {
 
         let r_a_tx = bus_a_tx.clone();
         let relay_side_a = relay.add_side_serialized("bus_a", move |bytes: &[u8]| -> TelemetryResult<()> {
-            r_a_tx.send(("relay", link_a, bytes.to_vec())).unwrap();
+            r_a_tx.send(("relay", bytes.to_vec())).unwrap();
             Ok(())
         });
 
         let r_b_tx = bus_b_tx.clone();
         let relay_side_b = relay.add_side_serialized("bus_b", move |bytes: &[u8]| -> TelemetryResult<()> {
-            r_b_tx.send(("relay", link_b, bytes.to_vec())).unwrap();
+            r_b_tx.send(("relay", bytes.to_vec())).unwrap();
             Ok(())
         });
 
         let r_c_tx = bus_c_tx.clone();
         let relay_side_c = relay.add_side_serialized("bus_c", move |bytes: &[u8]| -> TelemetryResult<()> {
-            r_c_tx.send(("relay", link_c, bytes.to_vec())).unwrap();
+            r_c_tx.send(("relay", bytes.to_vec())).unwrap();
             Ok(())
         });
 
@@ -96,11 +81,7 @@ mod mega_library_system_tests {
         let c_radio_hits = Arc::new(AtomicUsize::new(0));
         let c_sd_hits = Arc::new(AtomicUsize::new(0));
 
-        let seen_links_radio = Arc::new(Mutex::new(HashSet::<u64>::new()));
-        let seen_links_sd = Arc::new(Mutex::new(HashSet::<u64>::new()));
-
-        // Track hub TX links: we WILL force TX to happen (don’t rely on “remote endpoint present”)
-        let hub_tx_links = Arc::new(Mutex::new(Vec::<u64>::new()));
+        // Track TX counts only; link-specific tracking is no longer available.
 
         // -------------------------------
         // 4) Three sink routers, each has BOTH endpoint handlers
@@ -109,97 +90,80 @@ mod mega_library_system_tests {
             let handlers = vec![
                 mk_counter_handler(DataEndpoint::GroundStation, a_radio_hits.clone()),
                 mk_counter_handler(DataEndpoint::SdCard, a_sd_hits.clone()),
-                mk_seen_link_handler(DataEndpoint::GroundStation, seen_links_radio.clone()),
-                mk_seen_link_handler(DataEndpoint::SdCard, seen_links_sd.clone()),
             ];
 
-            Arc::new(Router::new::<_>(
-                Some({
-                    let bus = bus_a_tx.clone();
-                    move |bytes: &[u8], link: &LinkId| -> TelemetryResult<()> {
-                        bus.send(("node_a", *link, bytes.to_vec())).unwrap();
-                        Ok(())
-                    }
-                }),
-                RouterMode::Sink,
-                RouterConfig::new(handlers),
-                zero_clock(),
-            ))
+            let router = Router::new(RouterMode::Sink, RouterConfig::new(handlers), zero_clock());
+            router.add_side_serialized("bus_a", {
+                let bus = bus_a_tx.clone();
+                move |bytes: &[u8]| -> TelemetryResult<()> {
+                    bus.send(("node_a", bytes.to_vec())).unwrap();
+                    Ok(())
+                }
+            });
+            Arc::new(router)
         };
 
         let node_b_router = {
             let handlers = vec![
                 mk_counter_handler(DataEndpoint::GroundStation, b_radio_hits.clone()),
                 mk_counter_handler(DataEndpoint::SdCard, b_sd_hits.clone()),
-                mk_seen_link_handler(DataEndpoint::GroundStation, seen_links_radio.clone()),
-                mk_seen_link_handler(DataEndpoint::SdCard, seen_links_sd.clone()),
             ];
 
-            Arc::new(Router::new::<_>(
-                Some({
-                    let bus = bus_b_tx.clone();
-                    move |bytes: &[u8], link: &LinkId| -> TelemetryResult<()> {
-                        bus.send(("node_b", *link, bytes.to_vec())).unwrap();
-                        Ok(())
-                    }
-                }),
-                RouterMode::Sink,
-                RouterConfig::new(handlers),
-                zero_clock(),
-            ))
+            let router = Router::new(RouterMode::Sink, RouterConfig::new(handlers), zero_clock());
+            router.add_side_serialized("bus_b", {
+                let bus = bus_b_tx.clone();
+                move |bytes: &[u8]| -> TelemetryResult<()> {
+                    bus.send(("node_b", bytes.to_vec())).unwrap();
+                    Ok(())
+                }
+            });
+            Arc::new(router)
         };
 
         let node_c_router = {
             let handlers = vec![
                 mk_counter_handler(DataEndpoint::GroundStation, c_radio_hits.clone()),
                 mk_counter_handler(DataEndpoint::SdCard, c_sd_hits.clone()),
-                mk_seen_link_handler(DataEndpoint::GroundStation, seen_links_radio.clone()),
-                mk_seen_link_handler(DataEndpoint::SdCard, seen_links_sd.clone()),
             ];
 
-            Arc::new(Router::new::<_>(
-                Some({
-                    let bus = bus_c_tx.clone();
-                    move |bytes: &[u8], link: &LinkId| -> TelemetryResult<()> {
-                        bus.send(("node_c", *link, bytes.to_vec())).unwrap();
-                        Ok(())
-                    }
-                }),
-                RouterMode::Sink,
-                RouterConfig::new(handlers),
-                zero_clock(),
-            ))
+            let router = Router::new(RouterMode::Sink, RouterConfig::new(handlers), zero_clock());
+            router.add_side_serialized("bus_c", {
+                let bus = bus_c_tx.clone();
+                move |bytes: &[u8]| -> TelemetryResult<()> {
+                    bus.send(("node_c", bytes.to_vec())).unwrap();
+                    Ok(())
+                }
+            });
+            Arc::new(router)
         };
 
         // -------------------------------
         // 5) Hub router in RELAY mode (no local handlers)
         // -------------------------------
-        let hub_router = {
-            let tx_links = hub_tx_links.clone();
-
-            let tx_map: Arc<Mutex<HashMap<u64, mpsc::Sender<BusMsg>>>> = Arc::new(Mutex::new({
-                let mut m = HashMap::new();
-                m.insert(link_a.id(), bus_a_tx.clone());
-                m.insert(link_b.id(), bus_b_tx.clone());
-                m.insert(link_c.id(), bus_c_tx.clone());
-                m
-            }));
-
-            let tx = move |bytes: &[u8], link: &LinkId| -> TelemetryResult<()> {
-                tx_links.lock().unwrap().push(link.id());
-
-                let map = tx_map.lock().unwrap();
-                let out = map.get(&link.id()).ok_or(TelemetryError::BadArg)?;
-                out.send(("hub_router", *link, bytes.to_vec())).unwrap();
-                Ok(())
-            };
-
-            Arc::new(Router::new::<_>(
-                Some(tx),
-                RouterMode::Relay,
-                RouterConfig::default(),
-                zero_clock(),
-            ))
+        let (hub_router, hub_side_a, hub_side_b, hub_side_c) = {
+            let router = Router::new(RouterMode::Relay, RouterConfig::default(), zero_clock());
+            let hub_side_a = router.add_side_serialized("bus_a", {
+                let bus = bus_a_tx.clone();
+                move |bytes: &[u8]| -> TelemetryResult<()> {
+                    bus.send(("hub_router", bytes.to_vec())).unwrap();
+                    Ok(())
+                }
+            });
+            let hub_side_b = router.add_side_serialized("bus_b", {
+                let bus = bus_b_tx.clone();
+                move |bytes: &[u8]| -> TelemetryResult<()> {
+                    bus.send(("hub_router", bytes.to_vec())).unwrap();
+                    Ok(())
+                }
+            });
+            let hub_side_c = router.add_side_serialized("bus_c", {
+                let bus = bus_c_tx.clone();
+                move |bytes: &[u8]| -> TelemetryResult<()> {
+                    bus.send(("hub_router", bytes.to_vec())).unwrap();
+                    Ok(())
+                }
+            });
+            (Arc::new(router), hub_side_a, hub_side_b, hub_side_c)
         };
 
         // -------------------------------
@@ -214,23 +178,23 @@ mod mega_library_system_tests {
                          relay: Arc<Relay>,
                          relay_side: usize,
                          hub: Arc<Router>,
-                         bus_link: LinkId,
+                         hub_side: usize,
                          stop: Arc<AtomicBool>| {
             thread::spawn(move || {
                 while !stop.load(Ordering::SeqCst) {
                     match rx.recv_timeout(Duration::from_millis(10)) {
-                        Ok((_from, _link, frame)) => {
+                        Ok((_from, frame)) => {
                             local_node.rx_serialized_queue(&frame).unwrap();
-                            hub.rx_serialized_queue_from(&frame, bus_link).unwrap();
+                            hub.rx_serialized_queue_from_side(&frame, hub_side).unwrap();
                             relay.rx_serialized_from_side(relay_side, &frame).unwrap();
                         }
                         Err(mpsc::RecvTimeoutError::Timeout) => {}
                         Err(mpsc::RecvTimeoutError::Disconnected) => break,
                     }
                 }
-                while let Ok((_from, _link, frame)) = rx.try_recv() {
+                while let Ok((_from, frame)) = rx.try_recv() {
                     local_node.rx_serialized_queue(&frame).unwrap();
-                    hub.rx_serialized_queue_from(&frame, bus_link).unwrap();
+                    hub.rx_serialized_queue_from_side(&frame, hub_side).unwrap();
                     relay.rx_serialized_from_side(relay_side, &frame).unwrap();
                 }
                 eprintln!("bus thread {name} exiting");
@@ -244,7 +208,7 @@ mod mega_library_system_tests {
             relay.clone(),
             relay_side_a,
             hub_router.clone(),
-            link_a,
+            hub_side_a,
             stop.clone(),
         );
         let bus_b_handle = spawn_bus(
@@ -254,7 +218,7 @@ mod mega_library_system_tests {
             relay.clone(),
             relay_side_b,
             hub_router.clone(),
-            link_b,
+            hub_side_b,
             stop.clone(),
         );
         let bus_c_handle = spawn_bus(
@@ -264,7 +228,7 @@ mod mega_library_system_tests {
             relay.clone(),
             relay_side_c,
             hub_router.clone(),
-            link_c,
+            hub_side_c,
             stop.clone(),
         );
 
@@ -316,7 +280,7 @@ mod mega_library_system_tests {
                 for i in 0..8 {
                     make_series(&mut buf[..2], 10.0);
                     let pkt = make_packet(DataType::GpsData, &buf[..2], i);
-                    r.tx_from(pkt, link_a).unwrap();
+                    r.tx(pkt).unwrap();
                     thread::sleep(Duration::from_millis(3));
                 }
             })
@@ -330,10 +294,10 @@ mod mega_library_system_tests {
                     make_series(&mut buf[..1], 3.7);
                     let pkt = make_packet(DataType::BatteryVoltage, &buf[..1], 100 + i);
 
-                    r.tx_queue_from(pkt.clone(), link_b).unwrap();
+                    r.tx_queue(pkt.clone()).unwrap();
 
                     let wire = serialize_packet(&pkt);
-                    r.tx_serialized_from(wire, link_b).unwrap();
+                    r.tx_serialized(wire).unwrap();
 
                     thread::sleep(Duration::from_millis(3));
                 }
@@ -354,7 +318,7 @@ mod mega_library_system_tests {
                         .unwrap();
 
                     let wire = serialize_packet(&pkt);
-                    r.tx_serialized_queue_from(wire, link_c).unwrap();
+                    r.tx_serialized_queue(wire).unwrap();
 
                     thread::sleep(Duration::from_millis(3));
                 }
@@ -370,13 +334,13 @@ mod mega_library_system_tests {
                     make_series(&mut buf[..3], 42.0 + i as f32);
 
                     let pkt_a = make_packet(DataType::GpsData, &buf[..2], 1000 + i);
-                    hub.tx_from(pkt_a.clone(), link_a).unwrap();
-                    hub.tx_queue_from(pkt_a, link_a).unwrap();
+                    hub.tx(pkt_a.clone()).unwrap();
+                    hub.tx_queue(pkt_a).unwrap();
 
                     let pkt_b = make_packet(DataType::BatteryCurrent, &buf[..1], 2000 + i);
                     let wire_b = serialize_packet(&pkt_b);
-                    hub.tx_serialized_from(wire_b.clone(), link_b).unwrap();
-                    hub.tx_serialized_queue_from(wire_b, link_b).unwrap();
+                    hub.tx_serialized(wire_b.clone()).unwrap();
+                    hub.tx_serialized_queue(wire_b).unwrap();
 
                     let pkt_c = TelemetryPacket::from_str_slice(
                         DataType::TelemetryError,
@@ -386,7 +350,7 @@ mod mega_library_system_tests {
                     )
                         .unwrap();
                     let wire_c = serialize_packet(&pkt_c);
-                    hub.tx_serialized_queue_from(wire_c, link_c).unwrap();
+                    hub.tx_serialized_queue(wire_c).unwrap();
 
                     thread::sleep(Duration::from_millis(2));
                 }
@@ -465,19 +429,6 @@ mod mega_library_system_tests {
         assert!(c_r >= min_per_node_per_endpoint, "node C radio too low: {c_r}");
         assert!(c_s >= min_per_node_per_endpoint, "node C sd too low: {c_s}");
 
-        // Link IDs reached BOTH endpoint handlers (proves link propagation all the way to handlers).
-        let seen_r = seen_links_radio.lock().unwrap().clone();
-        let seen_s = seen_links_sd.lock().unwrap().clone();
-        for l in [link_a.id(), link_b.id(), link_c.id()] {
-            assert!(seen_r.contains(&l), "Radio handlers never saw link {l}; seen={seen_r:?}");
-            assert!(seen_s.contains(&l), "SdCard handlers never saw link {l}; seen={seen_s:?}");
-        }
-
-        // Hub TX was exercised across multiple links (forced by gen_hub).
-        let tx_links = hub_tx_links.lock().unwrap();
-        assert!(!tx_links.is_empty(), "hub router never transmitted (even forced)");
-        assert!(tx_links.contains(&link_a.id()), "hub never transmitted on link_a; got={tx_links:?}");
-        assert!(tx_links.contains(&link_b.id()), "hub never transmitted on link_b; got={tx_links:?}");
-        assert!(tx_links.contains(&link_c.id()), "hub never transmitted on link_c; got={tx_links:?}");
+        // Link-specific handler provenance is no longer exposed (sides are internal).
     }
 }

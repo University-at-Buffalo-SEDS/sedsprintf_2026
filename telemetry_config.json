@@ -45,20 +45,6 @@
   ],
   "types": [
     {
-      "rust": "TelemetryError",
-      "name": "TELEMETRY_ERROR",
-      "doc": "Encoded telemetry error text (string payload) (CRITICAL FOR SYSTEM FUNCTIONALITY, DO NOT REMOVE)",
-      "class": "Error",
-      "element": {
-        "kind": "Dynamic",
-        "data_type": "String"
-      },
-      "endpoints": [
-        "SdCard",
-        "GroundStation"
-      ]
-    },
-    {
       "rust": "GenericError",
       "name": "GENERIC_ERROR",
       "doc": "Generic Error: Dynamic string payload (human-readable error message).",
@@ -70,7 +56,8 @@
       "endpoints": [
         "SdCard",
         "GroundStation"
-      ]
+      ],
+      "reliable_mode": "None"
     },
     {
       "rust": "GpsData",
@@ -86,7 +73,8 @@
         "GroundStation",
         "SdCard",
         "FlightController"
-      ]
+      ],
+      "reliable_mode": "Ordered"
     },
     {
       "rust": "KalmanFilterData",
@@ -101,7 +89,8 @@
       "endpoints": [
         "GroundStation",
         "SdCard"
-      ]
+      ],
+      "reliable_mode": "None"
     },
     {
       "rust": "GyroData",
@@ -116,7 +105,8 @@
       "endpoints": [
         "SdCard",
         "GroundStation"
-      ]
+      ],
+      "reliable_mode": "None"
     },
     {
       "rust": "AccelData",
@@ -131,7 +121,8 @@
       "endpoints": [
         "GroundStation",
         "SdCard"
-      ]
+      ],
+      "reliable_mode": "None"
     },
     {
       "rust": "BatteryVoltage",
@@ -146,7 +137,8 @@
       "endpoints": [
         "GroundStation",
         "SdCard"
-      ]
+      ],
+      "reliable_mode": "None"
     },
     {
       "rust": "BatteryCurrent",
@@ -161,7 +153,8 @@
       "endpoints": [
         "GroundStation",
         "SdCard"
-      ]
+      ],
+      "reliable_mode": "None"
     },
     {
       "rust": "BarometerData",
@@ -176,7 +169,8 @@
       "endpoints": [
         "GroundStation",
         "SdCard"
-      ]
+      ],
+      "reliable_mode": "None"
     },
     {
       "rust": "Abort",
@@ -189,7 +183,8 @@
       },
       "endpoints": [
         "Abort"
-      ]
+      ],
+      "reliable_mode": "None"
     },
     {
       "rust": "FuelFlow",
@@ -204,7 +199,8 @@
       "endpoints": [
         "GroundStation",
         "SdCard"
-      ]
+      ],
+      "reliable_mode": "None"
     },
     {
       "rust": "ValveCommand",
@@ -220,7 +216,8 @@
         "GroundStation",
         "SdCard",
         "ValveBoard"
-      ]
+      ],
+      "reliable_mode": "None"
     },
     {
       "rust": "FlightCommand",
@@ -236,7 +233,8 @@
         "GroundStation",
         "SdCard",
         "FlightController"
-      ]
+      ],
+      "reliable_mode": "None"
     },
     {
       "rust": "FuelTankPressure",
@@ -251,7 +249,8 @@
       "endpoints": [
         "GroundStation",
         "SdCard"
-      ]
+      ],
+      "reliable_mode": "None"
     },
     {
       "rust": "FlightState",
@@ -265,7 +264,8 @@
       },
       "endpoints": [
         "FlightState"
-      ]
+      ],
+      "reliable_mode": "None"
     },
     {
       "rust": "Heartbeat",
@@ -279,7 +279,8 @@
       },
       "endpoints": [
         "HeartBeat"
-      ]
+      ],
+      "reliable_mode": "None"
     },
     {
       "rust": "Warning",
@@ -293,7 +294,8 @@
       "endpoints": [
         "SdCard",
         "GroundStation"
-      ]
+      ],
+      "reliable_mode": "None"
     },
     {
       "rust": "MessageData",
@@ -307,7 +309,8 @@
       "endpoints": [
         "SdCard",
         "GroundStation"
-      ]
+      ],
+      "reliable_mode": "None"
     }
   ]
 }

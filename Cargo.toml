@@ -1,6 +1,6 @@
 [package]
 name = "sedsprintf_rs_2026"
-version = "2.4.0"
+version = "3.0.0"
 edition = "2024"
 build = "build.rs"
 authors = ["Rylan Meilutis <rylan@rylanswebsite.com>"]
@@ -40,6 +40,11 @@ path = "tests/rust-system-test/single_threaded_test.rs"
 required-features = ["std", "compression"]
 
 [[test]]
+name = "reliable_drop_test"
+path = "tests/rust-system-test/reliable_drop_test.rs"
+required-features = ["std", "compression"]
+
+[[test]]
 name = "c-system-test"
 path = "tests/c-system-test/c_system_test.rs"
 required-features = ["std", "compression"]
@@ -52,7 +57,7 @@ strum = { version = "0.27", default-features = false }
 # Optional dependencies enabled by features
 spin = { version = "0.10", optional = true }
 pyo3 = { version = "0.27", optional = true, features = ["auto-initialize", "extension-module", "multiple-pymethods"] }
-miniz_oxide = { version = "0.8", default-features = false, features = ["with-alloc"] }
+miniz_oxide = { version = "0.9.0", default-features = false, features = ["with-alloc"] }
 
 [build-dependencies]
 regex = "1.12"

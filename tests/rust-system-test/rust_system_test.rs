@@ -2,7 +2,7 @@
 mod threaded_system_tests {
     use sedsprintf_rs_2026::config::{DataEndpoint, DataType};
     use sedsprintf_rs_2026::relay::Relay;
-    use sedsprintf_rs_2026::router::{Clock, EndpointHandler, LinkId, Router, RouterConfig, RouterMode};
+    use sedsprintf_rs_2026::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
     use sedsprintf_rs_2026::telemetry_packet::TelemetryPacket;
     use sedsprintf_rs_2026::TelemetryResult;
 
@@ -26,7 +26,7 @@ mod threaded_system_tests {
     /// Build a handler that counts packets received on the Radio endpoint
     /// (this plays the role of the "radio" handler in the C test).
     fn make_radio_handler(counter: Arc<AtomicUsize>) -> EndpointHandler {
-        EndpointHandler::new_packet_handler(DataEndpoint::GroundStation, move |_pkt: &TelemetryPacket, _link_id: &LinkId| {
+        EndpointHandler::new_packet_handler(DataEndpoint::GroundStation, move |_pkt: &TelemetryPacket| {
             counter.fetch_add(1, Ordering::SeqCst);
             Ok(())
         })
@@ -35,7 +35,7 @@ mod threaded_system_tests {
     /// Build a handler that counts packets received on the SdCard endpoint
     /// (this plays the role of the "SD" handler in the C test).
     fn make_sd_handler(counter: Arc<AtomicUsize>) -> EndpointHandler {
-        EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt: &TelemetryPacket, _link_id: &LinkId| {
+        EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt: &TelemetryPacket| {
             counter.fetch_add(1, Ordering::SeqCst);
             Ok(())
         })
@@ -130,16 +130,17 @@ mod threaded_system_tests {
             };
 
             // TX closure: router -> bus (which then forwards to other nodes and relay)
-            let tx = move |bytes: &[u8], _link_id: &LinkId| -> TelemetryResult<()> {
+            let tx = move |bytes: &[u8]| -> TelemetryResult<()> {
                 local_bus_tx.send((idx, bytes.to_vec())).unwrap();
                 Ok(())
             };
 
             let router = if handlers.is_empty() {
-                Router::new::<_>(Some(tx), RouterMode::Sink, RouterConfig::default(), clock)
+                Router::new(RouterMode::Sink, RouterConfig::default(), clock)
             } else {
-                Router::new(Some(tx), RouterMode::Sink, RouterConfig::new(handlers), clock)
+                Router::new(RouterMode::Sink, RouterConfig::new(handlers), clock)
             };
+            router.add_side_serialized("bus", tx);
 
             nodes.push(SimNode {
                 router: Arc::new(router),

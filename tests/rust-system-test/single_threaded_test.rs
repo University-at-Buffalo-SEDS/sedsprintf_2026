@@ -3,7 +3,7 @@
 mod single_threaded_test {
     use sedsprintf_rs_2026::config::{DataEndpoint, DataType};
     use sedsprintf_rs_2026::relay::Relay;
-    use sedsprintf_rs_2026::router::{Clock, EndpointHandler, LinkId, Router, RouterConfig, RouterMode};
+    use sedsprintf_rs_2026::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
     use sedsprintf_rs_2026::telemetry_packet::TelemetryPacket;
     use sedsprintf_rs_2026::TelemetryResult;
 
@@ -23,9 +23,9 @@ mod single_threaded_test {
         sd_hits: Arc<AtomicUsize>,
     }
 
-    /// Build a handler that counts packets received on the Radio endpoint.
+    /// Build a handler that counts packets received on the GroundStation endpoint.
     fn make_radio_handler(counter: Arc<AtomicUsize>) -> EndpointHandler {
-        EndpointHandler::new_packet_handler(DataEndpoint::GroundStation, move |_pkt: &TelemetryPacket, _link_id: &LinkId| {
+        EndpointHandler::new_packet_handler(DataEndpoint::GroundStation, move |_pkt: &TelemetryPacket| {
             counter.fetch_add(1, Ordering::SeqCst);
             Ok(())
         })
@@ -33,7 +33,7 @@ mod single_threaded_test {
 
     /// Build a handler that counts packets received on the SdCard endpoint.
     fn make_sd_handler(counter: Arc<AtomicUsize>) -> EndpointHandler {
-        EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt: &TelemetryPacket, _link_id: &LinkId| {
+        EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt: &TelemetryPacket| {
             counter.fetch_add(1, Ordering::SeqCst);
             Ok(())
         })
@@ -46,7 +46,7 @@ mod single_threaded_test {
         }
     }
 
-    /// Build a packet with endpoints [SD_CARD, Radio], mirroring the C system.
+    /// Build a packet with endpoints [SD_CARD, GroundStation], mirroring the C system.
     fn make_packet(ty: DataType, vals: &[f32], ts: u64) -> TelemetryPacket {
         TelemetryPacket::from_f32_slice(
             ty,
@@ -205,16 +205,17 @@ mod single_threaded_test {
             };
 
             // tx: push a copy of the wire bytes onto the node's bus with source id
-            let tx = move |bytes: &[u8], _link_id: &LinkId| -> TelemetryResult<()> {
+            let tx = move |bytes: &[u8]| -> TelemetryResult<()> {
                 local_bus_tx.send((idx, bytes.to_vec())).unwrap();
                 Ok(())
             };
 
             let router = if handlers.is_empty() {
-                Router::new::<_>(Some(tx), RouterMode::Sink, RouterConfig::default(), clock)
+                Router::new(RouterMode::Sink, RouterConfig::default(), clock)
             } else {
-                Router::new(Some(tx), RouterMode::Sink, RouterConfig::new(handlers), clock)
+                Router::new(RouterMode::Sink, RouterConfig::new(handlers), clock)
             };
+            router.add_side_serialized("bus", tx);
 
             nodes.push(SimNode {
                 router,
