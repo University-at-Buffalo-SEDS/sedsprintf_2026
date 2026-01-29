@@ -21,7 +21,10 @@ Handlers are typed:
 The router uses **named sides** (UART/CAN/RADIO/etc.) instead of LinkId.
 
 - You register sides with `add_side_serialized(...)` or `add_side_packet(...)`.
-- RX functions can tag an ingress side: `rx_serialized_from_side` / `rx_from_side`.
+- As of v3.0.0, side tracking is internal. Most apps use `rx_serialized` / `rx` without
+  threading side IDs through their handlers.
+- Side-aware RX functions can still tag an ingress side when you must override it:
+  `rx_serialized_from_side` / `rx_from_side`.
 - In `RouterMode::Relay`, packets are forwarded **once** to all other sides (the ingress side is excluded).
 
 Side TX handlers are either:

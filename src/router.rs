@@ -1431,7 +1431,58 @@ impl Router {
             };
 
             if opts.reliable_enabled && handler_is_serialized && self.cfg.reliable_enabled() {
-                let frame = serialize::peek_frame_info(bytes.as_ref())?;
+                let frame = match serialize::peek_frame_info(bytes.as_ref()) {
+                    Ok(frame) => frame,
+                    Err(e) => {
+                        if matches!(e, TelemetryError::Deserialize(msg) if msg == "crc32 mismatch") {
+                            if let Ok(frame) = serialize::peek_frame_info_unchecked(bytes.as_ref()) {
+                                if is_reliable_type(frame.envelope.ty)
+                                    && let Some(hdr) = frame.reliable
+                                {
+                                    if (hdr.flags & serialize::RELIABLE_FLAG_ACK_ONLY) != 0 {
+                                        return Ok(());
+                                    }
+
+                                    let unordered =
+                                        (hdr.flags & serialize::RELIABLE_FLAG_UNORDERED) != 0;
+                                    let unsequenced =
+                                        (hdr.flags & serialize::RELIABLE_FLAG_UNSEQUENCED) != 0;
+
+                                    if !unsequenced {
+                                        if unordered {
+                                            let ack = {
+                                                let mut st = self.state.lock();
+                                                let rx_state = self.reliable_rx_state_mut(
+                                                    &mut st,
+                                                    src,
+                                                    frame.envelope.ty,
+                                                );
+                                                rx_state.last_ack
+                                            };
+                                            let _ =
+                                                self.send_reliable_ack(src, frame.envelope.ty, ack);
+                                        } else {
+                                            let expected = {
+                                                let mut st = self.state.lock();
+                                                let rx_state = self.reliable_rx_state_mut(
+                                                    &mut st,
+                                                    src,
+                                                    frame.envelope.ty,
+                                                );
+                                                rx_state.expected_seq
+                                            };
+                                            let ack = expected.saturating_sub(1);
+                                            let _ =
+                                                self.send_reliable_ack(src, frame.envelope.ty, ack);
+                                        }
+                                    }
+                                }
+                            }
+                            return Ok(());
+                        }
+                        return Err(e);
+                    }
+                };
                 if is_reliable_type(frame.envelope.ty)
                     && let Some(hdr) = frame.reliable
                 {
@@ -1485,9 +1536,19 @@ impl Router {
                     }
                 }
             } else {
-                let frame = serialize::peek_frame_info(bytes.as_ref())?;
-                if frame.ack_only() {
-                    return Ok(());
+                match serialize::peek_frame_info(bytes.as_ref()) {
+                    Ok(frame) => {
+                        if frame.ack_only() {
+                            return Ok(());
+                        }
+                    }
+                    Err(e) => {
+                        if matches!(e, TelemetryError::Deserialize(msg) if msg == "crc32 mismatch")
+                        {
+                            return Ok(());
+                        }
+                        return Err(e);
+                    }
                 }
             }
         }

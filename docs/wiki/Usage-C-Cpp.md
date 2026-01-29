@@ -95,6 +95,15 @@ Common calls:
 - `seds_router_rx_serialized_packet_to_queue`: enqueue for later processing.
 - `seds_router_process_all_queues`: process queued RX/TX.
 
+As of v3.0.0, most applications should call the plain receive APIs above. Side IDs are tracked
+internally by the router. If you need to explicitly override ingress (custom relay or bridge),
+use the side-aware variants:
+
+- `seds_router_receive_serialized_from_side`
+- `seds_router_receive_from_side`
+- `seds_router_rx_serialized_packet_to_queue_from_side`
+- `seds_router_rx_packet_to_queue_from_side`
+
 ## Payload layout expectations
 
 Payloads are little-endian. The schema defines element type and count. For dynamic payloads, sizes must be a multiple of

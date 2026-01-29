@@ -17,6 +17,7 @@ use crate::{
 
 use crate::telemetry_packet::hash_bytes_u64;
 use alloc::{borrow::ToOwned, string::String, sync::Arc, vec::Vec};
+use crc32fast::Hasher as Crc32Hasher;
 
 /// Lightweight header-only view of a serialized [`TelemetryPacket`].
 ///
@@ -52,6 +53,8 @@ pub const RELIABLE_FLAG_UNSEQUENCED: u8 = 0x80;
 
 /// Fixed size of the reliable header on the wire.
 pub const RELIABLE_HEADER_BYTES: usize = 1 + 4 + 4;
+/// Fixed size of the CRC32 trailer on the wire.
+pub const CRC32_BYTES: usize = 4;
 
 // packet Layout:
 //
@@ -76,6 +79,7 @@ pub const RELIABLE_HEADER_BYTES: usize = 1 + 4 + 4;
 //       [SEQ: u32 LE]
 //       [ACK: u32 LE]
 //   PAYLOAD BYTES                    -- raw or compressed payload bytes
+//   [CRC32: u32 LE]                  -- checksum of all prior bytes
 
 // ===========================================================================
 // ULEB128 (varint) encoding helpers
@@ -177,6 +181,44 @@ fn write_u32_le(v: u32, out: &mut Vec<u8>) {
 fn read_u32_le(r: &mut ByteReader) -> Result<u32, TelemetryError> {
     let b = r.read_bytes(4)?;
     Ok(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+}
+
+#[inline]
+fn crc32_bytes(data: &[u8]) -> u32 {
+    let mut hasher = Crc32Hasher::new();
+    hasher.update(data);
+    hasher.finalize()
+}
+
+#[inline]
+fn append_crc32(out: &mut Vec<u8>) {
+    let crc = crc32_bytes(out);
+    out.extend_from_slice(&crc.to_le_bytes());
+}
+
+#[inline]
+fn split_crc32(buf: &[u8]) -> Result<(&[u8], u32), TelemetryError> {
+    if buf.len() < CRC32_BYTES {
+        return Err(TelemetryError::Deserialize("short buffer"));
+    }
+    let data_len = buf.len() - CRC32_BYTES;
+    let crc = u32::from_le_bytes([
+        buf[data_len],
+        buf[data_len + 1],
+        buf[data_len + 2],
+        buf[data_len + 3],
+    ]);
+    Ok((&buf[..data_len], crc))
+}
+
+#[inline]
+fn verify_crc32(buf: &[u8]) -> Result<&[u8], TelemetryError> {
+    let (data, expected) = split_crc32(buf)?;
+    let actual = crc32_bytes(data);
+    if actual != expected {
+        return Err(TelemetryError::Deserialize("crc32 mismatch"));
+    }
+    Ok(data)
 }
 
 #[inline]
@@ -317,7 +359,7 @@ pub fn serialize_reliable_ack(
         payload_compression::compress_if_beneficial(sender_bytes);
 
     // No payload for ACK-only control frames.
-    let mut out = Vec::with_capacity(32 + EP_BITMAP_BYTES + sender_wire.len());
+    let mut out = Vec::with_capacity(32 + EP_BITMAP_BYTES + sender_wire.len() + CRC32_BYTES);
 
     let mut flags: u8 = 0;
     if sender_compressed {
@@ -344,6 +386,7 @@ pub fn serialize_reliable_ack(
         },
         &mut out,
     );
+    append_crc32(&mut out);
 
     Arc::<[u8]>::from(out)
 }
@@ -363,7 +406,7 @@ fn serialize_packet_inner(pkt: &TelemetryPacket, reliable: Option<ReliableHeader
     // Heuristic capacity: fixed prelude + bitmap + sender_wire + reliable + payload_wire.
     let reliable_len = if reliable.is_some() { RELIABLE_HEADER_BYTES } else { 0 };
     let mut out = Vec::with_capacity(
-        16 + EP_BITMAP_BYTES + sender_wire.len() + reliable_len + payload_wire.len(),
+        16 + EP_BITMAP_BYTES + sender_wire.len() + reliable_len + payload_wire.len() + CRC32_BYTES,
     );
 
     // FLAGS byte
@@ -403,6 +446,7 @@ fn serialize_packet_inner(pkt: &TelemetryPacket, reliable: Option<ReliableHeader
         write_reliable_header(hdr, &mut out);
     }
     out.extend_from_slice(&payload_wire);
+    append_crc32(&mut out);
 
     Arc::<[u8]>::from(out)
 }
@@ -420,10 +464,11 @@ fn serialize_packet_inner(pkt: &TelemetryPacket, reliable: Option<ReliableHeader
 /// - `TelemetryError::Deserialize` if the buffer is malformed.
 /// - `TelemetryError::InvalidType` if the data type is invalid.
 pub fn deserialize_packet(buf: &[u8]) -> Result<TelemetryPacket, TelemetryError> {
-    if buf.is_empty() {
+    let data = verify_crc32(buf)?;
+    if data.is_empty() {
         return Err(TelemetryError::Deserialize("short prelude"));
     }
-    let mut r = ByteReader::new(buf);
+    let mut r = ByteReader::new(data);
 
     let flags = r.read_bytes(1)?[0];
     let payload_is_compressed = (flags & FLAG_COMPRESSED_PAYLOAD) != 0;
@@ -461,7 +506,7 @@ pub fn deserialize_packet(buf: &[u8]) -> Result<TelemetryPacket, TelemetryError>
             0
         };
         if r.remaining() < EP_BITMAP_BYTES + sender_wire_len + reliable_len + 1 {
-        return Err(TelemetryError::Deserialize("short buffer"));
+            return Err(TelemetryError::Deserialize("short buffer"));
         }
     }
 
@@ -536,10 +581,11 @@ pub fn deserialize_packet(buf: &[u8]) -> Result<TelemetryPacket, TelemetryError>
 /// - `TelemetryError::Deserialize` if the buffer is malformed.
 /// - `TelemetryError::InvalidType` if the data type is invalid.
 pub fn peek_envelope(buf: &[u8]) -> TelemetryResult<TelemetryEnvelope> {
-    if buf.is_empty() {
+    let data = verify_crc32(buf)?;
+    if data.is_empty() {
         return Err(TelemetryError::Deserialize("short prelude"));
     }
-    let mut r = ByteReader::new(buf);
+    let mut r = ByteReader::new(data);
 
     let flags = r.read_bytes(1)?[0];
     let sender_is_compressed = (flags & FLAG_COMPRESSED_SENDER) != 0;
@@ -611,8 +657,7 @@ impl TelemetryFrameInfo {
     }
 }
 
-/// Peek the envelope plus reliable header (if present) without decoding payload bytes.
-pub fn peek_frame_info(buf: &[u8]) -> TelemetryResult<TelemetryFrameInfo> {
+fn peek_frame_info_inner(buf: &[u8]) -> TelemetryResult<TelemetryFrameInfo> {
     if buf.is_empty() {
         return Err(TelemetryError::Deserialize("short prelude"));
     }
@@ -684,13 +729,26 @@ pub fn peek_frame_info(buf: &[u8]) -> TelemetryResult<TelemetryFrameInfo> {
     })
 }
 
+/// Peek the envelope plus reliable header (if present) without decoding payload bytes.
+pub fn peek_frame_info(buf: &[u8]) -> TelemetryResult<TelemetryFrameInfo> {
+    let data = verify_crc32(buf)?;
+    peek_frame_info_inner(data)
+}
+
+/// Peek the envelope plus reliable header (if present) without validating CRC32.
+pub fn peek_frame_info_unchecked(buf: &[u8]) -> TelemetryResult<TelemetryFrameInfo> {
+    let (data, _crc) = split_crc32(buf)?;
+    peek_frame_info_inner(data)
+}
+
 /// Locate the reliable header offset within a serialized frame.
 /// Returns `Ok(Some(offset))` if a reliable header is present.
 pub fn reliable_header_offset(buf: &[u8]) -> TelemetryResult<Option<usize>> {
-    if buf.is_empty() {
+    if buf.len() < CRC32_BYTES + 1 {
         return Err(TelemetryError::Deserialize("short prelude"));
     }
-    let mut r = ByteReader::new(buf);
+    let data_len = buf.len().saturating_sub(CRC32_BYTES);
+    let mut r = ByteReader::new(&buf[..data_len]);
 
     let flags = r.read_bytes(1)?[0];
     let sender_is_compressed = (flags & FLAG_COMPRESSED_SENDER) != 0;
@@ -738,12 +796,18 @@ pub fn rewrite_reliable_header(
     let Some(off) = reliable_header_offset(buf)? else {
         return Ok(false);
     };
-    if buf.len().saturating_sub(off) < RELIABLE_HEADER_BYTES {
+    let data_len = buf.len().saturating_sub(CRC32_BYTES);
+    if data_len.saturating_sub(off) < RELIABLE_HEADER_BYTES {
         return Err(TelemetryError::Deserialize("short buffer"));
     }
     buf[off] = flags;
     buf[off + 1..off + 5].copy_from_slice(&seq.to_le_bytes());
     buf[off + 5..off + 9].copy_from_slice(&ack.to_le_bytes());
+    if buf.len() < CRC32_BYTES {
+        return Err(TelemetryError::Deserialize("short buffer"));
+    }
+    let crc = crc32_bytes(&buf[..data_len]);
+    buf[data_len..data_len + CRC32_BYTES].copy_from_slice(&crc.to_le_bytes());
     Ok(true)
 }
 
@@ -801,16 +865,17 @@ pub fn packet_wire_size(pkt: &TelemetryPacket) -> usize {
         0
     };
 
-    header + EP_BITMAP_BYTES + sender_wire.len() + reliable_len + payload_wire.len()
+    header + EP_BITMAP_BYTES + sender_wire.len() + reliable_len + payload_wire.len() + CRC32_BYTES
 }
 
 #[inline]
 pub fn packet_id_from_wire(buf: &[u8]) -> Result<u64, TelemetryError> {
-    if buf.len() < 2 {
+    let data = verify_crc32(buf)?;
+    if data.len() < 2 {
         return Err(TelemetryError::Deserialize("short prelude"));
     }
 
-    let mut r = ByteReader::new(buf);
+    let mut r = ByteReader::new(data);
 
     let flags = r.read_bytes(1)?[0];
     let payload_is_compressed = (flags & FLAG_COMPRESSED_PAYLOAD) != 0;

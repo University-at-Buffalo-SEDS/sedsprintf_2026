@@ -31,7 +31,7 @@ mod reliable_drop_tests {
 
         let received: Arc<Mutex<Vec<u32>>> = Arc::new(Mutex::new(Vec::new()));
         let recv_sink = received.clone();
-        let handler = EndpointHandler::new_packet_handler(DataEndpoint::GroundStation, move |pkt| {
+        let handler = EndpointHandler::new_packet_handler(DataEndpoint::Radio, move |pkt| {
             let vals = pkt.data_as_f32()?;
             if let Some(first) = vals.first() {
                 recv_sink
@@ -90,8 +90,8 @@ mod reliable_drop_tests {
         for i in 0..TOTAL {
             let pkt = TelemetryPacket::from_f32_slice(
                 DataType::GpsData,
-                &[i as f32, 0.0],
-                &[DataEndpoint::GroundStation],
+                &[i as f32, 0.0, 0.0],
+                &[DataEndpoint::Radio],
                 i as u64,
             )
             .expect("failed to build packet");
@@ -160,5 +160,82 @@ mod reliable_drop_tests {
         assert!(dropped_data_once, "test did not drop a data frame");
         assert!(dropped_ack_once, "test did not drop an ack frame");
         assert_eq!(got, expected, "reliable delivery should recover from drops");
+    }
+
+    #[test]
+    fn reliable_ordered_delivers_in_order() {
+        let now = Arc::new(AtomicU64::new(0));
+
+        let received: Arc<Mutex<Vec<u32>>> = Arc::new(Mutex::new(Vec::new()));
+        let recv_sink = received.clone();
+        let handler = EndpointHandler::new_packet_handler(DataEndpoint::Radio, move |pkt| {
+            let vals = pkt.data_as_f32()?;
+            if let Some(first) = vals.first() {
+                recv_sink
+                    .lock()
+                    .expect("received lock poisoned")
+                    .push(*first as u32);
+            }
+            Ok(())
+        });
+
+        let router = Router::new(
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
+            shared_clock(now.clone()),
+        );
+
+        let side = router.add_side_serialized_with_options(
+            "SRC",
+            |_b| Ok(()),
+            RouterSideOptions {
+                reliable_enabled: true,
+            },
+        );
+
+        let pkt1 = TelemetryPacket::from_f32_slice(
+            DataType::GpsData,
+            &[1.0_f32, 0.0, 0.0],
+            &[DataEndpoint::Radio],
+            1,
+        )
+        .expect("failed to build packet");
+        let pkt2 = TelemetryPacket::from_f32_slice(
+            DataType::GpsData,
+            &[2.0_f32, 0.0, 0.0],
+            &[DataEndpoint::Radio],
+            2,
+        )
+        .expect("failed to build packet");
+
+        let seq1 = serialize::serialize_packet_with_reliable(
+            &pkt1,
+            serialize::ReliableHeader {
+                flags: 0,
+                seq: 1,
+                ack: 0,
+            },
+        );
+        let seq2 = serialize::serialize_packet_with_reliable(
+            &pkt2,
+            serialize::ReliableHeader {
+                flags: 0,
+                seq: 2,
+                ack: 0,
+            },
+        );
+
+        router
+            .rx_serialized_from_side(seq2.as_ref(), side)
+            .expect("rx seq2 failed");
+        router
+            .rx_serialized_from_side(seq1.as_ref(), side)
+            .expect("rx seq1 failed");
+        router
+            .rx_serialized_from_side(seq2.as_ref(), side)
+            .expect("rx seq2 retransmit failed");
+
+        let got = received.lock().expect("received lock poisoned").clone();
+        assert_eq!(got, vec![1, 2], "ordered reliable delivery must reorder");
     }
 }

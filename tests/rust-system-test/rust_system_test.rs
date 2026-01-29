@@ -26,7 +26,7 @@ mod threaded_system_tests {
     /// Build a handler that counts packets received on the Radio endpoint
     /// (this plays the role of the "radio" handler in the C test).
     fn make_radio_handler(counter: Arc<AtomicUsize>) -> EndpointHandler {
-        EndpointHandler::new_packet_handler(DataEndpoint::GroundStation, move |_pkt: &TelemetryPacket| {
+        EndpointHandler::new_packet_handler(DataEndpoint::Radio, move |_pkt: &TelemetryPacket| {
             counter.fetch_add(1, Ordering::SeqCst);
             Ok(())
         })
@@ -51,13 +51,8 @@ mod threaded_system_tests {
     /// Build a packet with endpoints [SD_CARD, Radio], mirroring the C
     /// system’s idea that every message goes to both "radio" and "SD".
     fn make_packet(ty: DataType, vals: &[f32], ts: u64) -> TelemetryPacket {
-        TelemetryPacket::from_f32_slice(
-            ty,
-            vals,
-            &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
-            ts,
-        )
-        .unwrap()
+        TelemetryPacket::from_f32_slice(ty, vals, &[DataEndpoint::SdCard, DataEndpoint::Radio], ts)
+            .unwrap()
     }
 
     /// Threaded system test that mirrors `main.c` but now uses the Rust
@@ -292,8 +287,8 @@ mod threaded_system_tests {
         let sender_a = thread::spawn(move || {
             let mut buf = [0.0_f32; 8];
             for i in 0..5 {
-                make_series(&mut buf[..2], 10.0);
-                let pkt = make_packet(DataType::GpsData, &buf[..2], i);
+                make_series(&mut buf[..3], 10.0);
+                let pkt = make_packet(DataType::GpsData, &buf[..3], i);
                 radio_router.tx(pkt).unwrap();
                 thread::sleep(Duration::from_millis(5));
             }
@@ -304,14 +299,14 @@ mod threaded_system_tests {
             let mut buf = [0.0_f32; 8];
             for i in 0..5 {
                 // IMU-like data
-                make_series(&mut buf[..2], 0.5);
-                let pkt1 = make_packet(DataType::GpsData, &buf[..2], i);
+                make_series(&mut buf[..3], 0.5);
+                let pkt1 = make_packet(DataType::GpsData, &buf[..3], i);
                 flight_router.tx(pkt1).unwrap();
                 thread::sleep(Duration::from_millis(5));
 
                 // BARO-like data
-                make_series(&mut buf[..2], 101.3);
-                let pkt2 = make_packet(DataType::GpsData, &buf[..2], i + 100);
+                make_series(&mut buf[..3], 101.3);
+                let pkt2 = make_packet(DataType::GpsData, &buf[..3], i + 100);
                 flight_router.tx(pkt2).unwrap();
                 thread::sleep(Duration::from_millis(5));
             }
@@ -321,8 +316,8 @@ mod threaded_system_tests {
         let sender_c = thread::spawn(move || {
             let mut buf = [0.0_f32; 8];
             for i in 0..5 {
-                make_series(&mut buf[..1], 3.7);
-                let pkt1 = make_packet(DataType::BatteryVoltage, &buf[..1], i + 200);
+                make_series(&mut buf[..2], 3.7);
+                let pkt1 = make_packet(DataType::BatteryStatus, &buf[..2], i + 200);
                 power_router.tx(pkt1).unwrap();
                 thread::sleep(Duration::from_millis(5));
 
@@ -330,7 +325,7 @@ mod threaded_system_tests {
                 let pkt2 = TelemetryPacket::from_str_slice(
                     DataType::TelemetryError,
                     msg,
-                    &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
+                    &[DataEndpoint::SdCard, DataEndpoint::Radio],
                     i + 300,
                 )
                     .unwrap();

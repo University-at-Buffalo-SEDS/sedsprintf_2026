@@ -34,7 +34,7 @@ mod mega_library_system_tests {
 
     fn make_packet(ty: DataType, vals: &[f32], ts: u64) -> TelemetryPacket {
         // Every packet targets BOTH endpoints (full coverage)
-        TelemetryPacket::from_f32_slice(ty, vals, &[DataEndpoint::SdCard, DataEndpoint::GroundStation], ts).unwrap()
+        TelemetryPacket::from_f32_slice(ty, vals, &[DataEndpoint::SdCard, DataEndpoint::Radio], ts).unwrap()
     }
 
     #[test]
@@ -88,7 +88,7 @@ mod mega_library_system_tests {
         // -------------------------------
         let node_a_router = {
             let handlers = vec![
-                mk_counter_handler(DataEndpoint::GroundStation, a_radio_hits.clone()),
+                mk_counter_handler(DataEndpoint::Radio, a_radio_hits.clone()),
                 mk_counter_handler(DataEndpoint::SdCard, a_sd_hits.clone()),
             ];
 
@@ -105,7 +105,7 @@ mod mega_library_system_tests {
 
         let node_b_router = {
             let handlers = vec![
-                mk_counter_handler(DataEndpoint::GroundStation, b_radio_hits.clone()),
+                mk_counter_handler(DataEndpoint::Radio, b_radio_hits.clone()),
                 mk_counter_handler(DataEndpoint::SdCard, b_sd_hits.clone()),
             ];
 
@@ -122,7 +122,7 @@ mod mega_library_system_tests {
 
         let node_c_router = {
             let handlers = vec![
-                mk_counter_handler(DataEndpoint::GroundStation, c_radio_hits.clone()),
+                mk_counter_handler(DataEndpoint::Radio, c_radio_hits.clone()),
                 mk_counter_handler(DataEndpoint::SdCard, c_sd_hits.clone()),
             ];
 
@@ -278,8 +278,8 @@ mod mega_library_system_tests {
             thread::spawn(move || {
                 let mut buf = [0.0_f32; 8];
                 for i in 0..8 {
-                    make_series(&mut buf[..2], 10.0);
-                    let pkt = make_packet(DataType::GpsData, &buf[..2], i);
+                    make_series(&mut buf[..3], 10.0);
+                    let pkt = make_packet(DataType::GpsData, &buf[..3], i);
                     r.tx(pkt).unwrap();
                     thread::sleep(Duration::from_millis(3));
                 }
@@ -291,8 +291,8 @@ mod mega_library_system_tests {
             thread::spawn(move || {
                 let mut buf = [0.0_f32; 8];
                 for i in 0..8 {
-                    make_series(&mut buf[..1], 3.7);
-                    let pkt = make_packet(DataType::BatteryVoltage, &buf[..1], 100 + i);
+                    make_series(&mut buf[..2], 3.7);
+                    let pkt = make_packet(DataType::BatteryStatus, &buf[..2], 100 + i);
 
                     r.tx_queue(pkt.clone()).unwrap();
 
@@ -312,7 +312,7 @@ mod mega_library_system_tests {
                     let pkt = TelemetryPacket::from_str_slice(
                         DataType::TelemetryError,
                         &msg,
-                        &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
+                        &[DataEndpoint::SdCard, DataEndpoint::Radio],
                         200 + i as u64,
                     )
                         .unwrap();
@@ -333,11 +333,11 @@ mod mega_library_system_tests {
                 for i in 0..6 {
                     make_series(&mut buf[..3], 42.0 + i as f32);
 
-                    let pkt_a = make_packet(DataType::GpsData, &buf[..2], 1000 + i);
+                    let pkt_a = make_packet(DataType::GpsData, &buf[..3], 1000 + i);
                     hub.tx(pkt_a.clone()).unwrap();
                     hub.tx_queue(pkt_a).unwrap();
 
-                    let pkt_b = make_packet(DataType::BatteryCurrent, &buf[..1], 2000 + i);
+                    let pkt_b = make_packet(DataType::BatteryStatus, &buf[..2], 2000 + i);
                     let wire_b = serialize_packet(&pkt_b);
                     hub.tx_serialized(wire_b.clone()).unwrap();
                     hub.tx_serialized_queue(wire_b).unwrap();
@@ -345,7 +345,7 @@ mod mega_library_system_tests {
                     let pkt_c = TelemetryPacket::from_str_slice(
                         DataType::TelemetryError,
                         "hub-msg",
-                        &[DataEndpoint::SdCard, DataEndpoint::GroundStation],
+                        &[DataEndpoint::SdCard, DataEndpoint::Radio],
                         3000 + i,
                     )
                         .unwrap();

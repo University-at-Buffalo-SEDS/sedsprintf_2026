@@ -214,7 +214,7 @@ SedsResult node_init(SimNode * n, SimBus * bus, const char * name, int radio, in
     if (n->has_radio)
     {
         locals[num++] = (SedsLocalEndpointDesc){
-            .endpoint = SEDS_EP_GROUND_STATION,
+            .endpoint = SEDS_EP_RADIO,
             .serialized_handler = radio_handler_serial,
             .user = (void *) n
         };
