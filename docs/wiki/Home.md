@@ -4,6 +4,14 @@ Sedsprintf_rs is a Rust telemetry transport and logging library with a shared sc
 multi-language bindings (C/C++ and Python). It targets embedded and host environments and supports optional compression
 for senders and payloads.
 
+## Version 3.0.0 highlights
+
+- Router side tracking is internal. Most applications should call the plain RX APIs (`rx_serialized` / `rx`) and only
+  use side-aware variants when explicitly overriding ingress (custom relays, multi-link bridges, etc.).
+- TCP-like reliability is now available for schema types marked `reliable` / `reliable_mode`, with ACKs, retransmits,
+  and optional ordering. Enable per side and disable when the transport is already reliable.
+- Full changelog: [v2.4.0...v3.0.0](https://github.com/Rylan-Meilutis/sedsprintf_rs/compare/v2.4.0...v3.0.0)
+
 ## Start here (easy overview)
 
 These pages are written for readers who want a clear mental model before digging into code.

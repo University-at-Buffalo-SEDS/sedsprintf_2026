@@ -60,6 +60,18 @@ This small size makes it ideal for use in low bandwidth environments.
 
 ---
 
+## Version 3.0.0 highlights
+
+- Router side tracking is now internal. You generally call `rx_serialized(...)` / `rx(...)` without threading a side ID
+  through your own handlers. Use the `*_from_side` variants only when you must override ingress (e.g. custom relays or
+  multi-link bridges).
+- TCP-like reliability is available for schema types marked `reliable` / `reliable_mode`, including ACKs, retransmits,
+  and optional ordering. Enable it per side (`RouterSideOptions`) and disable it when your transport is already
+  reliable.
+- Full changelog: [v2.4.0...v3.0.0](https://github.com/Rylan-Meilutis/sedsprintf_rs/compare/v2.4.0...v3.0.0)
+
+---
+
 ## Building
 
 To build the library in a C project, just include the library as a submodule or subtree and link it in your
