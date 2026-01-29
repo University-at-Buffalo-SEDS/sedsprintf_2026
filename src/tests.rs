@@ -3204,9 +3204,9 @@ mod relay_reliable_tests {
 #[cfg(test)]
 mod reliable_tests {
     use crate::config::{DataEndpoint, DataType};
-    use crate::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
+    use crate::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode, RouterSideOptions};
     use crate::tests::timeout_tests::StepClock;
-    use crate::{telemetry_packet::TelemetryPacket, TelemetryResult};
+    use crate::{serialize, telemetry_packet::TelemetryPacket, TelemetryResult};
 
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
@@ -3296,6 +3296,78 @@ mod reliable_tests {
         }
 
         assert_eq!(rx_hits.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn reliable_ordered_delivers_in_order() {
+        let delivered: Arc<Mutex<Vec<u32>>> = Arc::new(Mutex::new(Vec::new()));
+        let delivered_c = delivered.clone();
+        let handler = EndpointHandler::new_serialized_handler(
+            DataEndpoint::SdCard,
+            move |bytes: &[u8]| -> TelemetryResult<()> {
+                let frame = serialize::peek_frame_info(bytes)?;
+                if let Some(hdr) = frame.reliable
+                    && (hdr.flags & serialize::RELIABLE_FLAG_ACK_ONLY) == 0
+                {
+                    delivered_c.lock().unwrap().push(hdr.seq);
+                }
+                Ok(())
+            },
+        );
+
+        let router = Router::new(
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]).with_reliable_enabled(true),
+            zero_clock(),
+        );
+
+        let side = router.add_side_serialized_with_options(
+            "SRC",
+            |_b| Ok(()),
+            RouterSideOptions {
+                reliable_enabled: true,
+            },
+        );
+
+        let pkt1 = TelemetryPacket::from_f32_slice(
+            DataType::GpsData,
+            &[1.0_f32, 2.0, 3.0],
+            &[DataEndpoint::SdCard],
+            0,
+        )
+        .unwrap();
+        let pkt2 = TelemetryPacket::from_f32_slice(
+            DataType::GpsData,
+            &[4.0_f32, 5.0, 6.0],
+            &[DataEndpoint::SdCard],
+            0,
+        )
+        .unwrap();
+
+        let seq1 = serialize::serialize_packet_with_reliable(
+            &pkt1,
+            serialize::ReliableHeader {
+                flags: 0,
+                seq: 1,
+                ack: 0,
+            },
+        );
+        let seq2 = serialize::serialize_packet_with_reliable(
+            &pkt2,
+            serialize::ReliableHeader {
+                flags: 0,
+                seq: 2,
+                ack: 0,
+            },
+        );
+
+        // Out-of-order: seq2 arrives first, then seq1, then seq2 retransmit.
+        router.rx_serialized_from_side(seq2.as_ref(), side).unwrap();
+        router.rx_serialized_from_side(seq1.as_ref(), side).unwrap();
+        router.rx_serialized_from_side(seq2.as_ref(), side).unwrap();
+
+        let delivered = delivered.lock().unwrap().clone();
+        assert_eq!(delivered, vec![1, 2], "ordered reliable delivery must reorder");
     }
 
     #[test]
