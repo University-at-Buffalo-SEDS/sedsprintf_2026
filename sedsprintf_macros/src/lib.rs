@@ -478,8 +478,8 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
                 Span::call_site(),
                 "telemetry_config.json: TelemetryError is built-in and must not be defined in the schema",
             )
-            .to_compile_error()
-            .into();
+                .to_compile_error()
+                .into();
         }
     }
     for ep in &cfg.endpoints {
@@ -488,8 +488,8 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
                 Span::call_site(),
                 "telemetry_config.json: TelemetryError endpoint is built-in and must not be defined in the schema",
             )
-            .to_compile_error()
-            .into();
+                .to_compile_error()
+                .into();
         }
     }
 
@@ -585,15 +585,15 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
                 .to_string(),
         )))
         .map(|(id, doc)| {
-        if doc.is_empty() {
-            quote!(#id,)
-        } else {
-            quote!(
+            if doc.is_empty() {
+                quote!(#id,)
+            } else {
+                quote!(
                 #[doc = #doc]
                 #id,
             )
-        }
-    });
+            }
+        });
 
     let builtin_ty_meta = {
         let endpoints_tokens: Vec<proc_macro2::TokenStream> =

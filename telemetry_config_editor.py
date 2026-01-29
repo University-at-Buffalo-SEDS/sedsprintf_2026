@@ -57,11 +57,11 @@ def _is_reserved_telemetry_error(rust: str) -> bool:
         return False
     return rust == "TelemetryError" or rust_ident_to_schema_name(rust) == "TELEMETRY_ERROR"
 
+
 def _is_valid_rust_ident_input(s: str) -> bool:
     if s == "":
         return True
     return ensure_rust_ident(s)
-
 
 
 def find_project_root(start: Path) -> Path:
@@ -446,7 +446,6 @@ class TelemetryConfigEditor(tk.Tk):
             rename_map = {old_rust: new_rust}
         self._sync_type_endpoints_to_known(rename_map=rename_map)
 
-
         after = self._compute_hash()
         if after != before:
             self._mark_changed()
@@ -519,7 +518,6 @@ class TelemetryConfigEditor(tk.Tk):
         ty["class"] = new_class
         ty["element"] = element
         ty["endpoints"] = [e for e in sel_eps if e in known_eps]
-
 
         after = self._compute_hash()
         if after != before:
@@ -1032,7 +1030,6 @@ class TelemetryConfigEditor(tk.Tk):
                         f"types[{i}] ({rust}) references unknown endpoint {epr!r}. "
                         f"Known endpoints: {sorted(endpoint_rust_set)}"
                     )
-
 
     def refresh_lists(self):
         self.endpoint_list.delete(0, tk.END)

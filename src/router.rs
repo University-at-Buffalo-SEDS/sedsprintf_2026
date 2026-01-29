@@ -19,11 +19,11 @@ use crate::{
     config::{
         DataEndpoint, DataType, DEVICE_IDENTIFIER, MAX_HANDLER_RETRIES, RELIABLE_MAX_PENDING,
         RELIABLE_MAX_RETRIES, RELIABLE_RETRANSMIT_MS,
-    }, get_needed_message_size, impl_letype_num, is_reliable_type, reliable_mode,
+    }, get_needed_message_size, impl_letype_num, is_reliable_type,
     lock::RouterMutex,
-    message_meta, serialize, telemetry_packet::TelemetryPacket,
-    EndpointsBroadcastMode,
-    MessageElement, TelemetryError,
+    message_meta, reliable_mode, serialize,
+    telemetry_packet::TelemetryPacket,
+    EndpointsBroadcastMode, MessageElement, TelemetryError,
     TelemetryResult,
 };
 use alloc::{
@@ -217,7 +217,6 @@ impl Debug for RouterTxHandlerFn {
 pub struct RouterSideOptions {
     pub reliable_enabled: bool,
 }
-
 
 /// One side of the router – a name + TX handler.
 #[derive(Clone, Debug)]
@@ -1434,47 +1433,45 @@ impl Router {
                 let frame = match serialize::peek_frame_info(bytes.as_ref()) {
                     Ok(frame) => frame,
                     Err(e) => {
-                        if matches!(e, TelemetryError::Deserialize(msg) if msg == "crc32 mismatch") {
-                            if let Ok(frame) = serialize::peek_frame_info_unchecked(bytes.as_ref()) {
-                                if is_reliable_type(frame.envelope.ty)
-                                    && let Some(hdr) = frame.reliable
-                                {
-                                    if (hdr.flags & serialize::RELIABLE_FLAG_ACK_ONLY) != 0 {
-                                        return Ok(());
-                                    }
+                        if matches!(e, TelemetryError::Deserialize(msg) if msg == "crc32 mismatch")
+                        {
+                            if let Ok(frame) = serialize::peek_frame_info_unchecked(bytes.as_ref())
+                                && is_reliable_type(frame.envelope.ty)
+                                && let Some(hdr) = frame.reliable
+                            {
+                                if (hdr.flags & serialize::RELIABLE_FLAG_ACK_ONLY) != 0 {
+                                    return Ok(());
+                                }
 
-                                    let unordered =
-                                        (hdr.flags & serialize::RELIABLE_FLAG_UNORDERED) != 0;
-                                    let unsequenced =
-                                        (hdr.flags & serialize::RELIABLE_FLAG_UNSEQUENCED) != 0;
+                                let unordered =
+                                    (hdr.flags & serialize::RELIABLE_FLAG_UNORDERED) != 0;
+                                let unsequenced =
+                                    (hdr.flags & serialize::RELIABLE_FLAG_UNSEQUENCED) != 0;
 
-                                    if !unsequenced {
-                                        if unordered {
-                                            let ack = {
-                                                let mut st = self.state.lock();
-                                                let rx_state = self.reliable_rx_state_mut(
-                                                    &mut st,
-                                                    src,
-                                                    frame.envelope.ty,
-                                                );
-                                                rx_state.last_ack
-                                            };
-                                            let _ =
-                                                self.send_reliable_ack(src, frame.envelope.ty, ack);
-                                        } else {
-                                            let expected = {
-                                                let mut st = self.state.lock();
-                                                let rx_state = self.reliable_rx_state_mut(
-                                                    &mut st,
-                                                    src,
-                                                    frame.envelope.ty,
-                                                );
-                                                rx_state.expected_seq
-                                            };
-                                            let ack = expected.saturating_sub(1);
-                                            let _ =
-                                                self.send_reliable_ack(src, frame.envelope.ty, ack);
-                                        }
+                                if !unsequenced {
+                                    if unordered {
+                                        let ack = {
+                                            let mut st = self.state.lock();
+                                            let rx_state = self.reliable_rx_state_mut(
+                                                &mut st,
+                                                src,
+                                                frame.envelope.ty,
+                                            );
+                                            rx_state.last_ack
+                                        };
+                                        let _ = self.send_reliable_ack(src, frame.envelope.ty, ack);
+                                    } else {
+                                        let expected = {
+                                            let mut st = self.state.lock();
+                                            let rx_state = self.reliable_rx_state_mut(
+                                                &mut st,
+                                                src,
+                                                frame.envelope.ty,
+                                            );
+                                            rx_state.expected_seq
+                                        };
+                                        let ack = expected.saturating_sub(1);
+                                        let _ = self.send_reliable_ack(src, frame.envelope.ty, ack);
                                     }
                                 }
                             }
@@ -1492,10 +1489,8 @@ impl Router {
                     }
                     self.handle_reliable_ack(src, frame.envelope.ty, hdr.ack);
 
-                    let unordered =
-                        (hdr.flags & serialize::RELIABLE_FLAG_UNORDERED) != 0;
-                    let unsequenced =
-                        (hdr.flags & serialize::RELIABLE_FLAG_UNSEQUENCED) != 0;
+                    let unordered = (hdr.flags & serialize::RELIABLE_FLAG_UNORDERED) != 0;
+                    let unsequenced = (hdr.flags & serialize::RELIABLE_FLAG_UNSEQUENCED) != 0;
 
                     if !unsequenced {
                         if unordered {

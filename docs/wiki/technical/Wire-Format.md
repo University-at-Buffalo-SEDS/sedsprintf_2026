@@ -45,9 +45,9 @@ For data types configured with `reliable: true` in `telemetry_config.json`, the 
 reliable header between the sender bytes and payload:
 
 - `REL_FLAGS`:
-  - `ACK_ONLY` (0x01): ACK-only control frame (no payload).
-  - `UNORDERED` (0x02): reliable delivery without ordering (ACK/retransmit enabled).
-  - `UNSEQUENCED` (0x80): best‑effort frame without ordering/ACK semantics.
+    - `ACK_ONLY` (0x01): ACK-only control frame (no payload).
+    - `UNORDERED` (0x02): reliable delivery without ordering (ACK/retransmit enabled).
+    - `UNSEQUENCED` (0x80): best‑effort frame without ordering/ACK semantics.
 - `SEQ`: sequence number used for reliable delivery.
 - `ACK`: acknowledgement of received reliable sequence(s).
 
