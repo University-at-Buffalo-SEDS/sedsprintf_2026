@@ -57,7 +57,8 @@
         "SdCard",
         "GroundStation"
       ],
-      "reliable_mode": "None"
+      "reliable_mode": "Ordered",
+      "reliable": true
     },
     {
       "rust": "GpsData",
@@ -66,15 +67,16 @@
       "class": "Data",
       "element": {
         "kind": "Static",
-        "count": 2,
-        "data_type": "Float32"
+        "data_type": "Float32",
+        "count": 2
       },
       "endpoints": [
         "GroundStation",
         "SdCard",
         "FlightController"
       ],
-      "reliable_mode": "Ordered"
+      "reliable_mode": "None",
+      "reliable": false
     },
     {
       "rust": "KalmanFilterData",
@@ -83,14 +85,15 @@
       "class": "Data",
       "element": {
         "kind": "Static",
-        "count": 3,
-        "data_type": "Float32"
+        "data_type": "Float32",
+        "count": 3
       },
       "endpoints": [
         "GroundStation",
         "SdCard"
       ],
-      "reliable_mode": "None"
+      "reliable_mode": "None",
+      "reliable": false
     },
     {
       "rust": "GyroData",
@@ -99,14 +102,15 @@
       "class": "Data",
       "element": {
         "kind": "Static",
-        "count": 3,
-        "data_type": "Float32"
+        "data_type": "Float32",
+        "count": 3
       },
       "endpoints": [
         "SdCard",
         "GroundStation"
       ],
-      "reliable_mode": "None"
+      "reliable_mode": "None",
+      "reliable": false
     },
     {
       "rust": "AccelData",
@@ -115,14 +119,15 @@
       "class": "Data",
       "element": {
         "kind": "Static",
-        "count": 3,
-        "data_type": "Float32"
+        "data_type": "Float32",
+        "count": 3
       },
       "endpoints": [
         "GroundStation",
         "SdCard"
       ],
-      "reliable_mode": "None"
+      "reliable_mode": "None",
+      "reliable": false
     },
     {
       "rust": "BatteryVoltage",
@@ -131,14 +136,15 @@
       "class": "Data",
       "element": {
         "kind": "Static",
-        "count": 1,
-        "data_type": "Float32"
+        "data_type": "Float32",
+        "count": 1
       },
       "endpoints": [
         "GroundStation",
         "SdCard"
       ],
-      "reliable_mode": "None"
+      "reliable_mode": "None",
+      "reliable": false
     },
     {
       "rust": "BatteryCurrent",
@@ -147,14 +153,15 @@
       "class": "Data",
       "element": {
         "kind": "Static",
-        "count": 1,
-        "data_type": "Float32"
+        "data_type": "Float32",
+        "count": 1
       },
       "endpoints": [
         "GroundStation",
         "SdCard"
       ],
-      "reliable_mode": "None"
+      "reliable_mode": "None",
+      "reliable": false
     },
     {
       "rust": "BarometerData",
@@ -184,7 +191,8 @@
       "endpoints": [
         "Abort"
       ],
-      "reliable_mode": "None"
+      "reliable_mode": "Unordered",
+      "reliable": true
     },
     {
       "rust": "FuelFlow",
@@ -209,15 +217,16 @@
       "class": "Data",
       "element": {
         "kind": "Static",
-        "count": 1,
-        "data_type": "UInt8"
+        "data_type": "UInt8",
+        "count": 1
       },
       "endpoints": [
         "GroundStation",
         "SdCard",
         "ValveBoard"
       ],
-      "reliable_mode": "None"
+      "reliable_mode": "Ordered",
+      "reliable": true
     },
     {
       "rust": "FlightCommand",
@@ -226,15 +235,16 @@
       "class": "Data",
       "element": {
         "kind": "Static",
-        "count": 1,
-        "data_type": "UInt8"
+        "data_type": "UInt8",
+        "count": 1
       },
       "endpoints": [
         "GroundStation",
         "SdCard",
         "FlightController"
       ],
-      "reliable_mode": "None"
+      "reliable_mode": "Ordered",
+      "reliable": true
     },
     {
       "rust": "FuelTankPressure",
@@ -265,7 +275,8 @@
       "endpoints": [
         "FlightState"
       ],
-      "reliable_mode": "None"
+      "reliable_mode": "Ordered",
+      "reliable": true
     },
     {
       "rust": "Heartbeat",
@@ -280,7 +291,8 @@
       "endpoints": [
         "HeartBeat"
       ],
-      "reliable_mode": "None"
+      "reliable_mode": "None",
+      "reliable": false
     },
     {
       "rust": "Warning",
@@ -295,7 +307,8 @@
         "SdCard",
         "GroundStation"
       ],
-      "reliable_mode": "None"
+      "reliable_mode": "Ordered",
+      "reliable": true
     },
     {
       "rust": "MessageData",
@@ -310,7 +323,8 @@
         "SdCard",
         "GroundStation"
       ],
-      "reliable_mode": "None"
+      "reliable_mode": "None",
+      "reliable": false
     }
   ]
 }
