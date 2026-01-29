@@ -413,6 +413,11 @@ def main(argv: list[str]) -> None:
     env = os.environ.copy()
     if device_id:
         env["DEVICE_IDENTIFIER"] = device_id
+    if tests:
+        if "SEDSPRINTF_RS_SCHEMA_PATH" not in env_overrides and "SEDSPRINTF_RS_SCHEMA_PATH" not in env:
+            env_overrides["SEDSPRINTF_RS_SCHEMA_PATH"] = str(
+                (repo_root / "telemetry_config.test.json").resolve()
+            )
     _apply_env_overrides(env, env_overrides)
 
     if release_build:

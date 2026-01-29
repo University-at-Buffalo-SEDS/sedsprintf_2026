@@ -33,6 +33,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const SCHEMA_PATH_ENV: &str = "SEDSPRINTF_RS_SCHEMA_PATH";
+const TEST_SCHEMA_FILE: &str = "telemetry_config.test.json";
 
 // ========================= JSON schema =========================
 
@@ -104,20 +105,7 @@ fn main() {
     println!("cargo:rerun-if-changed={}", lib_rs_path.display());
 
     // Discover schema json path by scanning config.rs for define_telemetry_schema!(path="...")
-    let schema_path = match env::var(SCHEMA_PATH_ENV) {
-        Ok(val) => {
-            if val.trim().is_empty() {
-                panic!("{SCHEMA_PATH_ENV} is set but empty");
-            }
-            let p = PathBuf::from(val);
-            if p.is_absolute() {
-                p
-            } else {
-                crate_dir.join(p)
-            }
-        }
-        Err(_) => find_schema_path_from_config_rs(&config_rs_path, &crate_dir),
-    };
+    let schema_path = resolve_schema_path(&crate_dir, &config_rs_path);
     println!("cargo:rerun-if-changed={}", schema_path.display());
     // Rebuild if the schema json changes
     println!("cargo:rerun-if-changed={}", schema_path.display());
@@ -206,6 +194,31 @@ fn find_schema_path_from_config_rs(config_rs_path: &Path, crate_dir: &Path) -> P
 
     let rel = first.get(1).unwrap().as_str();
     crate_dir.join(rel)
+}
+
+fn resolve_schema_path(crate_dir: &Path, config_rs_path: &Path) -> PathBuf {
+    if let Ok(val) = env::var(SCHEMA_PATH_ENV) {
+        if val.trim().is_empty() {
+            panic!("{SCHEMA_PATH_ENV} is set but empty");
+        }
+        let p = PathBuf::from(val);
+        return if p.is_absolute() { p } else { crate_dir.join(p) };
+    }
+
+    if env::var_os("CARGO_CFG_TEST").is_some() {
+        let test_path = crate_dir.join(TEST_SCHEMA_FILE);
+        if test_path.exists() {
+            // Ensure proc-macro expansion sees the test schema too.
+            println!(
+                "cargo:rustc-env={SCHEMA_PATH_ENV}={}",
+                test_path.display()
+            );
+            println!("cargo:rerun-if-changed={}", test_path.display());
+            return test_path;
+        }
+    }
+
+    find_schema_path_from_config_rs(config_rs_path, crate_dir)
 }
 
 // ========================= load / validate =========================
