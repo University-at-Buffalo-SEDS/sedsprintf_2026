@@ -41,6 +41,12 @@
       "name": "HEART_BEAT",
       "doc": "Endpoint for heartbeat messages",
       "broadcast_mode": "Always"
+    },
+    {
+      "rust": "ActuatorBoard",
+      "name": "ACTUATOR_BOARD",
+      "doc": "Actuator board endpoint",
+      "broadcast_mode": "Default"
     }
   ],
   "types": [
@@ -177,7 +183,8 @@
         "GroundStation",
         "SdCard"
       ],
-      "reliable_mode": "None"
+      "reliable_mode": "None",
+      "reliable": false
     },
     {
       "rust": "Abort",
@@ -201,14 +208,15 @@
       "class": "Data",
       "element": {
         "kind": "Static",
-        "count": 1,
-        "data_type": "Float32"
+        "data_type": "Float32",
+        "count": 1
       },
       "endpoints": [
         "GroundStation",
         "SdCard"
       ],
-      "reliable_mode": "None"
+      "reliable_mode": "None",
+      "reliable": false
     },
     {
       "rust": "ValveCommand",
@@ -253,14 +261,15 @@
       "class": "Data",
       "element": {
         "kind": "Static",
-        "count": 1,
-        "data_type": "Float32"
+        "data_type": "Float32",
+        "count": 1
       },
       "endpoints": [
         "GroundStation",
         "SdCard"
       ],
-      "reliable_mode": "None"
+      "reliable_mode": "None",
+      "reliable": false
     },
     {
       "rust": "FlightState",
@@ -325,6 +334,22 @@
       ],
       "reliable_mode": "None",
       "reliable": false
+    },
+    {
+      "rust": "ActuatorCommand",
+      "name": "ACTUATOR_COMMAND",
+      "doc": "Commands to be sent to the actuator board",
+      "reliable": true,
+      "reliable_mode": "Ordered",
+      "class": "Data",
+      "element": {
+        "kind": "Static",
+        "data_type": "UInt8",
+        "count": 1
+      },
+      "endpoints": [
+        "ActuatorBoard"
+      ]
     }
   ]
 }
