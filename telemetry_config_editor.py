@@ -51,6 +51,13 @@ ELEMENT_KIND_OPTIONS = ["Static", "Dynamic"]
 RELIABLE_MODE_OPTIONS = ["None", "Ordered", "Unordered"]
 
 
+def _is_reserved_telemetry_error(rust: str) -> bool:
+    rust = (rust or "").strip()
+    if not rust:
+        return False
+    return rust == "TelemetryError" or rust_ident_to_schema_name(rust) == "TELEMETRY_ERROR"
+
+
 
 def find_project_root(start: Path) -> Path:
     cur = start.resolve()
@@ -410,6 +417,14 @@ class TelemetryConfigEditor(tk.Tk):
         new_bm = (self.ep_bm_var.get() or "Default").strip()
         new_doc = self.ep_doc_text.get("1.0", tk.END).strip()
 
+        if new_rust and _is_reserved_telemetry_error(new_rust):
+            self._set_status("TelemetryError endpoint is built-in and cannot be added.")
+            self._suspend_live = True
+            try:
+                self.ep_rust_var.set(old_rust)
+            finally:
+                self._suspend_live = False
+            return
         if new_rust and not ensure_rust_ident(new_rust):
             return
         if new_bm not in BROADCAST_MODE_OPTIONS:
@@ -458,6 +473,14 @@ class TelemetryConfigEditor(tk.Tk):
         new_doc = self.ty_doc_text.get("1.0", tk.END).strip()
         new_reliable_mode = (self.ty_reliable_mode_var.get() or "None").strip()
 
+        if new_rust and _is_reserved_telemetry_error(new_rust):
+            self._set_status("TelemetryError data type is built-in and cannot be added.")
+            self._suspend_live = True
+            try:
+                self.ty_rust_var.set(ty.get("rust", ""))
+            finally:
+                self._suspend_live = False
+            return
         if new_rust and not ensure_rust_ident(new_rust):
             return
         if new_class not in MESSAGE_CLASS_OPTIONS:
@@ -1088,6 +1111,10 @@ class TelemetryConfigEditor(tk.Tk):
         self._flush_type_only()
         idx = _selected_index(self.type_list)
         if idx is None:
+            idx = self._ty_edit_idx
+        if idx is None:
+            return
+        if idx < 0 or idx >= len(self.config_obj.get("types", [])):
             return
         ty = self.config_obj["types"][idx]
         if not messagebox.askyesno("Delete type", f"Delete type {ty.get('rust')}?"):
