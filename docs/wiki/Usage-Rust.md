@@ -107,7 +107,11 @@ If you already built a `TelemetryPacket`, use `router.rx(&packet)` or `router.rx
 ## Side handling
 
 Routers use **named sides** (UART/CAN/RADIO/etc.) instead of LinkId. Register sides with
-`add_side_serialized` / `add_side_packet`, and tag ingress with:
+`add_side_serialized` / `add_side_packet`. As of v3.0.0, side tracking is internal, so most
+applications just call the plain RX APIs. Use side-aware RX only when you need to override
+ingress explicitly (custom relays, multi-link bridges, etc.).
+
+Side-aware ingress APIs:
 
 - `rx_serialized_from_side(bytes, side_id)`
 - `rx_from_side(packet, side_id)`

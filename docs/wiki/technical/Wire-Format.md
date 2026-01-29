@@ -29,6 +29,7 @@ SENDER BYTES                   // raw or compressed
     SEQ: u32 (little-endian)
     ACK: u32 (little-endian)
 PAYLOAD BYTES                  // raw or compressed
+[CRC32: u32 LE]               // checksum of all prior bytes
 ```
 
 ## Flags
@@ -97,6 +98,16 @@ route packets quickly without decoding full payloads.
 
 This ensures dedupe works even when one side compresses and the other does not.
 
+## CRC32 trailer
+
+Every serialized frame ends with a 4-byte CRC32 (little-endian) computed over all preceding bytes in the frame. This
+includes reliable ACK-only frames.
+
+Receivers validate CRC32 before decoding fields. If the checksum is invalid:
+
+- Reliable modes trigger a retransmit request (ACK of last good / expected-1), and the corrupt frame is dropped.
+- Non-reliable modes drop the frame silently.
+
 ## Error handling during decode
 
 Common error cases:
@@ -105,10 +116,11 @@ Common error cases:
 - Invalid endpoint bits (bitmap references invalid discriminants).
 - Decompression failures or size mismatches.
 - Invalid type discriminants.
+- CRC32 mismatch.
 
 ## Size planning
 
 If you need to estimate bandwidth:
 
 - Use `header_size_bytes(pkt)` for the header + varints.
-- Use `packet_wire_size(pkt)` for full encoded size (including compression decisions).
+- Use `packet_wire_size(pkt)` for full encoded size (including compression decisions and CRC32).

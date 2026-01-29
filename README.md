@@ -55,8 +55,23 @@ codebases.
 Sedsprintf_rs also supports python bindings via pyo3. to use you need maturin installed to build the python package.
 
 The size of the header in a serialized packet is around 20 bytes (the size will change based on the total number of
-endpoints in your system and the length of the sender string), so a packet containing three floats is 32 bytes total.
-This small size makes it ideal for use in low bandwidth environments.
+endpoints in your system and the length of the sender string), plus a 4-byte CRC32 trailer. As a rough example, a packet
+containing three floats is on the order of mid-30s bytes total. This small size makes it ideal for use in low bandwidth
+environments.
+
+---
+
+## Version 3.0.0 highlights
+
+- Router side tracking is now internal. You generally call `rx_serialized(...)` / `rx(...)` without threading a side ID
+  through your own handlers. Use the `*_from_side` variants only when you must override ingress (e.g. custom relays or
+  multi-link bridges).
+- TCP-like reliability is available for schema types marked `reliable` / `reliable_mode`, including ACKs, retransmits,
+  and optional ordering. Enable it per side (`RouterSideOptions`) and disable it when your transport is already
+  reliable.
+- All serialized frames include a CRC32 trailer for integrity checks. Corrupt frames are dropped; reliable modes trigger
+  retransmit requests.
+- Full changelog: [v2.4.0...v3.0.0](https://github.com/Rylan-Meilutis/sedsprintf_rs/compare/v2.4.0...v3.0.0)
 
 ---
 

@@ -1,6 +1,6 @@
 [package]
 name = "sedsprintf_rs"
-version = "3.0.0"
+version = "3.1.0"
 edition = "2024"
 build = "build.rs"
 authors = ["Rylan Meilutis <rylan@rylanswebsite.com>"]
@@ -51,16 +51,17 @@ required-features = ["std", "compression"]
 
 [dependencies]
 sedsprintf_macros = { path = "sedsprintf_macros" }
-strum_macros = { version = "0.27", default-features = false }
-strum = { version = "0.27", default-features = false }
+strum_macros = { version = "0.27.2", default-features = false }
+strum = { version = "0.27.2", default-features = false }
+crc32fast = { version = "1.5.0", default-features = false }
 
 # Optional dependencies enabled by features
-spin = { version = "0.10", optional = true }
-pyo3 = { version = "0.27", optional = true, features = ["auto-initialize", "extension-module", "multiple-pymethods"] }
+spin = { version = "0.10.0", optional = true }
+pyo3 = { version = "0.27.2", optional = true, features = ["auto-initialize", "extension-module", "multiple-pymethods"] }
 miniz_oxide = { version = "0.9.0", default-features = false, features = ["with-alloc"] }
 
 [build-dependencies]
-regex = "1.12"
+regex = "1.12.2"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 

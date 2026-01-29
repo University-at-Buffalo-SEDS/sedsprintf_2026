@@ -94,7 +94,10 @@ Routers use **named sides** (UART/CAN/RADIO/etc.). Register sides with:
 - `add_side_serialized(name, tx_cb)`
 - `add_side_packet(name, tx_cb)`
 
-Tag ingress with:
+As of v3.0.0, side tracking is internal, so most apps call `rx_serialized(bytes)` without passing
+a side ID. Use side-aware ingress only when you need to override ingress explicitly.
+
+Side-aware ingress:
 
 - `receive_serialized_from_side(side_id, bytes)`
 - `receive_packet_from_side(side_id, packet)`
