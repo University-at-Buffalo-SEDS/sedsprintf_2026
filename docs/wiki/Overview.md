@@ -15,6 +15,7 @@ Key outcomes:
 - Small, predictable packets that are easy to send over low‑bandwidth links.
 - A central Router API that handles validation, dedupe, and dispatch.
 - Optional TCP‑like reliability (ACKs, retransmits, ordered/unordered delivery) for types marked reliable in the schema.
+- CRC32 integrity checks on all serialized frames (corrupt frames are dropped; reliable modes request retransmit).
 
 As of v3.0.0, the router manages side tracking internally. Most users call the plain RX APIs without threading a side ID
 through their handlers; side-aware RX functions are only needed when you explicitly override ingress.

@@ -10,6 +10,8 @@ for senders and payloads.
   use side-aware variants when explicitly overriding ingress (custom relays, multi-link bridges, etc.).
 - TCP-like reliability is now available for schema types marked `reliable` / `reliable_mode`, with ACKs, retransmits,
   and optional ordering. Enable per side and disable when the transport is already reliable.
+- All serialized frames include a CRC32 trailer for integrity checks. Corrupt frames are dropped; reliable modes
+  trigger retransmit requests.
 - Full changelog: [v2.4.0...v3.0.0](https://github.com/Rylan-Meilutis/sedsprintf_rs/compare/v2.4.0...v3.0.0)
 
 ## Start here (easy overview)
