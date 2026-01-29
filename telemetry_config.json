@@ -350,6 +350,23 @@
       "endpoints": [
         "ActuatorBoard"
       ]
+    },
+    {
+      "rust": "UmbilicalStatus",
+      "name": "UMBILICAL_STATUS",
+      "doc": "The status of the umbilical setup (valves, actuator position, ingnighter state, etc)",
+      "reliable": false,
+      "reliable_mode": "None",
+      "class": "Data",
+      "element": {
+        "kind": "Static",
+        "data_type": "UInt8",
+        "count": 2
+      },
+      "endpoints": [
+        "GroundStation",
+        "SdCard"
+      ]
     }
   ]
 }
