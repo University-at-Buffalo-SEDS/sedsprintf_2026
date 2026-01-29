@@ -57,6 +57,11 @@ def _is_reserved_telemetry_error(rust: str) -> bool:
         return False
     return rust == "TelemetryError" or rust_ident_to_schema_name(rust) == "TELEMETRY_ERROR"
 
+def _is_valid_rust_ident_input(s: str) -> bool:
+    if s == "":
+        return True
+    return ensure_rust_ident(s)
+
 
 
 def find_project_root(start: Path) -> Path:
@@ -614,7 +619,14 @@ class TelemetryConfigEditor(tk.Tk):
 
         ttk.Label(right, text="Name (PascalCase):").grid(row=0, column=0, sticky="w")
         self.ep_rust_var = tk.StringVar()
-        ttk.Entry(right, textvariable=self.ep_rust_var).grid(row=0, column=1, sticky="ew", padx=(10, 0))
+        vcmd = (self.register(_is_valid_rust_ident_input), "%P")
+        self.ep_rust_entry = ttk.Entry(
+            right,
+            textvariable=self.ep_rust_var,
+            validate="key",
+            validatecommand=vcmd,
+        )
+        self.ep_rust_entry.grid(row=0, column=1, sticky="ew", padx=(10, 0))
 
         ttk.Label(right, text="Doc (optional):").grid(row=1, column=0, sticky="w", pady=(10, 0))
         self.ep_doc_text = tk.Text(right, height=5)
@@ -660,7 +672,13 @@ class TelemetryConfigEditor(tk.Tk):
 
         ttk.Label(right, text="Name (PascalCase):").grid(row=0, column=0, sticky="w")
         self.ty_rust_var = tk.StringVar()
-        self.ty_rust_entry = ttk.Entry(right, textvariable=self.ty_rust_var)
+        vcmd = (self.register(_is_valid_rust_ident_input), "%P")
+        self.ty_rust_entry = ttk.Entry(
+            right,
+            textvariable=self.ty_rust_var,
+            validate="key",
+            validatecommand=vcmd,
+        )
         self.ty_rust_entry.grid(row=0, column=1, sticky="ew", padx=(10, 0))
 
         ttk.Label(right, text="Class:").grid(row=1, column=0, sticky="w", pady=(10, 0))

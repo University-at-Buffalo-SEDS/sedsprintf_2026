@@ -472,7 +472,6 @@ mod handler_failure_tests {
     use core::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
 
-
     /// Pick any valid [`DataType`] from the enum range for generic tests.
     fn pick_any_type() -> DataType {
         for i in 0..=MAX_VALUE_DATA_TYPE {
@@ -1000,6 +999,17 @@ mod tests_extra {
         }
     }
 
+    fn rewrite_crc32(buf: &mut [u8]) {
+        if buf.len() < serialize::CRC32_BYTES {
+            return;
+        }
+        let data_len = buf.len() - serialize::CRC32_BYTES;
+        let mut hasher = crc32fast::Hasher::new();
+        hasher.update(&buf[..data_len]);
+        let crc = hasher.finalize();
+        buf[data_len..].copy_from_slice(&crc.to_le_bytes());
+    }
+
     /// Ensure serialization is canonical: serialize → deserialize → serialize
     /// produces identical bytes (ULEB128 canonical form).
     #[test]
@@ -1202,6 +1212,7 @@ mod tests_extra {
             }
             v >>= 1;
         }
+        rewrite_crc32(&mut wire);
 
         // Now deserialization must fail with a Deserialize("bad endpoint") error.
         let err = serialize::deserialize_packet(&wire).unwrap_err();
@@ -1877,7 +1888,12 @@ mod tests_more {
             }
         }
     }
-
+    fn append_crc32(buf: &mut Vec<u8>) {
+        let mut hasher = crc32fast::Hasher::new();
+        hasher.update(buf);
+        let crc = hasher.finalize();
+        buf.extend_from_slice(&crc.to_le_bytes());
+    }
     /// Construct an invalid varint (11 continuation bytes), and ensure
     /// `deserialize_packet` returns a `uleb128 too long` error.
     #[test]
@@ -1886,6 +1902,7 @@ mod tests_more {
         // Construct a fake wire buffer with NEP=0, then an invalid varint (11 continuation bytes)
         let mut wire = vec![0x00u8]; // NEP = 0
         wire.extend([0xFFu8; 11]); // invalid ULEB128 (too long for u64)
+        append_crc32(&mut wire);
         let err = serialize::deserialize_packet(&wire).unwrap_err();
         match err {
             TelemetryError::Deserialize(msg) if msg.eq("uleb128 too long") => {}
@@ -2376,17 +2393,29 @@ mod data_conversion_types {
 mod relay_tests {
     //! Tests for the serialized relay fan-out behavior and timeout semantics.
 
+    use crate::config::{DataEndpoint, DataType};
     use crate::router::Clock;
 
     use crate::relay::Relay;
     use crate::tests::timeout_tests::StepClock;
-    use crate::{TelemetryError, TelemetryResult};
+    use crate::{serialize, telemetry_packet::TelemetryPacket, TelemetryError, TelemetryResult};
     use core::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
     /// Simple zero clock for tests that don't care about timeouts.
     fn zero_clock() -> Box<dyn Clock + Send + Sync> {
         Box::new(|| 0u64)
+    }
+
+    fn wire_for_value(v: u64) -> Arc<[u8]> {
+        let pkt = TelemetryPacket::from_f32_slice(
+            DataType::GpsData,
+            &[v as f32, 0.0, 0.0],
+            &[DataEndpoint::SdCard],
+            v,
+        )
+        .unwrap();
+        serialize::serialize_packet(&pkt)
     }
 
     /// A small "bus" that records frames seen by each relay side.
@@ -2433,11 +2462,11 @@ mod relay_tests {
         let _id_b = relay.add_side_serialized("B", tx_b);
         let _id_c = relay.add_side_serialized("C", tx_c);
 
-        let frame = [0xAAu8, 0xBB, 0xCC];
+        let frame = wire_for_value(1);
 
         // Inject from A
         relay
-            .rx_serialized_from_side(id_a, &frame)
+            .rx_serialized_from_side(id_a, frame.as_ref())
             .expect("rx_serialized_from_side failed");
 
         // Drain all queues → should deliver once to B and once to C.
@@ -2449,8 +2478,8 @@ mod relay_tests {
         assert_eq!(bus_b.len(), 1, "side B should see one frame");
         assert_eq!(bus_c.len(), 1, "side C should see one frame");
 
-        assert_eq!(bus_b.first().unwrap(), frame);
-        assert_eq!(bus_c.first().unwrap(), frame);
+        assert_eq!(bus_b.first().unwrap(), frame.as_ref());
+        assert_eq!(bus_c.first().unwrap(), frame.as_ref());
     }
 
     /// Ensure invalid side IDs are rejected with a TelemetryError::HandlerError.
@@ -2498,11 +2527,13 @@ mod relay_tests {
         relay.add_side_serialized("C", tx_c);
 
         // Queue some RX work from A.
+        let frame_a = wire_for_value(1);
+        let frame_b = wire_for_value(2);
         relay
-            .rx_serialized_from_side(id_a, &[0x01, 0x02, 0x03])
+            .rx_serialized_from_side(id_a, frame_a.as_ref())
             .unwrap();
         relay
-            .rx_serialized_from_side(id_a, &[0x04, 0x05, 0x06])
+            .rx_serialized_from_side(id_a, frame_b.as_ref())
             .unwrap();
 
         // Expand RX → TX, but do not deliver yet.
@@ -2547,8 +2578,9 @@ mod relay_tests {
 
         // Queue multiple RX items from SRC, each with a unique frame to avoid dedup.
         for i in 0..5u8 {
+            let frame = wire_for_value(i as u64);
             relay
-                .rx_serialized_from_side(id_src, &[0xDE, 0xAD, 0xBE, 0xE0 + i])
+                .rx_serialized_from_side(id_src, frame.as_ref())
                 .unwrap();
         }
 
@@ -2607,7 +2639,8 @@ mod relay_tests {
                 for i in 0..ITERS_PER_THREAD {
                     let idx = (tid * ITERS_PER_THREAD + i) as u8;
                     // Unique last byte per (thread, iteration) to avoid dedup.
-                    r.rx_serialized_from_side(0, &[1, 2, 3, idx]).unwrap();
+                    let frame = wire_for_value(idx as u64);
+                    r.rx_serialized_from_side(0, frame.as_ref()).unwrap();
                 }
             }));
         }
@@ -2644,6 +2677,17 @@ mod dedupe_tests {
     /// Simple clock that always returns 0.
     fn zero_clock() -> Box<dyn Clock + Send + Sync> {
         Box::new(|| 0u64)
+    }
+
+    fn wire_for_value(v: u64) -> Arc<[u8]> {
+        let pkt = TelemetryPacket::from_f32_slice(
+            DataType::GpsData,
+            &[v as f32, 0.0, 0.0],
+            &[DataEndpoint::SdCard],
+            v,
+        )
+        .unwrap();
+        serialize::serialize_packet(&pkt)
     }
 
     // -----------------------------------------------------------------------
@@ -2816,11 +2860,11 @@ mod dedupe_tests {
         relay.add_side_serialized("B", tx_b);
         relay.add_side_serialized("C", tx_c);
 
-        let frame = [0xDEu8, 0xAD, 0xBE, 0xEF];
+        let frame = wire_for_value(1);
 
         for _ in 0..5 {
             relay
-                .rx_serialized_from_side(id_src, &frame)
+                .rx_serialized_from_side(id_src, frame.as_ref())
                 .expect("rx_serialized_from_side failed");
         }
 
@@ -2858,17 +2902,17 @@ mod dedupe_tests {
             Ok(())
         });
 
-        let frame = [0x01u8, 0x02, 0x03];
+        let frame = wire_for_value(1);
 
         relay
-            .rx_serialized_from_side(id_src, &frame)
+            .rx_serialized_from_side(id_src, frame.as_ref())
             .expect("first rx_serialized_from_side failed");
         relay
             .process_all_queues_with_timeout(0)
             .expect("first drain failed");
 
         relay
-            .rx_serialized_from_side(id_src, &frame)
+            .rx_serialized_from_side(id_src, frame.as_ref())
             .expect("second rx_serialized_from_side failed");
         relay
             .process_all_queues_with_timeout(0)
@@ -2896,14 +2940,14 @@ mod dedupe_tests {
             Ok(())
         });
 
-        let frame_a = [0xAAu8, 0xBB, 0xCC];
-        let frame_b = [0x11u8, 0x22, 0x33];
+        let frame_a = wire_for_value(1);
+        let frame_b = wire_for_value(2);
 
         relay
-            .rx_serialized_from_side(id_src, &frame_a)
+            .rx_serialized_from_side(id_src, frame_a.as_ref())
             .expect("rx_serialized_from_side A failed");
         relay
-            .rx_serialized_from_side(id_src, &frame_b)
+            .rx_serialized_from_side(id_src, frame_b.as_ref())
             .expect("rx_serialized_from_side B failed");
 
         relay
@@ -3204,7 +3248,9 @@ mod relay_reliable_tests {
 #[cfg(test)]
 mod reliable_tests {
     use crate::config::{DataEndpoint, DataType};
-    use crate::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode, RouterSideOptions};
+    use crate::router::{
+        Clock, EndpointHandler, Router, RouterConfig, RouterMode, RouterSideOptions,
+    };
     use crate::tests::timeout_tests::StepClock;
     use crate::{serialize, telemetry_packet::TelemetryPacket, TelemetryResult};
 
@@ -3252,7 +3298,7 @@ mod reliable_tests {
                 }
                 Ok(())
             },
-            crate::router::RouterSideOptions {
+            RouterSideOptions {
                 reliable_enabled: true,
             },
         );
@@ -3275,7 +3321,7 @@ mod reliable_tests {
         let sender_side = sender.add_side_serialized_with_options(
             "TO_RECEIVER",
             tx,
-            crate::router::RouterSideOptions {
+            RouterSideOptions {
                 reliable_enabled: true,
             },
         );
@@ -3367,7 +3413,11 @@ mod reliable_tests {
         router.rx_serialized_from_side(seq2.as_ref(), side).unwrap();
 
         let delivered = delivered.lock().unwrap().clone();
-        assert_eq!(delivered, vec![1, 2], "ordered reliable delivery must reorder");
+        assert_eq!(
+            delivered,
+            vec![1, 2],
+            "ordered reliable delivery must reorder"
+        );
     }
 
     #[test]
