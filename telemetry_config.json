@@ -383,7 +383,7 @@
       "class": "Data",
       "element": {
         "kind": "Static",
-        "data_type": "Float64",
+        "data_type": "UInt64",
         "count": 1
       },
       "endpoints": [
