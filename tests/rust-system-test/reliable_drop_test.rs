@@ -94,7 +94,7 @@ mod reliable_drop_tests {
                 &[DataEndpoint::Radio],
                 i as u64,
             )
-            .expect("failed to build packet");
+                .expect("failed to build packet");
             router_a.tx(pkt).expect("tx failed");
         }
 
@@ -199,14 +199,14 @@ mod reliable_drop_tests {
             &[DataEndpoint::Radio],
             1,
         )
-        .expect("failed to build packet");
+            .expect("failed to build packet");
         let pkt2 = TelemetryPacket::from_f32_slice(
             DataType::GpsData,
             &[2.0_f32, 0.0, 0.0],
             &[DataEndpoint::Radio],
             2,
         )
-        .expect("failed to build packet");
+            .expect("failed to build packet");
 
         let seq1 = serialize::serialize_packet_with_reliable(
             &pkt1,

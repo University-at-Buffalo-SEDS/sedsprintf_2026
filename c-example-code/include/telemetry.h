@@ -24,6 +24,7 @@ extern RouterState g_router;
 SedsResult tx_send(const uint8_t * bytes, size_t len, void * user);
 
 SedsResult on_radio_packet(const SedsPacketView * pkt, void * user);
+SedsResult on_time_sync_packet(const SedsPacketView * pkt, void * user);
 
 // Initialize router once; safe to call multiple times.
 SedsResult init_telemetry_router(void);

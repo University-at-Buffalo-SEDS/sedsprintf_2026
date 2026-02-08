@@ -1,6 +1,6 @@
 [package]
 name = "sedsprintf_rs_2026"
-version = "3.1.0"
+version = "3.2.0"
 edition = "2024"
 build = "build.rs"
 authors = ["Rylan Meilutis <rylan@rylanswebsite.com>"]
@@ -15,11 +15,12 @@ readme = "README.md"
 crate-type = ["rlib", "staticlib"]
 
 [features]
-default = ["std", "compression"]
+default = ["std", "compression", "timesync"]
 std = []
-embedded = ["spin", "compression"]
-python = ["std", "pyo3/extension-module", "compression"]
+embedded = ["spin", "compression", "timesync"]
+python = ["std", "pyo3/extension-module", "compression", "timesync"]
 compression = []
+timesync = []
 
 [package.metadata.maturin]
 bindings = "pyo3"
@@ -27,27 +28,32 @@ bindings = "pyo3"
 [[test]]
 name = "rust-system-test"
 path = "tests/rust-system-test/rust_system_test.rs"
-required-features = ["std", "compression"]
+required-features = ["std", "compression", "timesync"]
 
 [[test]]
 name = "full_system_test"
 path = "tests/rust-system-test/full_system_test.rs"
-required-features = ["std", "compression"]
+required-features = ["std", "compression", "timesync"]
 
 [[test]]
 name = "rust_single_threaded_test"
 path = "tests/rust-system-test/single_threaded_test.rs"
-required-features = ["std", "compression"]
+required-features = ["std", "compression", "timesync"]
 
 [[test]]
 name = "reliable_drop_test"
 path = "tests/rust-system-test/reliable_drop_test.rs"
-required-features = ["std", "compression"]
+required-features = ["std", "compression", "timesync"]
 
 [[test]]
 name = "c-system-test"
 path = "tests/c-system-test/c_system_test.rs"
-required-features = ["std", "compression"]
+required-features = ["std", "compression", "timesync"]
+
+[[test]]
+name = "timesync_system_test"
+path = "tests/rust-system-test/timesync_system_test.rs"
+required-features = ["std", "compression", "timesync"]
 
 [dependencies]
 sedsprintf_macros = { path = "sedsprintf_macros" }

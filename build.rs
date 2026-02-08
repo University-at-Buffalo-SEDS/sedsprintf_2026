@@ -115,6 +115,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=SEDSPRINTF_RS_LIB_RS");
     println!("cargo:rerun-if-env-changed=SEDSPRINTF_RS_SKIP_ENUMGEN");
     println!("cargo:rerun-if-env-changed={SCHEMA_PATH_ENV}");
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_TIMESYNC");
 
     // Make the discovered JSON path available to the crate at compile time.
     // Use in Rust as: env!("SEDSPRINTF_RS_SCHEMA_JSON")
@@ -130,8 +131,12 @@ fn main() {
     println!("cargo:rerun-if-changed={}", pyi_tpl_path.display());
 
     // Load + validate JSON schema
-    let cfg = load_schema_absolute(&schema_path);
-    validate_schema(&cfg);
+    let mut cfg = load_schema_absolute(&schema_path);
+    let timesync_enabled = is_timesync_enabled();
+    validate_schema(&cfg, timesync_enabled);
+    if timesync_enabled {
+        append_timesync_builtins(&mut cfg);
+    }
 
     // Parse TelemetryErrorCode from lib.rs into SedsResult members
     let seds_result = parse_seds_result_from_lib_rs(&lib_rs_path);
@@ -176,24 +181,24 @@ fn find_schema_path_from_config_rs(config_rs_path: &Path, crate_dir: &Path) -> P
         .expect("regex compile failed");
 
     let mut it = re.captures_iter(&text);
-
     let first = it.next().unwrap_or_else(|| {
         panic!(
             "could not find define_telemetry_schema!(path = \"...\") in {}",
             config_rs_path.display()
         )
     });
-
-    // If there are multiple, error (keeps build deterministic)
-    if it.next().is_some() {
-        panic!(
-            "multiple define_telemetry_schema!(path = \"...\") invocations found in {} (expected exactly one)",
-            config_rs_path.display()
-        );
+    let first_rel = first.get(1).unwrap().as_str().to_string();
+    for cap in it {
+        let rel = cap.get(1).unwrap().as_str();
+        if rel != first_rel {
+            panic!(
+                "multiple define_telemetry_schema!(path = \"...\") invocations with different paths found in {} (expected identical paths)",
+                config_rs_path.display()
+            );
+        }
     }
 
-    let rel = first.get(1).unwrap().as_str();
-    crate_dir.join(rel)
+    crate_dir.join(first_rel)
 }
 
 fn resolve_schema_path(crate_dir: &Path, config_rs_path: &Path) -> PathBuf {
@@ -235,11 +240,16 @@ fn load_schema_absolute(path: &Path) -> TelemetryConfig {
     })
 }
 
-fn validate_schema(cfg: &TelemetryConfig) {
+fn validate_schema(cfg: &TelemetryConfig, timesync_enabled: bool) {
     for ty in &cfg.types {
         if ty.rust == "TelemetryError" || ty.name == "TELEMETRY_ERROR" {
             panic!(
                 "telemetry_config.json: TelemetryError is built-in and must not be defined in the schema"
+            );
+        }
+        if is_timesync_type(ty) {
+            panic!(
+                "telemetry_config.json: TimeSync types are built-in and must not be defined in the schema"
             );
         }
     }
@@ -247,6 +257,11 @@ fn validate_schema(cfg: &TelemetryConfig) {
         if ep.rust == "TelemetryError" || ep.name == "TELEMETRY_ERROR" {
             panic!(
                 "telemetry_config.json: TelemetryError endpoint is built-in and must not be defined in the schema"
+            );
+        }
+        if is_timesync_endpoint(ep) {
+            panic!(
+                "telemetry_config.json: TimeSync endpoint is built-in and must not be defined in the schema"
             );
         }
     }
@@ -258,6 +273,9 @@ fn validate_schema(cfg: &TelemetryConfig) {
     }
 
     let mut endpoint_set: HashSet<&str> = cfg.endpoints.iter().map(|e| e.rust.as_str()).collect();
+    if timesync_enabled {
+        endpoint_set.insert("TimeSync");
+    }
     endpoint_set.insert("TelemetryError");
 
     for ty in &cfg.types {
@@ -295,6 +313,71 @@ fn validate_schema(cfg: &TelemetryConfig) {
             panic!("telemetry_config.json: types[{}].class is empty", ty.rust);
         }
     }
+}
+
+fn is_timesync_enabled() -> bool {
+    env::var_os("CARGO_FEATURE_TIMESYNC").is_some()
+}
+
+fn is_timesync_endpoint(ep: &JsonEndpoint) -> bool {
+    ep.rust == "TimeSync" || ep.name == "TIME_SYNC"
+}
+
+fn is_timesync_type(ty: &JsonType) -> bool {
+    matches!(
+        (ty.rust.as_str(), ty.name.as_str()),
+        ("TimeSyncAnnounce", _)
+            | ("TimeSyncRequest", _)
+            | ("TimeSyncResponse", _)
+            | (_, "TIME_SYNC_ANNOUNCE")
+            | (_, "TIME_SYNC_REQUEST")
+            | (_, "TIME_SYNC_RESPONSE")
+    )
+}
+
+fn append_timesync_builtins(cfg: &mut TelemetryConfig) {
+    cfg.endpoints.push(JsonEndpoint {
+        rust: "TimeSync".to_string(),
+        name: "TIME_SYNC".to_string(),
+        doc: Some("Time sync routing endpoint (always forwarded).".to_string()),
+        _broadcast_mode: Some("Always".to_string()),
+    });
+
+    cfg.types.push(JsonType {
+        rust: "TimeSyncAnnounce".to_string(),
+        name: "TIME_SYNC_ANNOUNCE".to_string(),
+        doc: Some("Time source announce (priority, time_ms).".to_string()),
+        _reliable: Some(false),
+        element: JsonElement::Static {
+            data_type: "UInt64".to_string(),
+        },
+        class: "Data".to_string(),
+        endpoints: vec!["TimeSync".to_string()],
+    });
+
+    cfg.types.push(JsonType {
+        rust: "TimeSyncRequest".to_string(),
+        name: "TIME_SYNC_REQUEST".to_string(),
+        doc: Some("Time sync request (seq, t1_ms).".to_string()),
+        _reliable: Some(false),
+        element: JsonElement::Static {
+            data_type: "UInt64".to_string(),
+        },
+        class: "Data".to_string(),
+        endpoints: vec!["TimeSync".to_string()],
+    });
+
+    cfg.types.push(JsonType {
+        rust: "TimeSyncResponse".to_string(),
+        name: "TIME_SYNC_RESPONSE".to_string(),
+        doc: Some("Time sync response (seq, t1_ms, t2_ms, t3_ms).".to_string()),
+        _reliable: Some(false),
+        element: JsonElement::Static {
+            data_type: "UInt64".to_string(),
+        },
+        class: "Data".to_string(),
+        endpoints: vec!["TimeSync".to_string()],
+    });
 }
 
 fn ensure_rust_ident(s: &str, field: &str) {

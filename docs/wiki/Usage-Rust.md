@@ -108,6 +108,27 @@ If you already built a `TelemetryPacket`, use `router.rx(&packet)` or `router.rx
 
 Routers use **named sides** (UART/CAN/RADIO/etc.) instead of LinkId. Register sides with
 `add_side_serialized` / `add_side_packet`. As of v3.0.0, side tracking is internal, so most
+
+## Time sync (feature: timesync)
+
+When the `timesync` feature is enabled, the schema adds time sync packets and the crate exposes
+helpers in `sedsprintf_rs::timesync`. See `rust-example-code/timesync_example.rs` for a full example.
+
+```
+use sedsprintf_rs::timesync::{
+    TimeSyncConfig, TimeSyncRole, TimeSyncTracker, compute_offset_delay, send_timesync_request,
+};
+
+let cfg = TimeSyncConfig {
+    role: TimeSyncRole::Consumer,
+    ..Default::default()
+};
+let mut tracker = TimeSyncTracker::new(cfg);
+// Use send_timesync_request(...) and compute_offset_delay(...) in your app logic.
+```
+
+`TIME_SYNC` is a built-in endpoint with broadcast mode set to `Always`, so time sync packets
+forward across sides even when a local handler is registered.
 applications just call the plain RX APIs. Use side-aware RX only when you need to override
 ingress explicitly (custom relays, multi-link bridges, etc.).
 

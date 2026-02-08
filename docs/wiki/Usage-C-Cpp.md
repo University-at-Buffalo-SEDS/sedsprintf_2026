@@ -83,7 +83,8 @@ int main(void)
 }
 ```
 
-See `c-example-code/` for a more complete example.
+See `c-example-code/` for a more complete example. Time sync is demonstrated in
+`c-example-code/src/timesync_example.c`.
 
 ## Sending and receiving
 

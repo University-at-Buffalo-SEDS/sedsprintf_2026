@@ -49,6 +49,27 @@ def _on_packet(pkt: seds.Packet):
 def _on_serialized(data: bytes):
     print(f"[RX Serialized] {len(data)} bytes: {data.hex()}")
 
+_ROUTER = None
+_PENDING_TIMESYNC = []
+
+def _on_timesync(pkt: seds.Packet):
+    global _PENDING_TIMESYNC
+    if pkt.ty == int(DT.TIME_SYNC_REQUEST):
+        vals = pkt.data_as_u64()
+        if len(vals) >= 2:
+            seq, t1 = vals[0], vals[1]
+            t2 = _now_ms()
+            t3 = _now_ms()
+            _PENDING_TIMESYNC.append((seq, t1, t2, t3))
+    elif pkt.ty == int(DT.TIME_SYNC_ANNOUNCE):
+        vals = pkt.data_as_u64()
+        if len(vals) >= 2:
+            print(f"[TIME_SYNC] announce priority={vals[0]} time_ms={vals[1]}")
+    elif pkt.ty == int(DT.TIME_SYNC_RESPONSE):
+        vals = pkt.data_as_u64()
+        if len(vals) >= 4:
+            print(f"[TIME_SYNC] response seq={vals[0]} t1={vals[1]} t2={vals[2]} t3={vals[3]}")
+
 
 # ---------------- Server (single-threaded) ----------------
 def router_server(cmd_q: mp.Queue, _done_evt_unused: mp.Event,
@@ -66,9 +87,19 @@ def router_server(cmd_q: mp.Queue, _done_evt_unused: mp.Event,
     handlers = [
         (int(EP.SD_CARD), _on_packet, None),
         (int(EP.RADIO), None, _on_serialized),
+        (int(EP.TIME_SYNC), _on_timesync, None),
     ]
     router = seds.Router(now_ms=_now_ms, handlers=handlers, mode=RM.Sink)
     router.add_side_serialized("TX", _tx)
+    global _ROUTER
+    _ROUTER = router
+    announce = np.array([10, _now_ms()], dtype=np.uint64)
+    router.log(
+        ty=int(DT.TIME_SYNC_ANNOUNCE),
+        data=announce,
+        elem_size=8,
+        elem_kind=EK.UNSIGNED,
+    )
     print(f"[SERVER] Router up. PID={os.getpid()}")
 
     shutting_down = False
@@ -83,6 +114,19 @@ def router_server(cmd_q: mp.Queue, _done_evt_unused: mp.Event,
         finally:
             last_pump = time.time()
 
+    def flush_timesync():
+        global _PENDING_TIMESYNC
+        while _PENDING_TIMESYNC:
+            seq, t1, t2, t3 = _PENDING_TIMESYNC.pop(0)
+            resp = np.array([seq, t1, t2, t3], dtype=np.uint64)
+            router.log(
+                ty=int(DT.TIME_SYNC_RESPONSE),
+                data=resp,
+                elem_size=8,
+                elem_kind=EK.UNSIGNED,
+                timestamp_ms=t3,
+            )
+
     # Main loop
     while True:
         now = time.time()
@@ -95,6 +139,7 @@ def router_server(cmd_q: mp.Queue, _done_evt_unused: mp.Event,
         # Periodic pump
         if (now - last_pump) * 1000.0 >= pump_period_ms:
             pump_now()
+        flush_timesync()
 
         # Drain a bit of work from the command queue
         try:
@@ -117,12 +162,21 @@ def router_server(cmd_q: mp.Queue, _done_evt_unused: mp.Event,
                     router.log_f32(ty=payload["ty"], values=payload["values"])
                 elif op == "log_bytes":
                     router.log_bytes(ty=payload["ty"], data=payload["data"])
+                elif op == "timesync_request":
+                    router.log(
+                        ty=int(DT.TIME_SYNC_REQUEST),
+                        data=payload["data"],
+                        elem_size=8,
+                        elem_kind=EK.UNSIGNED,
+                        timestamp_ms=payload["timestamp_ms"],
+                    )
             except Exception as e:
                 print(f"[SERVER] worker op error: {e!r}")
 
         # If in shutdown, keep pumping and stop when quiet or grace expires
         if shutting_down:
             pump_now()
+            flush_timesync()
             # Router queues are internal; we can't query length here,
             # so just wait for the grace window to pass.
             if time.time() >= drain_deadline:
@@ -131,6 +185,7 @@ def router_server(cmd_q: mp.Queue, _done_evt_unused: mp.Event,
     # Final drain
     try:
         pump_now()
+        flush_timesync()
     except Exception as e:
         print(f"[SERVER] final drain error: {e!r}")
     print("[SERVER] Shutdown complete.")
@@ -199,6 +254,12 @@ def main():
     # Wait for producers
     for p in procs:
         p.join()
+
+    ts_req = np.array([1, _now_ms()], dtype=np.uint64)
+    cmd_q.put(deep_coerce_enums(("timesync_request", {
+        "data": ts_req,
+        "timestamp_ms": int(_now_ms()),
+    })))
 
     # Tell server to finish once queue is drained
     cmd_q.put(("shutdown", {}))

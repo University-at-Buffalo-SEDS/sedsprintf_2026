@@ -35,11 +35,17 @@ From `Cargo.toml`:
 - `embedded`: enables embedded defaults and no_std-friendly behavior.
 - `python`: enables pyo3 bindings.
 - `compression` (default): enables payload compression.
+- `timesync`: enables time sync helpers and built-in time sync packet types.
 
 Examples:
 
 - Disable compression: `default-features = false` and omit `compression`.
 - Embedded + compression: enable `embedded` and keep `compression`.
+
+When `timesync` is enabled, the build adds the `TIME_SYNC` endpoint and
+`TIME_SYNC_*` packet types directly in code (like `TelemetryError`).
+
+Python builds via `maturin` in this repo enable `timesync` by default (see `pyproject.toml`).
 
 ## Device identifier
 

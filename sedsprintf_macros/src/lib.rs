@@ -2,7 +2,7 @@ use proc_macro::TokenStream;
 use proc_macro2::Span;
 use quote::quote;
 use syn::parse::{Parse, ParseStream};
-use syn::{parse_macro_input, Ident, LitInt, LitStr, Token};
+use syn::{parse_macro_input, Ident, LitBool, LitInt, LitStr, Token};
 
 // NOTE:
 // This proc-macro crate must depend on:
@@ -355,20 +355,38 @@ enum JsonElement {
 
 struct SchemaArgs {
     path: String,
+    timesync: bool,
 }
 
 impl Parse for SchemaArgs {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
-        // path = "..."
-        let k: Ident = input.parse()?;
-        if k != "path" {
-            return Err(syn::Error::new_spanned(k, "expected `path`"));
+        let mut path: Option<String> = None;
+        let mut timesync = false;
+
+        while !input.is_empty() {
+            let k: Ident = input.parse()?;
+            input.parse::<Token![=]>()?;
+
+            if k == "path" {
+                let path_lit: LitStr = input.parse()?;
+                path = Some(path_lit.value());
+            } else if k == "timesync" {
+                let ts_lit: LitBool = input.parse()?;
+                timesync = ts_lit.value();
+            } else {
+                return Err(syn::Error::new_spanned(
+                    k,
+                    "expected `path` or `timesync`",
+                ));
+            }
+
+            if input.peek(Token![,]) {
+                input.parse::<Token![,]>()?;
+            }
         }
-        input.parse::<Token![=]>()?;
-        let path_lit: LitStr = input.parse()?;
-        Ok(Self {
-            path: path_lit.value(),
-        })
+
+        let path = path.ok_or_else(|| syn::Error::new(Span::call_site(), "missing `path`"))?;
+        Ok(Self { path, timesync })
     }
 }
 
@@ -389,6 +407,22 @@ fn ensure_caps_name(kind: &str, s: &str) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+fn is_timesync_endpoint(ep: &JsonEndpoint) -> bool {
+    ep.rust == "TimeSync" || ep.name == "TIME_SYNC"
+}
+
+fn is_timesync_type(ty: &JsonType) -> bool {
+    matches!(
+        (ty.rust.as_str(), ty.name.as_str()),
+        ("TimeSyncAnnounce", _)
+            | ("TimeSyncRequest", _)
+            | ("TimeSyncResponse", _)
+            | (_, "TIME_SYNC_ANNOUNCE")
+            | (_, "TIME_SYNC_REQUEST")
+            | (_, "TIME_SYNC_RESPONSE")
+    )
 }
 
 fn caller_manifest_dir() -> Result<std::path::PathBuf, String> {
@@ -465,18 +499,27 @@ fn reliable_mode_token(mode: &str) -> Result<proc_macro2::TokenStream, String> {
 
 #[proc_macro]
 pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
-    let SchemaArgs { path } = parse_macro_input!(input as SchemaArgs);
+    let SchemaArgs { path, timesync } = parse_macro_input!(input as SchemaArgs);
 
     let cfg = match load_schema(&path) {
         Ok(v) => v,
         Err(e) => return syn::Error::new(Span::call_site(), e).to_compile_error().into(),
     };
+    let timesync_enabled = timesync;
 
     for ty in &cfg.types {
         if ty.rust == "TelemetryError" || ty.name == "TELEMETRY_ERROR" {
             return syn::Error::new(
                 Span::call_site(),
                 "telemetry_config.json: TelemetryError is built-in and must not be defined in the schema",
+            )
+                .to_compile_error()
+                .into();
+        }
+        if is_timesync_type(ty) {
+            return syn::Error::new(
+                Span::call_site(),
+                "telemetry_config.json: TimeSync types are built-in and must not be defined in the schema",
             )
             .to_compile_error()
             .into();
@@ -487,6 +530,14 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
             return syn::Error::new(
                 Span::call_site(),
                 "telemetry_config.json: TelemetryError endpoint is built-in and must not be defined in the schema",
+            )
+                .to_compile_error()
+                .into();
+        }
+        if is_timesync_endpoint(ep) {
+            return syn::Error::new(
+                Span::call_site(),
+                "telemetry_config.json: TimeSync endpoint is built-in and must not be defined in the schema",
             )
             .to_compile_error()
             .into();
@@ -517,6 +568,13 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
         ep_bm.push(ep.broadcast_mode.clone().unwrap_or_else(|| "Default".to_string()));
     }
 
+    if timesync_enabled {
+        ep_idents.push(syn::Ident::new("TimeSync", Span::call_site()));
+        ep_docs.push("Time sync routing endpoint (always forwarded).".to_string());
+        ep_names.push("TIME_SYNC".to_string());
+        ep_bm.push("Always".to_string());
+    }
+
     ep_idents.push(syn::Ident::new("TelemetryError", Span::call_site()));
     ep_docs.push(
         "Encoded telemetry error text (string payload) (CRITICAL FOR SYSTEM FUNCTIONALITY, DO NOT REMOVE)"
@@ -525,7 +583,7 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
     ep_names.push("TELEMETRY_ERROR".to_string());
     ep_bm.push("Always".to_string());
 
-    let max_ep_value = cfg.endpoints.len() as u32;
+    let max_ep_value = cfg.endpoints.len() as u32 + if timesync_enabled { 1 } else { 0 };
 
     let ep_variants = ep_idents.iter().zip(ep_docs.iter()).map(|(id, doc)| {
         if doc.is_empty() {
@@ -556,8 +614,7 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
     // ----------------------------
     // Validate + prep types
     // ----------------------------
-    let mut ty_idents = Vec::<syn::Ident>::new();
-    let mut ty_docs = Vec::<String>::new();
+    let mut ty_entries: Vec<(syn::Ident, String)> = Vec::new();
 
     for ty in &cfg.types {
         if let Err(e) = ensure_caps_name("type", &ty.name) {
@@ -569,31 +626,44 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
             Err(e) => return syn::Error::new(Span::call_site(), e).to_compile_error().into(),
         };
 
-        ty_idents.push(id);
-        ty_docs.push(ty.doc.clone().unwrap_or_default());
+        ty_entries.push((id, ty.doc.clone().unwrap_or_default()));
     }
 
-    let max_ty_value = cfg.types.len() as u32;
+    if timesync_enabled {
+        ty_entries.push((
+            syn::Ident::new("TimeSyncAnnounce", Span::call_site()),
+            "Time source announce (priority, time_ms).".to_string(),
+        ));
+        ty_entries.push((
+            syn::Ident::new("TimeSyncRequest", Span::call_site()),
+            "Time sync request (seq, t1_ms).".to_string(),
+        ));
+        ty_entries.push((
+            syn::Ident::new("TimeSyncResponse", Span::call_site()),
+            "Time sync response (seq, t1_ms, t2_ms, t3_ms).".to_string(),
+        ));
+    }
 
-    let ty_variants = ty_idents
+    let max_ty_value = cfg.types.len() as u32 + if timesync_enabled { 3 } else { 0 };
+
+    let ty_variants = ty_entries
         .iter()
         .cloned()
-        .zip(ty_docs.iter().cloned())
         .chain(std::iter::once((
             syn::Ident::new("TelemetryError", Span::call_site()),
             "Encoded telemetry error text (string payload) (CRITICAL FOR SYSTEM FUNCTIONALITY, DO NOT REMOVE)"
                 .to_string(),
         )))
         .map(|(id, doc)| {
-        if doc.is_empty() {
-            quote!(#id,)
-        } else {
-            quote!(
+            if doc.is_empty() {
+                quote!(#id,)
+            } else {
+                quote!(
                 #[doc = #doc]
                 #id,
             )
-        }
-    });
+            }
+        });
 
     let builtin_ty_meta = {
         let endpoints_tokens: Vec<proc_macro2::TokenStream> =
@@ -657,6 +727,31 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
         }
     });
 
+    let timesync_ty_meta = if timesync_enabled {
+        quote! {
+            DataType::TimeSyncAnnounce => MessageMeta {
+                name: "TIME_SYNC_ANNOUNCE",
+                element: MessageElement::Static(2, MessageDataType::UInt64, MessageClass::Data),
+                endpoints: &[DataEndpoint::TimeSync],
+                reliable: crate::ReliableMode::None,
+            },
+            DataType::TimeSyncRequest => MessageMeta {
+                name: "TIME_SYNC_REQUEST",
+                element: MessageElement::Static(2, MessageDataType::UInt64, MessageClass::Data),
+                endpoints: &[DataEndpoint::TimeSync],
+                reliable: crate::ReliableMode::None,
+            },
+            DataType::TimeSyncResponse => MessageMeta {
+                name: "TIME_SYNC_RESPONSE",
+                element: MessageElement::Static(4, MessageDataType::UInt64, MessageClass::Data),
+                endpoints: &[DataEndpoint::TimeSync],
+                reliable: crate::ReliableMode::None,
+            },
+        }
+    } else {
+        quote! {}
+    };
+
     let expanded = quote! {
         // Auto-generated by `define_telemetry_schema!`.
         // Source: telemetry schema JSON.
@@ -693,6 +788,7 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
         pub const fn get_message_meta(data_type: DataType) -> MessageMeta {
             match data_type {
                 #builtin_ty_meta
+                #timesync_ty_meta
                 #(#ty_meta_arms)*
             }
         }
