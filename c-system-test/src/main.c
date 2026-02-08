@@ -108,6 +108,8 @@ static void * sender_A(void * arg)
     {
         make_series(buf, 3, 10.0f);
         assert(node_log(A, SEDS_DT_GPS_DATA, buf, 3, sizeof(buf[0])) == SEDS_OK);
+        const uint64_t announce[2] = {10ULL, node_now_since_bus_ms(A)};
+        assert(node_log(A, SEDS_DT_TIME_SYNC_ANNOUNCE, announce, 2, sizeof(announce[0])) == SEDS_OK);
         usleep(gen_random_us());
     }
     return NULL;
@@ -128,6 +130,8 @@ static void * sender_B(void * arg)
         usleep(gen_random_us());
         uint8_t buff[0];
         assert(node_log(B, SEDS_DT_HEARTBEAT, buff, 0, 0) == SEDS_OK);
+        const uint64_t req[2] = {(uint64_t) i, node_now_since_bus_ms(B)};
+        assert(node_log(B, SEDS_DT_TIME_SYNC_REQUEST, req, 2, sizeof(req[0])) == SEDS_OK);
         usleep(gen_random_us());
     }
     return NULL;
@@ -205,10 +209,10 @@ int main(void)
     bus2.relay_side_id = (uint32_t) side_bus2;
 
     SimNode radioBoard, flightControllerBoard, powerBoard, valve_board;
-    assert(node_init(&radioBoard, &bus1, "Radio Board", 1, 0) == SEDS_OK);
-    assert(node_init(&flightControllerBoard, &bus1, "Flight Controller Board", 0, 1) == SEDS_OK);
-    assert(node_init(&powerBoard, &bus1, "Power Board", 0, 0) == SEDS_OK);
-    assert(node_init(&valve_board, &bus2, "Valve Board", 1, 0) == SEDS_OK);
+    assert(node_init(&radioBoard, &bus1, "Radio Board", 1, 0, 1) == SEDS_OK);
+    assert(node_init(&flightControllerBoard, &bus1, "Flight Controller Board", 0, 1, 0) == SEDS_OK);
+    assert(node_init(&powerBoard, &bus1, "Power Board", 0, 0, 0) == SEDS_OK);
+    assert(node_init(&valve_board, &bus2, "Valve Board", 1, 0, 0) == SEDS_OK);
 
     // 2) Processor threads (one per node)
     pthread_t procA, procB, procC, procD, relay_th;
@@ -270,6 +274,9 @@ int main(void)
     printf("radioBoard.radio_hits=%u, radioBoard.sd_hits=%u, flightControllerBoard.radio_hits=%u, flightControllerBoard.sd_hits=%u, powerBoard.radio_hits=%u, powerBoard.sd_hits=%u valveBoard.radio_hits=%u, valveBoard.sd_hits=%u\n",
            radioBoard.radio_hits,radioBoard.sd_hits, flightControllerBoard.radio_hits, flightControllerBoard.sd_hits,
            powerBoard.radio_hits, powerBoard.sd_hits, valve_board.radio_hits, valve_board.sd_hits);
+    printf("time_sync_hits: radio=%u, flight=%u, power=%u, valve=%u\n",
+           radioBoard.time_sync_hits, flightControllerBoard.time_sync_hits,
+           powerBoard.time_sync_hits, valve_board.time_sync_hits);
 
     // 7) Assertions (may need adjusting depending on how many packets now cross the relay)
     assert(radioBoard.radio_hits == num_endpoint_hits);
@@ -280,6 +287,8 @@ int main(void)
     assert(powerBoard.sd_hits == 0);
     assert(valve_board.radio_hits == num_endpoint_hits);
     assert(valve_board.sd_hits == 0);
+    assert(radioBoard.time_sync_hits > 0);
+    assert(flightControllerBoard.time_sync_hits > 0);
 
     // 8) Cleanup
     node_free(&radioBoard);

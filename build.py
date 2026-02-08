@@ -29,6 +29,7 @@ Options (can be combined where it makes sense):
   test                    Run `cargo test` (and in test mode also validate embedded+python builds).
   embedded                Build for the embedded target (enables `embedded` feature).
   python                  Build with Python bindings (enables `python` feature).
+  timesync                Build with time sync helpers (enables `timesync` feature).
   maturin-build           Run `maturin build` with the .pyi .gitignore hack.
   maturin-develop         Run `maturin develop` with the .pyi .gitignore hack.
   maturin-install         Build wheel and install it with `uv pip install`.
@@ -48,6 +49,7 @@ Examples:
   build.py release
   build.py embedded release target=thumbv7em-none-eabihf
   build.py python
+  build.py timesync
   build.py test
   build.py test release
   build.py maturin-build max_stack_payload=256
@@ -335,6 +337,7 @@ def main(argv: list[str]) -> None:
     tests = False
     build_embedded = False
     build_python = False
+    build_timesync = False
     build_wheel = False
     develop_wheel = False
     release_build = False
@@ -363,6 +366,10 @@ def main(argv: list[str]) -> None:
         elif arg == "python":
             print("Building Python bindings.")
             build_python = True
+
+        elif arg == "timesync":
+            print("Building with time sync helpers.")
+            build_timesync = True
 
         elif arg == "maturin-build":
             print("Building Python wheel.")
@@ -426,9 +433,10 @@ def main(argv: list[str]) -> None:
     # ---- TEST MODE: also validate embedded + python builds ----
     if tests:
         _banner("TEST MODE")
+        feature_suffix = ",timesync" if build_timesync else ""
 
         run_cmd(
-            ["cargo", "test"],
+            ["cargo", "test", "--features", "timesync"],
             env=env,
             repo_root=repo_root,
             title="1/3 cargo test",
@@ -437,7 +445,7 @@ def main(argv: list[str]) -> None:
         _success("Tests passed.")
 
         run_cmd(
-            ["cargo", "build", "--features", "python", *build_mode],
+            ["cargo", "build", "--features", f"python{feature_suffix}", *build_mode],
             env=env,
             repo_root=repo_root,
             title="2/3 cargo build (python feature)",
@@ -463,7 +471,7 @@ def main(argv: list[str]) -> None:
                 "--target",
                 embedded_target,
                 "--features",
-                "embedded",
+                f"embedded{feature_suffix}",
             ],
             env=env,
             repo_root=repo_root,
@@ -487,12 +495,19 @@ def main(argv: list[str]) -> None:
 
     build_args: list[str] = []
     embedded_profile = False
+    feature_suffix = ",timesync" if build_timesync else ""
 
     if build_embedded:
         if not target:
             print("info: no target specified using thumbv7em-none-eabihf")
             target = "thumbv7em-none-eabihf"
-        build_args = ["--no-default-features", "--target", target, "--features", "embedded"]
+        build_args = [
+            "--no-default-features",
+            "--target",
+            target,
+            "--features",
+            f"embedded{feature_suffix}",
+        ]
         if release_build:
             build_mode = ["--profile", "release-embedded"]
             embedded_profile = True
@@ -514,7 +529,7 @@ def main(argv: list[str]) -> None:
         return
 
     if build_python:
-        build_args = ["--features", "python"]
+        build_args = ["--features", f"python{feature_suffix}"]
         run_cmd(
             ["cargo", "build", *build_mode, *build_args],
             env=env,
@@ -552,6 +567,8 @@ def main(argv: list[str]) -> None:
     # default: plain cargo build
     if target:
         build_args = ["--target", target]
+    if build_timesync:
+        build_args.extend(["--features", "timesync"])
 
     run_cmd(
         ["cargo", "build", *build_mode, *build_args],

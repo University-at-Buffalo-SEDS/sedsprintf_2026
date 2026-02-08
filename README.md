@@ -102,6 +102,7 @@ Options:
   test                    Run cargo tests (also validates embedded+python builds).
   embedded                Build for the embedded target (enables embedded feature).
   python                  Build with Python bindings (enables python feature).
+  timesync                Build with time sync helpers (enables timesync feature).
   maturin-build           Run maturin build with the .pyi .gitignore hack.
   maturin-develop         Run maturin develop with the .pyi .gitignore hack.
   maturin-install         Build wheel and install it with uv pip install.
