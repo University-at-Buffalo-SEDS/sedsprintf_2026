@@ -125,6 +125,8 @@ pub mod router;
 pub mod serialize;
 mod small_payload;
 pub mod telemetry_packet;
+#[cfg(feature = "timesync")]
+pub mod timesync;
 // ============================================================================
 //  Schema-derived global constants
 // ============================================================================

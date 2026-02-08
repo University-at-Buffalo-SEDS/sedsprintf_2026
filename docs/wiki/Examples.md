@@ -5,12 +5,14 @@ This page points to runnable examples and suggests a learning path.
 ## C/C++ example
 
 - `c-example-code/`
+- `c-example-code/src/timesync_example.c`
 
 What it demonstrates:
 
 - Building and linking the staticlib.
 - Creating and sending packets.
 - Receiving and dispatching to handlers.
+- Time sync announce/request/response and offset math.
 
 Suggested first steps:
 
@@ -21,12 +23,14 @@ Suggested first steps:
 ## Python example
 
 - `python-example/`
+- `python-example/timesync_example.py`
 
 What it demonstrates:
 
 - Installing the Python package.
 - Logging packets and decoding values.
 - Using the generated enums.
+- Time sync announce/request/response and offset math.
 
 Suggested first steps:
 
@@ -37,7 +41,18 @@ Suggested first steps:
 ## Rust example (minimal)
 
 If you want a minimal Rust example, start with `docs/wiki/Usage-Rust.md` and build a small router with one endpoint
-handler.
+handler. For a runnable example, see:
+
+- `rust-example-code/timesync_example.rs`
+- `rust-example-code/relay_example.rs`
+- `rust-example-code/reliable_example.rs`
+- `rust-example-code/queue_timeout_example.rs`
+- `rust-example-code/multinode_sim_example.rs`
+
+## RTOS time sync examples
+
+- `rtos-example-code/freertos_timesync.c`
+- `rtos-example-code/threadx_timesync.c`
 
 Recommended structure:
 

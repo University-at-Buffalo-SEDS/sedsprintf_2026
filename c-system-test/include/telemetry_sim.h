@@ -33,10 +33,12 @@ struct SimNode
     int has_radio;
 
     int has_sdcard;
+    int is_time_source;
     uint32_t bus_side_id;
     // --- NEW: simple stats for tests ---
     unsigned radio_hits; // times RADIO handler ran
     unsigned sd_hits; // times SD handler ran
+    unsigned time_sync_hits; // times TIME_SYNC handler ran
 };
 
 // Bus API unchanged...
@@ -49,7 +51,7 @@ size_t bus_register(SimBus * bus, SimNode * n);
 SedsResult bus_send(SimBus * bus, const SimNode * from, const uint8_t * bytes, size_t len);
 
 // Node API unchanged...
-SedsResult node_init(SimNode * n, SimBus * bus, const char * name, int radio, int sdcard);
+SedsResult node_init(SimNode * n, SimBus * bus, const char * name, int radio, int sdcard, int time_source);
 
 void node_free(SimNode * n);
 
@@ -66,6 +68,7 @@ SedsResult node_log(
 SedsResult radio_handler_serial(const uint8_t * bytes, size_t len, void * user);
 
 SedsResult sdcard_handler(const SedsPacketView * pkt, void * user);
+SedsResult timesync_handler(const SedsPacketView * pkt, void * user);
 
 uint64_t host_now_ms(const void * user);
 

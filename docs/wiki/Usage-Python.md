@@ -55,6 +55,7 @@ router.process_all_queues()
 ```
 
 See `python-example/main.py` for a more complete multi-process example.
+Time sync is demonstrated in `python-example/timesync_example.py`.
 
 ## Logging API
 

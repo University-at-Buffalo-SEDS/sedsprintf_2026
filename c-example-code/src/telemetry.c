@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <time.h>
 #include <sys/time.h>
+#include <string.h>
 
 /* ---------------- Monotonic ms provider ---------------- */
 static uint64_t host_now_ms(void * user)
@@ -71,6 +72,51 @@ SedsResult on_radio_packet(const SedsPacketView * pkt, void * user)
     return SEDS_OK;
 }
 
+static uint64_t read_u64_le(const uint8_t * bytes)
+{
+    uint64_t v = 0;
+    memcpy(&v, bytes, sizeof(v));
+    return v;
+}
+
+SedsResult on_time_sync_packet(const SedsPacketView * pkt, void * user)
+{
+    (void) user;
+    if (!pkt || !pkt->payload || pkt->payload_len == 0) return SEDS_ERR;
+
+    if (pkt->ty == SEDS_DT_TIME_SYNC_ANNOUNCE && pkt->payload_len >= 16)
+    {
+        const uint64_t priority = read_u64_le(pkt->payload);
+        const uint64_t t_ms = read_u64_le(pkt->payload + 8);
+        printf("[TIME_SYNC] announce priority=%llu time_ms=%llu\n",
+               (unsigned long long) priority, (unsigned long long) t_ms);
+        return SEDS_OK;
+    }
+    if (pkt->ty == SEDS_DT_TIME_SYNC_REQUEST && pkt->payload_len >= 16)
+    {
+        const uint64_t seq = read_u64_le(pkt->payload);
+        const uint64_t t1 = read_u64_le(pkt->payload + 8);
+        printf("[TIME_SYNC] request seq=%llu t1=%llu\n",
+               (unsigned long long) seq, (unsigned long long) t1);
+        return SEDS_OK;
+    }
+    if (pkt->ty == SEDS_DT_TIME_SYNC_RESPONSE && pkt->payload_len >= 32)
+    {
+        const uint64_t seq = read_u64_le(pkt->payload);
+        const uint64_t t1 = read_u64_le(pkt->payload + 8);
+        const uint64_t t2 = read_u64_le(pkt->payload + 16);
+        const uint64_t t3 = read_u64_le(pkt->payload + 24);
+        printf("[TIME_SYNC] response seq=%llu t1=%llu t2=%llu t3=%llu\n",
+               (unsigned long long) seq,
+               (unsigned long long) t1,
+               (unsigned long long) t2,
+               (unsigned long long) t3);
+        return SEDS_OK;
+    }
+
+    return SEDS_OK;
+}
+
 /* ---------------- Router init (idempotent + locked) ---------------- */
 SedsResult init_telemetry_router(void)
 {
@@ -82,6 +128,7 @@ SedsResult init_telemetry_router(void)
 
     const SedsLocalEndpointDesc locals[] = {
         {.endpoint = SEDS_EP_RADIO, .packet_handler = on_radio_packet, .user = NULL},
+        {.endpoint = SEDS_EP_TIME_SYNC, .packet_handler = on_time_sync_packet, .user = NULL},
     };
 
     SedsRouter * r = seds_router_new(
