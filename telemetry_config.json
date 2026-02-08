@@ -47,12 +47,6 @@
       "name": "ACTUATOR_BOARD",
       "doc": "Actuator board endpoint",
       "broadcast_mode": "Default"
-    },
-    {
-      "rust": "GpsTime",
-      "name": "GPS_TIME",
-      "doc": "GPS time endpoint",
-      "broadcast_mode": "Always"
     }
   ],
   "types": [
@@ -372,22 +366,6 @@
       "endpoints": [
         "GroundStation",
         "SdCard"
-      ]
-    },
-    {
-      "rust": "GpsTime",
-      "name": "GPS_TIME",
-      "doc": "GPS Time",
-      "reliable": false,
-      "reliable_mode": "None",
-      "class": "Data",
-      "element": {
-        "kind": "Static",
-        "data_type": "UInt64",
-        "count": 1
-      },
-      "endpoints": [
-        "GpsTime"
       ]
     }
   ]
