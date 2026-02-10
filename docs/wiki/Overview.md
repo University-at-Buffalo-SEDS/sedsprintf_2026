@@ -23,7 +23,7 @@ through their handlers; side-aware RX functions are only needed when you explici
 ## The core concepts (in plain language)
 
 - **Schema**: A shared list of endpoints (where data goes) and types (what data looks like). It lives in
-  `telemetry_config.json`.
+  telemetry_config.json ([GitHub](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/telemetry_config.json), [GitLab](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/-/blob/main/telemetry_config.json)).
 - **Telemetry packet**: One message, with a type, destination endpoints, sender ID, timestamp, and payload bytes.
 - **Router**: The switchboard. It receives packets, calls local handlers, and optionally forwards packets to other
   nodes.
@@ -74,6 +74,7 @@ log(GPS_DATA)  ->  serialize -> bytes -> send -> bytes -> rx_serialized()
 
 ## What to read next
 
-- If you want the concepts explained without code: docs/wiki/Concepts.md
-- If you want integration steps: docs/wiki/Build-and-Configure.md
-- If you want implementation details: docs/wiki/technical/Architecture.md
+- If you want the concepts explained without code: [Concepts](Concepts)
+- If you want integration steps: [Build-and-Configure](Build-and-Configure)
+- If you need time sync details: [Time-Sync](Time-Sync)
+- If you want implementation details: [technical/Architecture](technical/Architecture)

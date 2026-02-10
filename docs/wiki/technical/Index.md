@@ -5,19 +5,19 @@ internal behavior.
 
 ## Core architecture
 
-- docs/wiki/technical/Architecture.md
-- docs/wiki/technical/Telemetry-Schema.md
+- [technical/Architecture](technical/Architecture)
+- [technical/Telemetry-Schema](technical/Telemetry-Schema)
 
 ## Packet format and processing
 
-- docs/wiki/technical/Wire-Format.md
-- docs/wiki/technical/TelemetryPacket-Details.md
+- [technical/Wire-Format](technical/Wire-Format)
+- [technical/TelemetryPacket-Details](technical/TelemetryPacket-Details)
 
 ## Routing and queues
 
-- docs/wiki/technical/Router-Details.md
-- docs/wiki/technical/Queues-and-Memory.md
+- [technical/Router-Details](technical/Router-Details)
+- [technical/Queues-and-Memory](technical/Queues-and-Memory)
 
 ## Bindings and interop
 
-- docs/wiki/technical/Bindings-and-FFI.md
+- [technical/Bindings-and-FFI](technical/Bindings-and-FFI)
