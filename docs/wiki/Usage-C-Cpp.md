@@ -1,6 +1,6 @@
 # C/C++ Usage
 
-The C API is exposed via C-Headers/sedsprintf.h ([GitHub](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/C-Headers/sedsprintf.h), [GitLab](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/-/blob/main/C-Headers/sedsprintf.h)) and a static library built by Cargo.
+The C API is exposed via C-Headers/sedsprintf.h ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/C-Headers/sedsprintf.h)) and a static library built by Cargo.
 
 ## CMake integration (recommended)
 
@@ -84,11 +84,9 @@ int main(void)
 ```
 
 See c-example-code/
-([GitHub](https://github.com/Rylan-Meilutis/sedsprintf_rs/tree/main/c-example-code),
-[GitLab](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/-/tree/main/c-example-code))
+([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/tree/main/c-example-code))
 for a more complete example. Time sync is demonstrated in c-example-code/src/timesync_example.c
-([GitHub](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/c-example-code/src/timesync_example.c),
-[GitLab](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/-/blob/main/c-example-code/src/timesync_example.c)).
+([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/c-example-code/src/timesync_example.c)).
 See [Time-Sync](Time-Sync) for the time sync packet flow and roles.
 
 ## Sending and receiving

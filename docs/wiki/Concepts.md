@@ -80,6 +80,20 @@ ACKs, retransmits, and optional ordering to deliver messages more like TCP.
 
 This is useful on lossy links, but you can disable it for transports that are already reliable.
 
+## Time sync
+
+Time sync is an optional feature that adds built-in packets and helpers for clock alignment between devices. A time
+source announces itself, and consumers exchange request/response timestamps to estimate offset and delay.
+
+If you need the details, see [Time-Sync](Time-Sync).
+
+## Reliability
+
+Reliability is opt-in and only applies to types marked reliable in the schema. When enabled on a link, the router uses
+ACKs, retransmits, and optional ordering to deliver messages more like TCP.
+
+This is useful on lossy links, but you can disable it for transports that are already reliable.
+
 ## Dedupe
 
 To prevent loops (especially in relay mode), the system uses a packet ID hash. If it sees the same packet again, it

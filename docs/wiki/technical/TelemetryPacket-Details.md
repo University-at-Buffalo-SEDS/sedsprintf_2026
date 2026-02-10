@@ -1,6 +1,6 @@
 # TelemetryPacket Details (Technical)
 
-This page documents `TelemetryPacket` in src/telemetry_packet.rs ([GitHub](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/telemetry_packet.rs), [GitLab](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/-/blob/main/src/telemetry_packet.rs)) and how payload validation works.
+This page documents `TelemetryPacket` in src/telemetry_packet.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/telemetry_packet.rs)) and how payload validation works.
 
 ## Structure
 

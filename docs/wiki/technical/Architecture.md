@@ -13,27 +13,27 @@ look the way they do. It assumes no prior knowledge of the codebase.
 
 ## Module map (what lives where)
 
-- src/config.rs ([GitHub](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/config.rs), [GitLab](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/-/blob/main/src/config.rs)): compile-time configuration values plus generated `DataType`/`DataEndpoint` enums.
-- src/lib.rs ([GitHub](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/lib.rs), [GitLab](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/-/blob/main/src/lib.rs)): schema metadata (`MessageMeta`, `MessageElement`, `MessageDataType`, `MessageClass`).
-- src/telemetry_packet.rs ([GitHub](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/telemetry_packet.rs), [GitLab](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/-/blob/main/src/telemetry_packet.rs)): `TelemetryPacket` validation, formatting, and packet IDs.
-- src/small_payload.rs ([GitHub](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/small_payload.rs), [GitLab](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/-/blob/main/src/small_payload.rs)): inline-optimized payload storage (`SmallPayload`).
-- src/serialize.rs ([GitHub](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/serialize.rs), [GitLab](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/-/blob/main/src/serialize.rs)): compact wire format, ULEB128 helpers, envelope peek, packet IDs from wire.
-- src/router.rs ([GitHub](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/router.rs), [GitLab](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/-/blob/main/src/router.rs)): router core, queues, endpoint handlers, side-based routing.
-- src/relay.rs ([GitHub](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/relay.rs), [GitLab](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/-/blob/main/src/relay.rs)): schema-agnostic fanout relay between sides.
-- src/queue.rs ([GitHub](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/queue.rs), [GitLab](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/-/blob/main/src/queue.rs)): bounded deque used by router and relay.
-- src/c_api.rs ([GitHub](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/c_api.rs), [GitLab](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/-/blob/main/src/c_api.rs)) and src/python_api.rs ([GitHub](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/python_api.rs), [GitLab](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/-/blob/main/src/python_api.rs)): FFI bindings (C ABI and pyo3).
+- src/config.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/config.rs)): compile-time configuration values plus generated `DataType`/`DataEndpoint` enums.
+- src/lib.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/lib.rs)): schema metadata (`MessageMeta`, `MessageElement`, `MessageDataType`, `MessageClass`).
+- src/telemetry_packet.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/telemetry_packet.rs)): `TelemetryPacket` validation, formatting, and packet IDs.
+- src/small_payload.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/small_payload.rs)): inline-optimized payload storage (`SmallPayload`).
+- src/serialize.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/serialize.rs)): compact wire format, ULEB128 helpers, envelope peek, packet IDs from wire.
+- src/router.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/router.rs)): router core, queues, endpoint handlers, side-based routing.
+- src/relay.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/relay.rs)): schema-agnostic fanout relay between sides.
+- src/queue.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/queue.rs)): bounded deque used by router and relay.
+- src/c_api.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/c_api.rs)) and src/python_api.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/python_api.rs)): FFI bindings (C ABI and pyo3).
 
 ## Schema and metadata pipeline
 
-The schema is defined in telemetry_config.json ([GitHub](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/telemetry_config.json), [GitLab](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/-/blob/main/telemetry_config.json)) (plus built-in `TelemetryError` endpoint/type). At build time:
+The schema is defined in telemetry_config.json ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/telemetry_config.json)) (plus built-in `TelemetryError` endpoint/type). At build time:
 
-1) build.rs ([GitHub](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.rs), [GitLab](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/-/blob/main/build.rs)) reads the schema to generate C headers and Python `.pyi` stubs.
-2) `define_telemetry_schema!` in src/config.rs ([GitHub](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/config.rs), [GitLab](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/-/blob/main/src/config.rs)) expands into Rust enums and metadata tables.
+1) build.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.rs)) reads the schema to generate C headers and Python `.pyi` stubs.
+2) `define_telemetry_schema!` in src/config.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/config.rs)) expands into Rust enums and metadata tables.
 
 Core schema types:
 
-- `DataEndpoint`: enum generated from the `endpoints` list in telemetry_config.json ([GitHub](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/telemetry_config.json), [GitLab](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/-/blob/main/telemetry_config.json)) plus built-ins.
-- `DataType`: enum generated from the `types` list in telemetry_config.json ([GitHub](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/telemetry_config.json), [GitLab](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/-/blob/main/telemetry_config.json)) plus built-ins.
+- `DataEndpoint`: enum generated from the `endpoints` list in telemetry_config.json ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/telemetry_config.json)) plus built-ins.
+- `DataType`: enum generated from the `types` list in telemetry_config.json ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/telemetry_config.json)) plus built-ins.
 - `MessageMeta`: per-`DataType` metadata (name, element layout, allowed endpoints).
 - `MessageElement`: `Static(count, MessageDataType, MessageClass)` or `Dynamic(MessageDataType, MessageClass)`.
 - `MessageDataType`: primitive element type (Float32, UInt16, String, Binary, etc.).
@@ -88,7 +88,7 @@ Why this matters:
 
 ## Serialization and wire format
 
-The compact v2 wire format is implemented in src/serialize.rs ([GitHub](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/serialize.rs), [GitLab](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/-/blob/main/src/serialize.rs)). A packet is encoded as:
+The compact v2 wire format is implemented in src/serialize.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/serialize.rs)). A packet is encoded as:
 
 ```
 [FLAGS: u8]

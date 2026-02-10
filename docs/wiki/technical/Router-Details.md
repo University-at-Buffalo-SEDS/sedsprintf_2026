@@ -1,6 +1,6 @@
 # Router Details (Technical)
 
-This page dives into the Router internals in src/router.rs ([GitHub](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/router.rs), [GitLab](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/-/blob/main/src/router.rs)) and how routing decisions are made.
+This page dives into the Router internals in src/router.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/router.rs)) and how routing decisions are made.
 
 ## Router configuration
 
