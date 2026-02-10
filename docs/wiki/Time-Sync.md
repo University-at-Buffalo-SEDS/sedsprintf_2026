@@ -5,7 +5,7 @@ This page explains the built-in time sync support that ships with the `timesync`
 ## Enabling time sync
 
 - Enable the `timesync` Cargo feature.
-- Python builds in this repo enable it by default (pyproject.toml ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/pyproject.toml))).
+- Python builds in this repo enable it by default (pyproject.toml ([source](/rylan-meilutis/sedsprintf_rs/blob/main/pyproject.toml))).
 
 When enabled, the build adds the `TIME_SYNC` endpoint (broadcast mode `Always`) plus built-in
 time sync packet types in code.
@@ -50,8 +50,8 @@ Rust helpers live in `sedsprintf_rs::timesync`:
 
 Example implementations:
 
-- rust-example-code/timesync_example.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rust-example-code/timesync_example.rs))
-- c-example-code/src/timesync_example.c ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/c-example-code/src/timesync_example.c))
-- python-example/timesync_example.py ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/python-example/timesync_example.py))
-- rtos-example-code/freertos_timesync.c ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rtos-example-code/freertos_timesync.c))
-- rtos-example-code/threadx_timesync.c ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rtos-example-code/threadx_timesync.c))
+- rust-example-code/timesync_example.rs ([source](/rylan-meilutis/sedsprintf_rs/blob/main/rust-example-code/timesync_example.rs))
+- c-example-code/src/timesync_example.c ([source](/rylan-meilutis/sedsprintf_rs/blob/main/c-example-code/src/timesync_example.c))
+- python-example/timesync_example.py ([source](/rylan-meilutis/sedsprintf_rs/blob/main/python-example/timesync_example.py))
+- rtos-example-code/freertos_timesync.c ([source](/rylan-meilutis/sedsprintf_rs/blob/main/rtos-example-code/freertos_timesync.c))
+- rtos-example-code/threadx_timesync.c ([source](/rylan-meilutis/sedsprintf_rs/blob/main/rtos-example-code/threadx_timesync.c))

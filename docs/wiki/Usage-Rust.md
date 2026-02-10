@@ -65,7 +65,7 @@ fn main() -> TelemetryResult<()> {
 
 ## Reliable delivery (opt-in)
 
-If a `DataType` is marked `reliable: true` in telemetry_config.json ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/telemetry_config.json)), the router can provide
+If a `DataType` is marked `reliable: true` in telemetry_config.json ([source](/rylan-meilutis/sedsprintf_rs/blob/main/telemetry_config.json)), the router can provide
 ordered delivery and retransmits on **serialized sides**. ACK frames are sent back on the
 ingress side automatically via the side's serialized TX handler.
 
@@ -113,7 +113,7 @@ Routers use **named sides** (UART/CAN/RADIO/etc.) instead of LinkId. Register si
 
 When the `timesync` feature is enabled, the schema adds time sync packets and the crate exposes
 helpers in `sedsprintf_rs::timesync`. See rust-example-code/timesync_example.rs
-([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rust-example-code/timesync_example.rs))
+([source](/rylan-meilutis/sedsprintf_rs/blob/main/rust-example-code/timesync_example.rs))
 for a full example.
 For protocol details and role selection, see [Time-Sync](Time-Sync).
 
