@@ -1,6 +1,6 @@
 # Wire Format (Technical)
 
-This page documents the compact v2 wire format used by src/serialize.rs ([source](/rylan-meilutis/sedsprintf_rs/blob/main/src/serialize.rs)).
+This page documents the compact v2 wire format used by src/serialize.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/src/serialize.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/serialize.rs)).
 
 ## Goals
 
@@ -41,7 +41,7 @@ When a field is compressed, the logical length is still transmitted so the recei
 
 ## Reliable header
 
-For data types configured with `reliable: true` in telemetry_config.json ([source](/rylan-meilutis/sedsprintf_rs/blob/main/telemetry_config.json)), the wire format includes a fixed 9‑byte
+For data types configured with `reliable: true` in telemetry_config.json ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/telemetry_config.json) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/telemetry_config.json)), the wire format includes a fixed 9‑byte
 reliable header between the sender bytes and payload:
 
 - `REL_FLAGS`:

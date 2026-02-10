@@ -2,13 +2,13 @@
 
 ## Header or enums not updating
 
-- Run a build that triggers build.rs ([source](/rylan-meilutis/sedsprintf_rs/blob/main/build.rs)) (for example `cargo build` or `./build.py release`).
-- Ensure telemetry_config.json ([source](/rylan-meilutis/sedsprintf_rs/blob/main/telemetry_config.json)) is valid JSON.
+- Run a build that triggers build.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/build.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.rs)) (for example `cargo build` or `./build.py release`).
+- Ensure telemetry_config.json ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/telemetry_config.json) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/telemetry_config.json)) is valid JSON.
 - If you override the schema path, set `SEDSPRINTF_RS_CONFIG_RS`.
 
 ## Schema mismatch between systems
 
-All nodes must use the exact same telemetry_config.json ([source](/rylan-meilutis/sedsprintf_rs/blob/main/telemetry_config.json)) order and definitions. Mismatches cause decode errors or
+All nodes must use the exact same telemetry_config.json ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/telemetry_config.json) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/telemetry_config.json)) order and definitions. Mismatches cause decode errors or
 undefined behavior.
 
 Symptoms:
@@ -65,6 +65,6 @@ Bare-metal targets must provide `telemetryMalloc`, `telemetryFree`, and `seds_er
 
 ## Python import fails
 
-- Ensure you built the extension: `./build.py python` or `maturin develop`. (build.py: [source](/rylan-meilutis/sedsprintf_rs/blob/main/build.py)) (build.py: [source](/rylan-meilutis/sedsprintf_rs/blob/main/build.py))
+- Ensure you built the extension: `./build.py python` or `maturin develop`. (build.py: [source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/build.py) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.py)) (build.py: [source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/build.py) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.py))
 - Verify you are using the same Python interpreter/venv used for the build.
 - If the module loads but symbols are missing, rebuild after schema changes.

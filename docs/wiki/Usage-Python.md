@@ -4,7 +4,7 @@ Python bindings are built with pyo3 and maturin. The Python module name is `seds
 
 ## Build and install
 
-Option 1: use build.py ([source](/rylan-meilutis/sedsprintf_rs/blob/main/build.py)) (recommended in this repo)
+Option 1: use build.py ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/build.py) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.py)) (recommended in this repo)
 
 ```
 ./build.py python
@@ -52,10 +52,10 @@ router.process_all_queues()
 ```
 
 See python-example/main.py
-([source](/rylan-meilutis/sedsprintf_rs/blob/main/python-example/main.py))
+([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/python-example/main.py) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/python-example/main.py))
 for a more complete multi-process example.
 Time sync is demonstrated in python-example/timesync_example.py
-([source](/rylan-meilutis/sedsprintf_rs/blob/main/python-example/timesync_example.py)).
+([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/python-example/timesync_example.py) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/python-example/timesync_example.py)).
 See [Time-Sync](Time-Sync) for the time sync packet flow and roles.
 
 ## Logging API
