@@ -90,10 +90,13 @@ def find_schema_json_from_config_rs(config_rs: Path, crate_root: Path) -> Option
     caps = list(rx.finditer(text))
     if not caps:
         return None
-    if len(caps) > 1:
-        raise RuntimeError(f"Multiple define_telemetry_schema!(path=...) found in {config_rs}")
-    rel = caps[0].group(1)
-    return (crate_root / rel).resolve()
+    rel_paths = [cap.group(1) for cap in caps]
+    first = rel_paths[0]
+    if any(p != first for p in rel_paths[1:]):
+        raise RuntimeError(
+            f"Multiple define_telemetry_schema!(path=...) entries found in {config_rs} with different paths"
+        )
+    return (crate_root / first).resolve()
 
 
 def default_blank_config() -> Dict[str, Any]:
