@@ -77,12 +77,25 @@ def _banner(title: str) -> None:
     print("-" * 60)
 
 
+def _supports_emoji() -> bool:
+    try:
+        "✅".encode(sys.stdout.encoding or "utf-8")
+    except Exception:
+        return False
+    return True
+
+
+_EMOJI_OK = _supports_emoji()
+
+
 def _success(msg: str) -> None:
-    print(f"✅ {msg}")
+    prefix = "✅" if _EMOJI_OK else "OK"
+    print(f"{prefix} {msg}")
 
 
 def _fail(msg: str) -> None:
-    print(f"❌ {msg}", file=sys.stderr)
+    prefix = "❌" if _EMOJI_OK else "ERROR"
+    print(f"{prefix} {msg}", file=sys.stderr)
 
 
 def output_hint_for_cmd(
