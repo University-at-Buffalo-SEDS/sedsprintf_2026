@@ -77,10 +77,11 @@ def find_project_root(start: Path) -> Path:
 
 
 def find_schema_json_from_config_rs(config_rs: Path, crate_root: Path) -> Optional[Path]:
+    script_root = Path(__file__).resolve().parent
     raw = os.environ.get("SEDSPRINTF_RS_SCHEMA_PATH", "").strip()
     if raw:
         p = Path(raw)
-        return (p if p.is_absolute() else (crate_root / p)).resolve()
+        return (p if p.is_absolute() else (script_root / p)).resolve()
     try:
         text = config_rs.read_text(encoding="utf-8")
     except Exception:
@@ -96,7 +97,7 @@ def find_schema_json_from_config_rs(config_rs: Path, crate_root: Path) -> Option
         raise RuntimeError(
             f"Multiple define_telemetry_schema!(path=...) entries found in {config_rs} with different paths"
         )
-    return (crate_root / first).resolve()
+    return (script_root / first).resolve()
 
 
 def default_blank_config() -> Dict[str, Any]:
@@ -1243,7 +1244,7 @@ class TelemetryConfigEditor(tk.Tk):
 
 
 def main():
-    start = Path.cwd()
+    start = Path(__file__).resolve().parent
     crate_root = find_project_root(start)
 
     config_rs = crate_root / "src" / "config.rs"
