@@ -6,14 +6,14 @@ This is the primary API and the source of truth for behavior.
 
 If this repo is used as a submodule or subtree:
 
-```
+```toml
 # Cargo.toml
 sedsprintf_rs = { path = "path/to/sedsprintf_rs" }
 ```
 
 For a git dependency:
 
-```
+```toml
 # Cargo.toml
 sedsprintf_rs = { git = "https://github.com/Rylan-Meilutis/sedsprintf_rs.git", branch = "main" }
 ```
@@ -28,7 +28,7 @@ Common patterns:
 
 ## Minimal router example
 
-```
+```rust
 use sedsprintf_rs::router::{EndpointHandler, Router, RouterConfig, RouterMode};
 use sedsprintf_rs::{DataEndpoint, DataType, TelemetryResult};
 
@@ -65,11 +65,11 @@ fn main() -> TelemetryResult<()> {
 
 ## Reliable delivery (opt-in)
 
-If a `DataType` is marked `reliable: true` in `telemetry_config.json`, the router can provide
+If a `DataType` is marked `reliable: true` in telemetry_config.json ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/telemetry_config.json) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/telemetry_config.json)), the router can provide
 ordered delivery and retransmits on **serialized sides**. ACK frames are sent back on the
 ingress side automatically via the side's serialized TX handler.
 
-```
+```rust
 let router = Router::new(RouterMode::Sink, cfg, Box::new(now_ms));
 router.add_side_serialized_with_options(
     "RADIO",
@@ -81,7 +81,7 @@ router.add_side_serialized_with_options(
 To disable reliable delivery for a router instance (e.g., when your transport is TCP),
 configure the router config:
 
-```
+```rust
 let cfg = RouterConfig::new([handler]).with_reliable_enabled(false);
 let router = Router::new(RouterMode::Sink, cfg, Box::new(now_ms));
 router.add_side_serialized("RADIO", tx);
@@ -112,9 +112,12 @@ Routers use **named sides** (UART/CAN/RADIO/etc.) instead of LinkId. Register si
 ## Time sync (feature: timesync)
 
 When the `timesync` feature is enabled, the schema adds time sync packets and the crate exposes
-helpers in `sedsprintf_rs::timesync`. See `rust-example-code/timesync_example.rs` for a full example.
+helpers in `sedsprintf_rs::timesync`. See rust-example-code/timesync_example.rs
+([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/rust-example-code/timesync_example.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rust-example-code/timesync_example.rs))
+for a full example.
+For protocol details and role selection, see [Time-Sync](Time-Sync).
 
-```
+```rust
 use sedsprintf_rs::timesync::{
     TimeSyncConfig, TimeSyncRole, TimeSyncTracker, compute_offset_delay, send_timesync_request,
 };
