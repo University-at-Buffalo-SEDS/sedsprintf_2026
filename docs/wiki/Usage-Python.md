@@ -4,7 +4,9 @@ Python bindings are built with pyo3 and maturin. The Python module name is `seds
 
 ## Build and install
 
-Option 1: use build.py ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/build.py) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.py)) (recommended in this repo)
+Option 1: use
+build.py ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/build.py) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.py)) (
+recommended in this repo)
 
 ```
 ./build.py python

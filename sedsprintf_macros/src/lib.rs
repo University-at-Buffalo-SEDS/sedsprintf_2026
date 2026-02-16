@@ -521,8 +521,8 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
                 Span::call_site(),
                 "telemetry_config.json: TimeSync types are built-in and must not be defined in the schema",
             )
-            .to_compile_error()
-            .into();
+                .to_compile_error()
+                .into();
         }
     }
     for ep in &cfg.endpoints {
@@ -539,8 +539,8 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
                 Span::call_site(),
                 "telemetry_config.json: TimeSync endpoint is built-in and must not be defined in the schema",
             )
-            .to_compile_error()
-            .into();
+                .to_compile_error()
+                .into();
         }
     }
 

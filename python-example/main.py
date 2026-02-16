@@ -49,8 +49,10 @@ def _on_packet(pkt: seds.Packet):
 def _on_serialized(data: bytes):
     print(f"[RX Serialized] {len(data)} bytes: {data.hex()}")
 
+
 _ROUTER = None
 _PENDING_TIMESYNC = []
+
 
 def _on_timesync(pkt: seds.Packet):
     global _PENDING_TIMESYNC

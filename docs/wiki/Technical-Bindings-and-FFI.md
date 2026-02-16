@@ -4,8 +4,14 @@ This page describes how the Rust core is exposed to C/C++ and Python.
 
 ## C/C++ binding
 
-- src/c_api.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/src/c_api.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/c_api.rs)) defines the C ABI surface.
-- build.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/build.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.rs)) generates C-Headers/sedsprintf.h ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/C-Headers/sedsprintf.h) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/C-Headers/sedsprintf.h)) from the schema.
+-
+src/c_api.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/src/c_api.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/c_api.rs))
+defines the C ABI surface.
+-
+build.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/build.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.rs))
+generates
+C-Headers/sedsprintf.h ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/C-Headers/sedsprintf.h) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/C-Headers/sedsprintf.h))
+from the schema.
 - The C header exposes `DataType` and `DataEndpoint` enums with the same discriminants as Rust.
 
 Typical usage patterns:
@@ -18,8 +24,14 @@ Embedded builds provide allocator and error hooks so the core can run without st
 
 ## Python binding
 
-- src/python_api.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/src/python_api.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/python_api.rs)) defines the pyo3 module.
-- build.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/build.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.rs)) generates python-files/sedsprintf_rs/sedsprintf_rs.pyi ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/python-files/sedsprintf_rs/sedsprintf_rs.pyi) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/python-files/sedsprintf_rs/sedsprintf_rs.pyi)) for type hints.
+-
+src/python_api.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/src/python_api.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/python_api.rs))
+defines the pyo3 module.
+-
+build.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/build.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.rs))
+generates
+python-files/sedsprintf_rs/sedsprintf_rs.pyi ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/python-files/sedsprintf_rs/sedsprintf_rs.pyi) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/python-files/sedsprintf_rs/sedsprintf_rs.pyi))
+for type hints.
 - The Python package mirrors the Rust enums and exposes router/packet helpers.
 
 Typical usage patterns:
@@ -30,7 +42,9 @@ Typical usage patterns:
 
 ## Schema consistency
 
-Both bindings are generated from telemetry_config.json ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/telemetry_config.json) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/telemetry_config.json)), plus built-in `TelemetryError` endpoint/type (which must not
+Both bindings are generated from
+telemetry_config.json ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/telemetry_config.json) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/telemetry_config.json)),
+plus built-in `TelemetryError` endpoint/type (which must not
 appear in the JSON). Any schema change requires regenerating and redeploying the bindings.
 
 ## Ownership and memory
