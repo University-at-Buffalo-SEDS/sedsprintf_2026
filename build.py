@@ -98,6 +98,10 @@ def _fail(msg: str) -> None:
     print(f"{prefix} {msg}", file=sys.stderr)
 
 
+def _format_cmd(cmd: list[str]) -> str:
+    return " ".join(cmd)
+
+
 def output_hint_for_cmd(
         cmd: list[str],
         *,
@@ -198,6 +202,14 @@ def run_cmd(
     t0 = time.monotonic()
     try:
         subprocess.run(cmd, check=True, env=env)
+    except FileNotFoundError as e:
+        _fail(f"Command not found: {e.filename}")
+        _fail(f"While running: {_format_cmd(cmd)}")
+        raise SystemExit(127) from e
+    except PermissionError as e:
+        _fail(f"Permission denied when running command: {e}")
+        _fail(f"While running: {_format_cmd(cmd)}")
+        raise SystemExit(1) from e
     except subprocess.CalledProcessError as e:
         dt = time.monotonic() - t0
         _fail(f"FAILED ({_fmt_secs(dt)}): {' '.join(cmd)}")
@@ -232,7 +244,17 @@ def ensure_rust_target_installed(target: str) -> None:
         return
 
     _banner(f"Installing Rust target: {target}")
-    subprocess.run(["rustup", "target", "add", target], check=True)
+    try:
+        subprocess.run(["rustup", "target", "add", target], check=True)
+    except FileNotFoundError as e:
+        raise SystemExit(
+            "Required tool `rustup` was not found while trying to install target "
+            f"`{target}`. Install Rust with rustup and try again."
+        ) from e
+    except subprocess.CalledProcessError as e:
+        raise SystemExit(
+            f"Failed to install Rust target `{target}` (exit code {e.returncode})."
+        ) from e
     _success(f"Installed Rust target `{target}`.")
 
 
@@ -295,6 +317,14 @@ def run_with_pyi_unignored(
 
         print("Running:", " ".join(cmd))
         subprocess.run(cmd, check=True, env=env)
+    except FileNotFoundError as e:
+        _fail(f"Command not found: {e.filename}")
+        _fail(f"While running: {_format_cmd(cmd)}")
+        raise SystemExit(127) from e
+    except PermissionError as e:
+        _fail(f"Permission denied when running command: {e}")
+        _fail(f"While running: {_format_cmd(cmd)}")
+        raise SystemExit(1) from e
 
     except subprocess.CalledProcessError as e:
         dt = time.monotonic() - t0
@@ -605,3 +635,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n\nexiting...")
         exit(0)
+    except Exception as e:
+        _fail(f"Unexpected error: {e}")
+        _fail("Run `./build.py --help` for usage and available options.")
+        raise SystemExit(1) from e

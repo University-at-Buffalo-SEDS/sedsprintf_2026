@@ -1,11 +1,11 @@
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use crate::{
-    message_meta, telemetry_packet::TelemetryPacket, DataEndpoint, DataType, TelemetryError,
-    TelemetryResult, config::DEVICE_IDENTIFIER,
-};
 use crate::router::{encode_slice_le, Router};
+use crate::{
+    config::DEVICE_IDENTIFIER, message_meta, telemetry_packet::TelemetryPacket, DataEndpoint, DataType,
+    TelemetryError, TelemetryResult,
+};
 
 pub const TIMESYNC_ANNOUNCE_WORDS: usize = 2;
 pub const TIMESYNC_REQUEST_WORDS: usize = 2;

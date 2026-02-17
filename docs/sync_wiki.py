@@ -7,15 +7,60 @@ Requires the wiki repos to exist (create the first wiki page in the UI first).
 import argparse
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 
+def _cmd_text(cmd: list[str]) -> str:
+    return " ".join(cmd)
+
+
+def _hint_for_cmd(cmd: list[str], returncode: int) -> str | None:
+    if not cmd or cmd[0] != "git":
+        return None
+    if cmd[:2] == ["git", "clone"]:
+        return "Check the repo URL, network access, and credentials/token permissions."
+    if cmd[:2] == ["git", "fetch"]:
+        return "Verify remote access and auth. Try `git remote -v` inside the repo."
+    if cmd[:2] == ["git", "pull"]:
+        return "Local branch may have diverged. Resolve locally, then retry with a clean fast-forward."
+    if cmd[:2] == ["git", "push"]:
+        return "Verify push permissions and authentication for the wiki repository."
+    if cmd[:2] == ["git", "commit"]:
+        return "Configure `git config user.name` and `git config user.email` if commit identity is missing."
+    return f"Run `{_cmd_text(cmd)}` manually for full git output."
+
+
 def run(cmd, cwd=None):
-    subprocess.run(cmd, cwd=cwd, check=True)
+    try:
+        subprocess.run(cmd, cwd=cwd, check=True)
+    except FileNotFoundError as e:
+        raise SystemExit(
+            f"Required command '{e.filename}' was not found while running: {_cmd_text(cmd)}. "
+            "Install git and ensure it is on your PATH."
+        ) from e
+    except subprocess.CalledProcessError as e:
+        hint = _hint_for_cmd(cmd, e.returncode)
+        raise SystemExit(
+            f"Command failed with exit code {e.returncode}: {_cmd_text(cmd)}"
+            + (f". Hint: {hint}" if hint else "")
+        ) from e
 
 
 def git_output(cmd, cwd=None):
-    return subprocess.check_output(cmd, cwd=cwd).decode("utf-8").strip()
+    try:
+        return subprocess.check_output(cmd, cwd=cwd).decode("utf-8").strip()
+    except FileNotFoundError as e:
+        raise SystemExit(
+            f"Required command '{e.filename}' was not found while running: {_cmd_text(cmd)}. "
+            "Install git and ensure it is on your PATH."
+        ) from e
+    except subprocess.CalledProcessError as e:
+        hint = _hint_for_cmd(cmd, e.returncode)
+        raise SystemExit(
+            f"Command failed with exit code {e.returncode}: {_cmd_text(cmd)}"
+            + (f". Hint: {hint}" if hint else "")
+        ) from e
 
 
 def ensure_repo(url: str, repo_dir: Path):
@@ -29,22 +74,34 @@ def ensure_repo(url: str, repo_dir: Path):
 
 
 def clear_repo_worktree(repo_dir: Path):
-    for child in repo_dir.iterdir():
-        if child.name == ".git":
-            continue
-        if child.is_dir():
-            shutil.rmtree(child)
-        else:
-            child.unlink()
+    try:
+        for child in repo_dir.iterdir():
+            if child.name == ".git":
+                continue
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+    except OSError as e:
+        raise SystemExit(
+            f"Failed to clear repository worktree at {repo_dir}: {e}. "
+            "Check file permissions and ensure files are not locked by another process."
+        ) from e
 
 
 def copy_source(source_dir: Path, repo_dir: Path):
-    for item in source_dir.iterdir():
-        dest = repo_dir / item.name
-        if item.is_dir():
-            shutil.copytree(item, dest)
-        else:
-            shutil.copy2(item, dest)
+    try:
+        for item in source_dir.iterdir():
+            dest = repo_dir / item.name
+            if item.is_dir():
+                shutil.copytree(item, dest)
+            else:
+                shutil.copy2(item, dest)
+    except OSError as e:
+        raise SystemExit(
+            f"Failed to copy wiki files from {source_dir} to {repo_dir}: {e}. "
+            "Check read/write permissions and available disk space."
+        ) from e
 
 
 def has_changes(repo_dir: Path) -> bool:
@@ -104,13 +161,29 @@ def main():
     workdir = Path(args.workdir).resolve()
 
     if not source_dir.is_dir():
-        raise SystemExit(f"Source dir not found: {source_dir}")
+        raise SystemExit(
+            f"Source dir not found: {source_dir}. "
+            "Pass `--source-dir` pointing to your local `docs/wiki` directory."
+        )
 
-    workdir.mkdir(parents=True, exist_ok=True)
+    try:
+        workdir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise SystemExit(
+            f"Failed to create workdir {workdir}: {e}. "
+            "Choose a writable directory with `--workdir`."
+        ) from e
 
     sync_one("github_wiki", args.github_url, source_dir, workdir, args.commit_message)
     sync_one("gitlab_wiki", args.gitlab_url, source_dir, workdir, args.commit_message)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nInterrupted by user.", file=sys.stderr)
+        raise SystemExit(130)
+    except Exception as e:
+        print(f"Error: Unexpected failure while syncing wiki: {e}", file=sys.stderr)
+        raise SystemExit(1) from e

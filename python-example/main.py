@@ -2,11 +2,23 @@
 import multiprocessing as mp
 import os
 import random
+import sys
 import time
 from queue import Empty
 
-import numpy as np
-import sedsprintf_rs_2026 as seds
+try:
+    import numpy as np
+except ModuleNotFoundError as e:
+    raise SystemExit(
+        "Missing dependency 'numpy'. Install it (for example: `python -m pip install numpy`) and retry."
+    ) from e
+
+try:
+    import sedsprintf_rs_2026 as seds
+except ModuleNotFoundError as e:
+    raise SystemExit(
+        "Missing dependency 'sedsprintf_rs'. Build/install the Python package first, then retry."
+    ) from e
 
 DT = seds.DataType
 EP = seds.DataEndpoint
@@ -49,8 +61,10 @@ def _on_packet(pkt: seds.Packet):
 def _on_serialized(data: bytes):
     print(f"[RX Serialized] {len(data)} bytes: {data.hex()}")
 
+
 _ROUTER = None
 _PENDING_TIMESYNC = []
+
 
 def _on_timesync(pkt: seds.Packet):
     global _PENDING_TIMESYNC
@@ -232,6 +246,23 @@ def producer_proc(name: str, cmd_q: mp.Queue, n_iters: int, seed: int):
     print(f"[{name}] done")
 
 
+def _router_server_safe(*args):
+    try:
+        router_server(*args)
+    except Exception as e:
+        print(f"[SERVER] Fatal error: {e}", file=sys.stderr)
+        raise SystemExit(1) from e
+
+
+def _producer_safe(*args):
+    try:
+        producer_proc(*args)
+    except Exception as e:
+        name = args[0] if args else "producer"
+        print(f"[{name}] Fatal error: {e}", file=sys.stderr)
+        raise SystemExit(1) from e
+
+
 # ---------------- Main ----------------
 def main():
     mp.set_start_method("spawn", force=True)
@@ -239,7 +270,7 @@ def main():
     cmd_q = mp.Queue(maxsize=8192)
     done_evt = mp.Event()
 
-    server = mp.Process(target=router_server, args=(cmd_q, done_evt, 2, 3.0, 120.0), daemon=False)
+    server = mp.Process(target=_router_server_safe, args=(cmd_q, done_evt, 2, 3.0, 120.0), daemon=False)
     server.start()
 
     n_producers = 6
@@ -247,7 +278,7 @@ def main():
 
     procs = []
     for i in range(n_producers):
-        p = mp.Process(target=producer_proc, args=(f"P{i}", cmd_q, iters_per, 1337 + i), daemon=False)
+        p = mp.Process(target=_producer_safe, args=(f"P{i}", cmd_q, iters_per, 1337 + i), daemon=False)
         p.start()
         procs.append(p)
 
@@ -285,3 +316,7 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         print("\n[MAIN] Interrupted")
+        raise SystemExit(130)
+    except Exception as e:
+        print(f"[MAIN] Unexpected error: {e}", file=sys.stderr)
+        raise SystemExit(1) from e

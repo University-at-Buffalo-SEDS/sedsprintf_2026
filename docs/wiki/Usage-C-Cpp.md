@@ -1,6 +1,8 @@
 # C/C++ Usage
 
-The C API is exposed via C-Headers/sedsprintf.h ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/C-Headers/sedsprintf.h) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/C-Headers/sedsprintf.h)) and a static library built by Cargo.
+The C API is exposed via
+C-Headers/sedsprintf.h ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/C-Headers/sedsprintf.h) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/C-Headers/sedsprintf.h))
+and a static library built by Cargo.
 
 ## CMake integration (recommended)
 
