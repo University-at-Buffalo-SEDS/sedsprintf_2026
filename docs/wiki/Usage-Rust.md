@@ -65,7 +65,9 @@ fn main() -> TelemetryResult<()> {
 
 ## Reliable delivery (opt-in)
 
-If a `DataType` is marked `reliable: true` in telemetry_config.json ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/telemetry_config.json) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/telemetry_config.json)), the router can provide
+If a `DataType` is marked `reliable: true` in
+telemetry_config.json ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/telemetry_config.json) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/telemetry_config.json)),
+the router can provide
 ordered delivery and retransmits on **serialized sides**. ACK frames are sent back on the
 ingress side automatically via the side's serialized TX handler.
 

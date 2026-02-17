@@ -6,8 +6,11 @@ For protocol details and role behavior, see [Time-Sync](Time-Sync).
 
 ## C/C++ example
 
-- c-example-code/ ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/tree/main/c-example-code) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/tree/main/c-example-code))
-- c-example-code/src/timesync_example.c ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/c-example-code/src/timesync_example.c) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/c-example-code/src/timesync_example.c))
+-
+
+c-example-code/ ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/tree/main/c-example-code) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/tree/main/c-example-code))
+-
+c-example-code/src/timesync_example.c ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/c-example-code/src/timesync_example.c) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/c-example-code/src/timesync_example.c))
 
 What it demonstrates:
 
@@ -18,14 +21,19 @@ What it demonstrates:
 
 Suggested first steps:
 
-1) Build the library with build.py ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/build.py) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.py)) or CMake.
+1) Build the library with
+   build.py ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/build.py) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.py))
+   or CMake.
 2) Compile the example and run it locally.
 3) Watch the output to see packet creation and handling.
 
 ## Python example
 
-- python-example/ ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/tree/main/python-example) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/tree/main/python-example))
-- python-example/timesync_example.py ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/python-example/timesync_example.py) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/python-example/timesync_example.py))
+-
+
+python-example/ ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/tree/main/python-example) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/tree/main/python-example))
+-
+python-example/timesync_example.py ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/python-example/timesync_example.py) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/python-example/timesync_example.py))
 
 What it demonstrates:
 
@@ -36,7 +44,8 @@ What it demonstrates:
 
 Suggested first steps:
 
-1) Build Python bindings with `build.py python` or `build.py maturin-install` (build.py: [source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/build.py) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.py)).
+1) Build Python bindings with `build.py python` or `build.py maturin-install` (
+   build.py: [source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/build.py) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.py)).
 2) Run the example script.
 3) Inspect printed packets to see decoded values.
 
@@ -45,16 +54,25 @@ Suggested first steps:
 If you want a minimal Rust example, start with [Usage-Rust](Usage-Rust) and build a small router with one endpoint
 handler. For a runnable example, see:
 
-- rust-example-code/timesync_example.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/rust-example-code/timesync_example.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rust-example-code/timesync_example.rs))
-- rust-example-code/relay_example.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/rust-example-code/relay_example.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rust-example-code/relay_example.rs))
-- rust-example-code/reliable_example.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/rust-example-code/reliable_example.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rust-example-code/reliable_example.rs))
-- rust-example-code/queue_timeout_example.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/rust-example-code/queue_timeout_example.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rust-example-code/queue_timeout_example.rs))
-- rust-example-code/multinode_sim_example.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/rust-example-code/multinode_sim_example.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rust-example-code/multinode_sim_example.rs))
+-
+
+rust-example-code/timesync_example.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/rust-example-code/timesync_example.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rust-example-code/timesync_example.rs))
+-
+rust-example-code/relay_example.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/rust-example-code/relay_example.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rust-example-code/relay_example.rs))
+-
+rust-example-code/reliable_example.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/rust-example-code/reliable_example.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rust-example-code/reliable_example.rs))
+-
+rust-example-code/queue_timeout_example.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/rust-example-code/queue_timeout_example.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rust-example-code/queue_timeout_example.rs))
+-
+rust-example-code/multinode_sim_example.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/rust-example-code/multinode_sim_example.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rust-example-code/multinode_sim_example.rs))
 
 ## RTOS time sync examples
 
-- rtos-example-code/freertos_timesync.c ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/rtos-example-code/freertos_timesync.c) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rtos-example-code/freertos_timesync.c))
-- rtos-example-code/threadx_timesync.c ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/rtos-example-code/threadx_timesync.c) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rtos-example-code/threadx_timesync.c))
+-
+
+rtos-example-code/freertos_timesync.c ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/rtos-example-code/freertos_timesync.c) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rtos-example-code/freertos_timesync.c))
+-
+rtos-example-code/threadx_timesync.c ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/rtos-example-code/threadx_timesync.c) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rtos-example-code/threadx_timesync.c))
 
 Recommended structure:
 

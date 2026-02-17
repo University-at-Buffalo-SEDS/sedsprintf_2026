@@ -21,10 +21,16 @@ import json
 import os
 import re
 import sys
-import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
 from typing import Any, Dict, List, Optional
+
+try:
+    import tkinter as tk
+    from tkinter import filedialog, messagebox, ttk
+except ModuleNotFoundError as e:
+    raise SystemExit(
+        "Tkinter is required for telemetry_config_editor.py but is not available in this Python runtime."
+    ) from e
 
 DATA_TYPE_OPTIONS = [
     "Float64",
@@ -1271,3 +1277,13 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n\nexiting...")
         exit(0)
+    except tk.TclError as e:
+        print(f"error: Failed to start Tk UI: {e}", file=sys.stderr)
+        print(
+            "hint: Ensure a desktop display is available and Tk is properly installed.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from e
+    except Exception as e:
+        print(f"error: Unexpected failure in telemetry config editor: {e}", file=sys.stderr)
+        raise SystemExit(1) from e

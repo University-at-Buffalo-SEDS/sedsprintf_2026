@@ -4,7 +4,9 @@ Python bindings are built with pyo3 and maturin. The Python module name is `seds
 
 ## Build and install
 
-Option 1: use build.py ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/build.py) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.py)) (recommended in this repo)
+Option 1: use
+build.py ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/build.py) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.py)) (
+recommended in this repo)
 
 ```
 ./build.py python
@@ -31,15 +33,19 @@ DT = seds.DataType
 EP = seds.DataEndpoint
 RM = seds.RouterMode
 
+
 def now_ms():
     return 0
+
 
 def tx(bytes_buf):
     # send bytes to transport
     pass
 
+
 def on_packet(pkt):
     print(pkt)
+
 
 handlers = [
     (int(EP.SD_CARD), on_packet, None),

@@ -1,7 +1,20 @@
 #!/usr/bin/env python3
+import sys
 import time
-import numpy as np
-import sedsprintf_rs as seds
+
+try:
+    import numpy as np
+except ModuleNotFoundError as e:
+    raise SystemExit(
+        "Missing dependency 'numpy'. Install it (for example: `python -m pip install numpy`) and retry."
+    ) from e
+
+try:
+    import sedsprintf_rs as seds
+except ModuleNotFoundError as e:
+    raise SystemExit(
+        "Missing dependency 'sedsprintf_rs'. Build/install the Python package first, then retry."
+    ) from e
 
 DT = seds.DataType
 EP = seds.DataEndpoint
@@ -66,4 +79,11 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nInterrupted by user.", file=sys.stderr)
+        raise SystemExit(130)
+    except Exception as e:
+        print(f"Error: Unexpected failure in timesync example: {e}", file=sys.stderr)
+        raise SystemExit(1) from e

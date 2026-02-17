@@ -4,7 +4,9 @@ This page explains how to build the library and how compile-time configuration w
 
 ## Build tooling (build.py)
 
-The repo includes build.py ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/build.py) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.py)), a wrapper around Cargo and Maturin that:
+The repo includes
+build.py ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/build.py) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.py)),
+a wrapper around Cargo and Maturin that:
 
 - Sets compile-time environment variables (e.g., `DEVICE_IDENTIFIER`).
 - Enables feature flags (`embedded`, `python`).
@@ -24,12 +26,14 @@ Useful options:
 
 - `device_id=<id>` sets `DEVICE_IDENTIFIER` for the build.
 - `max_stack_payload=<n>` sets `MAX_STACK_PAYLOAD` for inline payload storage.
-- `env:KEY=VALUE` passes any compile-time env var used by src/config.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/src/config.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/config.rs)).
+- `env:KEY=VALUE` passes any compile-time env var used by
+  src/config.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/src/config.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/config.rs)).
 - `target=<triple>` sets the Rust target triple for embedded builds.
 
 ## Cargo features
 
-From Cargo.toml ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/Cargo.toml) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/Cargo.toml)):
+From
+Cargo.toml ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/Cargo.toml) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/Cargo.toml)):
 
 - `std` (default): host build with std.
 - `embedded`: enables embedded defaults and no_std-friendly behavior.
@@ -46,7 +50,8 @@ When `timesync` is enabled, the build adds the `TIME_SYNC` endpoint and
 `TIME_SYNC_*` packet types directly in code (like `TelemetryError`).
 See [Time-Sync](Time-Sync) for roles, packet fields, and flow.
 
-Python builds via `maturin` in this repo enable `timesync` by default (see pyproject.toml ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/pyproject.toml) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/pyproject.toml)) ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/pyproject.toml ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/pyproject.toml) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/pyproject.toml ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/pyproject.toml))))))).
+Python builds via `maturin` in this repo enable `timesync` by default (see
+pyproject.toml ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/pyproject.toml) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/pyproject.toml)) ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/pyproject.toml ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/pyproject.toml) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/pyproject.toml ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/pyproject.toml))))))).
 
 ## Device identifier
 
@@ -74,7 +79,9 @@ build.py ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs
 
 ## Compile-time configuration
 
-Configuration values are read via `option_env!` in src/config.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/src/config.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/config.rs)). You can set them via `.cargo/config.toml`,
+Configuration values are read via `option_env!` in
+src/config.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/src/config.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/config.rs)).
+You can set them via `.cargo/config.toml`,
 `build.py env:KEY=VALUE`, or CMake `SEDSPRINTF_RS_ENV_<KEY>` variables.
 
 Supported keys (defaults shown):
@@ -95,7 +102,10 @@ Supported keys (defaults shown):
 
 ## CMake integration
 
-CMakeLists.txt ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/CMakeLists.txt) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/CMakeLists.txt)) invokes build.py ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/build.py) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.py)) and exposes variables for embedded builds.
+CMakeLists.txt ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/CMakeLists.txt) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/CMakeLists.txt))
+invokes
+build.py ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/build.py) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.py))
+and exposes variables for embedded builds.
 
 Common CMake variables:
 
@@ -125,7 +135,8 @@ If you use `maturin develop` directly, ensure you are in the correct virtualenv.
 
 ## Build.rs overrides (advanced)
 
-build.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/build.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.rs)) can be directed to alternate sources or disabled:
+build.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/build.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.rs))
+can be directed to alternate sources or disabled:
 
 - `SEDSPRINTF_RS_SKIP_ENUMGEN=1` skips enum generation.
 - `SEDSPRINTF_RS_CONFIG_RS=path/to/config.rs` overrides schema source.
