@@ -1,5 +1,21 @@
 # Changelogs
 
+## Version 3.2.2 highlights
+
+- Script reliability and UX improvements: better error handling with actionable failure hints across update/build/docs
+  helper scripts.
+- Formatting cleanup across scripts and docs for more consistent output.
+- Additional wiki documentation updates and wording cleanup.
+- Full
+  changelog: [v3.2.1...v3.2.2](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/-/compare/v3.2.1...v3.2.2)
+
+## Version 3.2.1 highlights
+
+- Wiki overhaul: broad documentation refresh, structure cleanup, and improved navigation/discoverability.
+- GUI updates to the telemetry config editor.
+- Full
+  changelog: [v3.2.0...v3.2.1](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/-/compare/v3.2.0...v3.2.1)
+
 ## Version 3.2.0 highlights
 
 - Time Sync feature: built-in `TIME_SYNC` endpoint and `TIME_SYNC_*` packet types (enabled via `timesync` feature).
