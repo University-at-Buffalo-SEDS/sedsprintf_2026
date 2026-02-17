@@ -6,6 +6,7 @@ nodes that exchange telemetry must use the exact same schema (including ordering
 Location:
 
 -
+
 telemetry_config.json ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/telemetry_config.json) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/telemetry_config.json)) (
 override path with `SEDSPRINTF_RS_SCHEMA_PATH`)
 

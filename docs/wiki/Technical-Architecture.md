@@ -14,30 +14,47 @@ look the way they do. It assumes no prior knowledge of the codebase.
 ## Module map (what lives where)
 
 -
+
 src/config.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/src/config.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/config.rs)):
 compile-time configuration values plus generated `DataType`/`DataEndpoint` enums.
+
 -
+
 src/lib.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/src/lib.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/lib.rs)):
 schema metadata (`MessageMeta`, `MessageElement`, `MessageDataType`, `MessageClass`).
+
 -
+
 src/telemetry_packet.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/src/telemetry_packet.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/telemetry_packet.rs)):
 `TelemetryPacket` validation, formatting, and packet IDs.
+
 -
+
 src/small_payload.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/src/small_payload.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/small_payload.rs)):
 inline-optimized payload storage (`SmallPayload`).
+
 -
+
 src/serialize.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/src/serialize.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/serialize.rs)):
 compact wire format, ULEB128 helpers, envelope peek, packet IDs from wire.
+
 -
+
 src/router.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/src/router.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/router.rs)):
 router core, queues, endpoint handlers, side-based routing.
+
 -
+
 src/relay.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/src/relay.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/relay.rs)):
 schema-agnostic fanout relay between sides.
+
 -
+
 src/queue.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/src/queue.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/queue.rs)):
 bounded deque used by router and relay.
+
 -
+
 src/c_api.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/src/c_api.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/c_api.rs))
 and
 src/python_api.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/src/python_api.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/python_api.rs)):
@@ -50,8 +67,10 @@ telemetry_config.json ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/
 plus built-in `TelemetryError` endpoint/type). At build time:
 
 1)
+
 build.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/build.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.rs))
 reads the schema to generate C headers and Python `.pyi` stubs.
+
 2) `define_telemetry_schema!` in
    src/config.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/src/config.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/config.rs))
    expands into Rust enums and metadata tables.

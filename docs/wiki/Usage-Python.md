@@ -33,15 +33,19 @@ DT = seds.DataType
 EP = seds.DataEndpoint
 RM = seds.RouterMode
 
+
 def now_ms():
     return 0
+
 
 def tx(bytes_buf):
     # send bytes to transport
     pass
 
+
 def on_packet(pkt):
     print(pkt)
+
 
 handlers = [
     (int(EP.SD_CARD), on_packet, None),

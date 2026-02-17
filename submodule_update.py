@@ -6,20 +6,56 @@ import sys
 from pathlib import Path
 
 
+def _fail(msg: str) -> None:
+    print(f"Error: {msg}", file=sys.stderr)
+
+
+def _cmd_text(cmd: list[str]) -> str:
+    return " ".join(cmd)
+
+
+def _hint_for_git_cmd(cmd: list[str], returncode: int) -> str | None:
+    if not cmd or cmd[0] != "git":
+        return None
+    if cmd[:2] == ["git", "stash"] and "pop" in cmd:
+        return "Run `git status` to inspect conflicts, resolve them, then continue."
+    if cmd[:2] == ["git", "stash"]:
+        return "Ensure you are inside a git repository and have permission to modify it."
+    return f"Try running `{_cmd_text(cmd)}` manually for detailed git diagnostics."
+
+
 def run(cmd: list[str]) -> None:
-    print("Running:", " ".join(cmd))
-    subprocess.run(cmd, check=True)
+    print("Running:", _cmd_text(cmd))
+    try:
+        subprocess.run(cmd, check=True)
+    except FileNotFoundError as e:
+        raise SystemExit(
+            f"Required command '{e.filename}' was not found while running: {_cmd_text(cmd)}. "
+            "Install git and ensure it is on your PATH."
+        ) from e
+    except subprocess.CalledProcessError as e:
+        hint = _hint_for_git_cmd(cmd, e.returncode)
+        raise SystemExit(
+            f"Command failed with exit code {e.returncode}: {_cmd_text(cmd)}"
+            + (f". Hint: {hint}" if hint else "")
+        ) from e
 
 
 def import_and_run_update():
     """Import and run submodule_update.py directly."""
     script_path = Path(__file__).parent / "submodule_update_no_stash.py"
     if not script_path.exists():
-        sys.exit(f"Error: {script_path} not found")
+        sys.exit(
+            f"Error: {script_path} not found. "
+            "Ensure this wrapper is run from the repository that contains submodule_update_no_stash.py."
+        )
 
     spec = importlib.util.spec_from_file_location("submodule_update", script_path)
     if spec is None or spec.loader is None:
-        sys.exit("Error: could not load submodule_update.py")
+        sys.exit(
+            "Error: could not load submodule_update_no_stash.py. "
+            "Check file permissions and that the script is valid Python."
+        )
 
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -28,7 +64,10 @@ def import_and_run_update():
         print("→ Running submodule_update.main()")
         module.main()
     else:
-        sys.exit("Error: submodule_update.py has no main() function")
+        sys.exit(
+            "Error: submodule_update_no_stash.py has no main() function. "
+            "Restore that entrypoint or run the no-stash script directly after fixing it."
+        )
 
 
 def main():
@@ -45,14 +84,16 @@ def main():
 
     # 3. Pop stash afterwards (same behavior as subtree scripts)
     print("→ Restoring stash...")
-    try:
-        run(["git", "stash", "pop"])
-    except subprocess.CalledProcessError as e:
-        if e.returncode == 1:
-            # "No stash to apply" — safe to ignore
-            pass
-        else:
-            raise
+    stash_pop = subprocess.run(["git", "stash", "pop"], check=False)
+    if stash_pop.returncode == 0:
+        return
+    if stash_pop.returncode == 1:
+        # "No stash entries found." is safe to ignore.
+        return
+    raise SystemExit(
+        "Failed to restore stashed changes with `git stash pop`. "
+        "Run `git stash list` and `git stash pop` manually to resolve."
+    )
 
 
 if __name__ == "__main__":
@@ -61,3 +102,6 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n\nexiting...")
         exit(0)
+    except Exception as e:
+        _fail(f"Unexpected error: {e}")
+        raise SystemExit(1) from e

@@ -7,6 +7,7 @@ For protocol details and role behavior, see [Time-Sync](Time-Sync).
 ## C/C++ example
 
 -
+
 c-example-code/ ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/tree/main/c-example-code) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/tree/main/c-example-code))
 -
 c-example-code/src/timesync_example.c ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/c-example-code/src/timesync_example.c) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/c-example-code/src/timesync_example.c))
@@ -29,6 +30,7 @@ Suggested first steps:
 ## Python example
 
 -
+
 python-example/ ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/tree/main/python-example) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/tree/main/python-example))
 -
 python-example/timesync_example.py ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/python-example/timesync_example.py) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/python-example/timesync_example.py))
@@ -53,6 +55,7 @@ If you want a minimal Rust example, start with [Usage-Rust](Usage-Rust) and buil
 handler. For a runnable example, see:
 
 -
+
 rust-example-code/timesync_example.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/rust-example-code/timesync_example.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rust-example-code/timesync_example.rs))
 -
 rust-example-code/relay_example.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/rust-example-code/relay_example.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rust-example-code/relay_example.rs))
@@ -66,6 +69,7 @@ rust-example-code/multinode_sim_example.rs ([source](https://gitlab.rylanswebsit
 ## RTOS time sync examples
 
 -
+
 rtos-example-code/freertos_timesync.c ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/rtos-example-code/freertos_timesync.c) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rtos-example-code/freertos_timesync.c))
 -
 rtos-example-code/threadx_timesync.c ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/rtos-example-code/threadx_timesync.c) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rtos-example-code/threadx_timesync.c))
