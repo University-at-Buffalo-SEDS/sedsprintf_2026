@@ -1,8 +1,8 @@
 #[cfg(feature = "timesync")]
 mod timesync_system_test {
-    use sedsprintf_rs::config::{DataEndpoint, DataType};
-    use sedsprintf_rs::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
-    use sedsprintf_rs::timesync::{
+    use sedsprintf_rs_2026::config::{DataEndpoint, DataType};
+    use sedsprintf_rs_2026::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
+    use sedsprintf_rs_2026::timesync::{
         build_timesync_announce_with_sender, build_timesync_request, build_timesync_response,
         compute_offset_delay, TimeSyncConfig, TimeSyncRole, TimeSyncTracker,
     };
