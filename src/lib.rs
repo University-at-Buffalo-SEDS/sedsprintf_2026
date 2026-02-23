@@ -70,31 +70,64 @@ unsafe extern "C" {
 #[cfg(all(not(feature = "std"), target_os = "none"))]
 mod embedded_alloc {
     use core::alloc::{GlobalAlloc, Layout};
+    use core::mem::size_of;
 
     unsafe extern "C" {
         fn telemetryMalloc(size: usize) -> *mut core::ffi::c_void;
         fn telemetryFree(ptr: *mut core::ffi::c_void);
-        fn telemetry_lock();
-        fn telemetry_unlock();
+        fn seds_error_msg(msg: *const u8, len: usize);
+        fn telemetry_panic_hook(msg: *const u8, len: usize);
     }
 
     /// Global allocator that forwards to `telemetryMalloc` / `telemetryFree`
     /// provided by the host environment.
     struct TelemetryAlloc;
 
+    #[inline]
+    fn align_up(addr: usize, align: usize) -> usize {
+        (addr + (align - 1)) & !(align - 1)
+    }
+
     unsafe impl GlobalAlloc for TelemetryAlloc {
         unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-            unsafe { telemetry_lock() };
-            let p = unsafe { telemetryMalloc(layout.size()) as *mut u8 };
-            unsafe { telemetry_unlock() };
-            debug_assert!(p.is_null() || (p as usize) % layout.align() == 0);
-            p
+            let align = layout.align().max(size_of::<usize>());
+            let header = size_of::<usize>();
+            let total = match layout
+                .size()
+                .checked_add(align)
+                .and_then(|v| v.checked_add(header))
+            {
+                Some(v) => v,
+                None => return core::ptr::null_mut(),
+            };
+
+            let raw = unsafe { telemetryMalloc(total) as *mut u8 };
+            if raw.is_null() {
+                return core::ptr::null_mut();
+            }
+
+            let base = raw as usize + header;
+            let aligned = align_up(base, align) as *mut u8;
+
+            // Store the original pointer just before the aligned pointer.
+            unsafe {
+                let slot = (aligned as *mut usize).offset(-1);
+                *slot = raw as usize;
+            }
+
+            aligned
         }
 
         unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
-            unsafe { telemetry_lock() };
-            unsafe { telemetryFree(ptr as *mut _) };
-            unsafe { telemetry_unlock() };
+            if ptr.is_null() {
+                return;
+            }
+
+            let raw = unsafe {
+                let slot = (ptr as *mut usize).offset(-1);
+                *slot as *mut core::ffi::c_void
+            };
+            unsafe { telemetryFree(raw) };
         }
     }
 
@@ -106,7 +139,13 @@ mod embedded_alloc {
 
     #[panic_handler]
     fn panic(_info: &PanicInfo) -> ! {
-        // Halt forever after panic
+        let msg = b"rust panic";
+        unsafe {
+            seds_error_msg(msg.as_ptr(), msg.len());
+            telemetry_panic_hook(msg.as_ptr(), msg.len());
+        }
+
+        // Halt forever after panic.
         loop {}
     }
 
