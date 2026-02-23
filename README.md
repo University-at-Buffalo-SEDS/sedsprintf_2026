@@ -423,12 +423,16 @@ void telemetry_init_lock(void)
 
 void telemetry_lock(void)
 {
-    (void)xSemaphoreTakeRecursive(g_telemetry_lock, portMAX_DELAY);
+    if (g_telemetry_lock != NULL) {
+        (void)xSemaphoreTakeRecursive(g_telemetry_lock, portMAX_DELAY);
+    }
 }
 
 void telemetry_unlock(void)
 {
-    (void)xSemaphoreGiveRecursive(g_telemetry_lock);
+    if (g_telemetry_lock != NULL) {
+        (void)xSemaphoreGiveRecursive(g_telemetry_lock);
+    }
 }
 
 void *telemetryMalloc(size_t xSize)
@@ -459,6 +463,8 @@ void seds_error_msg(const char *str, size_t len)
 static TX_BYTE_POOL *rust_byte_pool_external = NULL;
 static TX_MUTEX g_telemetry_mutex;
 static UINT g_telemetry_mutex_ready = 0U;
+static TX_THREAD *g_telemetry_mutex_owner = TX_NULL;
+static UINT g_telemetry_mutex_recursion = 0U;
 
 void telemetry_set_byte_pool(TX_BYTE_POOL *pool)
 {
@@ -476,16 +482,41 @@ void telemetry_init_lock(void)
 
 void telemetry_lock(void)
 {
-    if (g_telemetry_mutex_ready != 0U) {
-        (void)tx_mutex_get(&g_telemetry_mutex, TX_WAIT_FOREVER);
+    if (g_telemetry_mutex_ready == 0U) {
+        return;
+    }
+
+    TX_THREAD *self = tx_thread_identify();
+    if (g_telemetry_mutex_owner == self) {
+        g_telemetry_mutex_recursion++;
+        return;
+    }
+
+    if (tx_mutex_get(&g_telemetry_mutex, TX_WAIT_FOREVER) == TX_SUCCESS) {
+        g_telemetry_mutex_owner = self;
+        g_telemetry_mutex_recursion = 1U;
     }
 }
 
 void telemetry_unlock(void)
 {
-    if (g_telemetry_mutex_ready != 0U) {
-        (void)tx_mutex_put(&g_telemetry_mutex);
+    if (g_telemetry_mutex_ready == 0U) {
+        return;
     }
+
+    TX_THREAD *self = tx_thread_identify();
+    if (g_telemetry_mutex_owner != self) {
+        return;
+    }
+
+    if (g_telemetry_mutex_recursion > 1U) {
+        g_telemetry_mutex_recursion--;
+        return;
+    }
+
+    g_telemetry_mutex_owner = TX_NULL;
+    g_telemetry_mutex_recursion = 0U;
+    (void)tx_mutex_put(&g_telemetry_mutex);
 }
 
 void *telemetryMalloc(size_t xSize)
@@ -514,3 +545,5 @@ void seds_error_msg(const char *str, size_t len)
     printf("%s\r\n", str);
 }
 ```
+
+Call `telemetry_init_lock()` and `telemetry_set_byte_pool(...)` before any telemetry/router API usage.
