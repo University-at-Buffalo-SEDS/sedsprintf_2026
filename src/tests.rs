@@ -2004,6 +2004,7 @@ mod concurrency_tests {
         router::{Clock, EndpointHandler, Router, RouterConfig},
         serialize,
         telemetry_packet::TelemetryPacket,
+        TelemetryError,
         TelemetryResult,
     };
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -2086,6 +2087,125 @@ mod concurrency_tests {
             hits.load(Ordering::SeqCst),
             total,
             "expected {total} handler invocations from RX queue"
+        );
+    }
+
+    /// Simulate ISR-style enqueue from multiple producers using the non-blocking
+    /// `rx_serialized_queue_isr` API. Contention may return `rx queue busy`,
+    /// but must not produce any other error and accepted packets must be delivered.
+    #[test]
+    fn isr_rx_serialized_queue_is_non_blocking_and_thread_safe() {
+        const THREADS: usize = 4;
+        const ITERS_PER_THREAD: usize = 80;
+        let total = THREADS * ITERS_PER_THREAD;
+
+        let hits = Arc::new(AtomicUsize::new(0));
+        let hits_c = hits.clone();
+        let handler = EndpointHandler::new_packet_handler(
+            DataEndpoint::SdCard,
+            move |_pkt: &TelemetryPacket| {
+                hits_c.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+        );
+
+        let router = Arc::new(Router::new(
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
+            zero_clock(),
+        ));
+
+        let ok_count = Arc::new(AtomicUsize::new(0));
+        let busy_count = Arc::new(AtomicUsize::new(0));
+
+        let mut threads_vec = Vec::new();
+        for tid in 0..THREADS {
+            let r_cloned = router.clone();
+            let ok_c = ok_count.clone();
+            let busy_c = busy_count.clone();
+            threads_vec.push(thread::spawn(move || {
+                for i in 0..ITERS_PER_THREAD {
+                    let idx = (tid * ITERS_PER_THREAD + i) as u64;
+                    let base = 10.0_f32 + idx as f32 * 0.01;
+                    let pkt = TelemetryPacket::from_f32_slice(
+                        DataType::GpsData,
+                        &[base, 2.0, 3.0],
+                        &[DataEndpoint::SdCard],
+                        idx,
+                    )
+                    .unwrap();
+                    let wire = serialize::serialize_packet(&pkt);
+                    match r_cloned.rx_serialized_queue_isr(&wire) {
+                        Ok(()) => {
+                            ok_c.fetch_add(1, Ordering::SeqCst);
+                        }
+                        Err(TelemetryError::Io("rx queue busy")) => {
+                            busy_c.fetch_add(1, Ordering::SeqCst);
+                        }
+                        Err(e) => panic!("unexpected ISR enqueue error: {e:?}"),
+                    }
+                }
+            }));
+        }
+
+        for t in threads_vec {
+            t.join().expect("ISR producer thread panicked");
+        }
+
+        let accepted = ok_count.load(Ordering::SeqCst);
+        let busy = busy_count.load(Ordering::SeqCst);
+        assert_eq!(
+            accepted + busy,
+            total,
+            "every enqueue attempt must be accounted for"
+        );
+
+        router.process_rx_queue().unwrap();
+        assert_eq!(
+            hits.load(Ordering::SeqCst),
+            accepted,
+            "accepted ISR enqueues must be delivered exactly once"
+        );
+    }
+
+    /// Ensure queue clearing also drops packets added through ISR-safe enqueue.
+    #[test]
+    fn clear_rx_queue_drops_isr_enqueued_packets() {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let hits_c = hits.clone();
+        let handler = EndpointHandler::new_packet_handler(
+            DataEndpoint::SdCard,
+            move |_pkt: &TelemetryPacket| {
+                hits_c.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+        );
+
+        let router = Router::new(
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
+            zero_clock(),
+        );
+
+        let pkt = TelemetryPacket::from_f32_slice(
+            DataType::GpsData,
+            &[1.0_f32, 2.0, 3.0],
+            &[DataEndpoint::SdCard],
+            123,
+        )
+        .unwrap();
+        let wire = serialize::serialize_packet(&pkt);
+        router
+            .rx_serialized_queue_isr(&wire)
+            .expect("ISR enqueue should succeed");
+
+        router.clear_rx_queue();
+        router.process_rx_queue().unwrap();
+
+        assert_eq!(
+            hits.load(Ordering::SeqCst),
+            0,
+            "cleared RX queue should not deliver ISR-enqueued packets"
         );
     }
 
