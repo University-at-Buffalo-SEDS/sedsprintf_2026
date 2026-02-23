@@ -74,6 +74,8 @@ mod embedded_alloc {
     unsafe extern "C" {
         fn telemetryMalloc(size: usize) -> *mut core::ffi::c_void;
         fn telemetryFree(ptr: *mut core::ffi::c_void);
+        fn telemetry_lock();
+        fn telemetry_unlock();
     }
 
     /// Global allocator that forwards to `telemetryMalloc` / `telemetryFree`
@@ -82,13 +84,17 @@ mod embedded_alloc {
 
     unsafe impl GlobalAlloc for TelemetryAlloc {
         unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            unsafe { telemetry_lock() };
             let p = unsafe { telemetryMalloc(layout.size()) as *mut u8 };
+            unsafe { telemetry_unlock() };
             debug_assert!(p.is_null() || (p as usize) % layout.align() == 0);
             p
         }
 
         unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
-            unsafe { telemetryFree(ptr as *mut _) }
+            unsafe { telemetry_lock() };
+            unsafe { telemetryFree(ptr as *mut _) };
+            unsafe { telemetry_unlock() };
         }
     }
 

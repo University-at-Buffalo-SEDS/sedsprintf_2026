@@ -353,7 +353,7 @@ The scripts:
 
 ---
 
-## Embedded allocator hook example (C)
+## Embedded allocator + lock hook examples (C)
 
 ```C
 // telemetry_hooks.c
@@ -365,9 +365,21 @@ The scripts:
  *
  *   void *telemetryMalloc(size_t);
  *   void telemetryFree(void *);
+ *   void telemetry_lock(void);
+ *   void telemetry_unlock(void);
  *   void seds_error_msg(const char *, const size_t);
  *
  */
+
+void telemetry_lock(void)
+{
+    /* Optional on bare metal / single-threaded targets. */
+}
+
+void telemetry_unlock(void)
+{
+    /* Optional on bare metal / single-threaded targets. */
+}
 
 void *telemetryMalloc(size_t xSize)
 {
@@ -384,5 +396,121 @@ void seds_error_msg(const char *str, const size_t len)
     // Implement your logging mechanism here, for example:
     fwrite(str, 1, len, stderr);
     fwrite("\n", 1, 1, stderr);
+}
+```
+
+### FreeRTOS example
+
+```C
+// telemetry_hooks_freertos.c
+#include "FreeRTOS.h"
+#include "semphr.h"
+#include <stddef.h>
+#include <stdio.h>
+
+/* Example allocator backend; replace with heap_4/5 or your own allocator. */
+void *pvPortMalloc(size_t xSize);
+void vPortFree(void *pv);
+
+static SemaphoreHandle_t g_telemetry_lock = NULL;
+
+void telemetry_init_lock(void)
+{
+    if (g_telemetry_lock == NULL) {
+        g_telemetry_lock = xSemaphoreCreateRecursiveMutex();
+    }
+}
+
+void telemetry_lock(void)
+{
+    (void)xSemaphoreTakeRecursive(g_telemetry_lock, portMAX_DELAY);
+}
+
+void telemetry_unlock(void)
+{
+    (void)xSemaphoreGiveRecursive(g_telemetry_lock);
+}
+
+void *telemetryMalloc(size_t xSize)
+{
+    return pvPortMalloc(xSize);
+}
+
+void telemetryFree(void *pv)
+{
+    vPortFree(pv);
+}
+
+void seds_error_msg(const char *str, size_t len)
+{
+    (void)len;
+    printf("%s\r\n", str);
+}
+```
+
+### ThreadX example
+
+```C
+// telemetry_hooks_threadx.c
+#include "tx_api.h"
+#include <stddef.h>
+#include <stdio.h>
+
+static TX_BYTE_POOL *rust_byte_pool_external = NULL;
+static TX_MUTEX g_telemetry_mutex;
+static UINT g_telemetry_mutex_ready = 0U;
+
+void telemetry_set_byte_pool(TX_BYTE_POOL *pool)
+{
+    rust_byte_pool_external = pool;
+}
+
+void telemetry_init_lock(void)
+{
+    if (g_telemetry_mutex_ready == 0U) {
+        if (tx_mutex_create(&g_telemetry_mutex, "telemetry_mutex", TX_INHERIT) == TX_SUCCESS) {
+            g_telemetry_mutex_ready = 1U;
+        }
+    }
+}
+
+void telemetry_lock(void)
+{
+    if (g_telemetry_mutex_ready != 0U) {
+        (void)tx_mutex_get(&g_telemetry_mutex, TX_WAIT_FOREVER);
+    }
+}
+
+void telemetry_unlock(void)
+{
+    if (g_telemetry_mutex_ready != 0U) {
+        (void)tx_mutex_put(&g_telemetry_mutex);
+    }
+}
+
+void *telemetryMalloc(size_t xSize)
+{
+    void *ptr = NULL;
+    if (rust_byte_pool_external == NULL) {
+        return NULL;
+    }
+
+    if (tx_byte_allocate(rust_byte_pool_external, &ptr, xSize, TX_NO_WAIT) != TX_SUCCESS) {
+        return NULL;
+    }
+    return ptr;
+}
+
+void telemetryFree(void *pv)
+{
+    if (pv != NULL) {
+        (void)tx_byte_release(pv);
+    }
+}
+
+void seds_error_msg(const char *str, size_t len)
+{
+    (void)len;
+    printf("%s\r\n", str);
 }
 ```
