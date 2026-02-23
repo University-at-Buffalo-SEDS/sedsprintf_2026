@@ -7,12 +7,14 @@
 
 #include "tx_api.h"
 
+static SedsRouter *g_router = NULL;
+
 static uint64_t now_ms(void * user)
 {
     (void) user;
     // ThreadX ticks are in TX_TIMER_TICKS_PER_SECOND
     ULONG ticks = tx_time_get();
-    return (uint64_t) ticks * (1000ULL / TX_TIMER_TICKS_PER_SECOND);
+    return ((uint64_t) ticks * 1000ULL) / (uint64_t) TX_TIMER_TICKS_PER_SECOND;
 }
 
 static SedsResult tx_send(const uint8_t * bytes, size_t len, void * user)
@@ -36,7 +38,9 @@ static SedsResult on_timesync(const SedsPacketView * pkt, void * user)
         uint64_t t2 = now_ms(NULL);
         uint64_t t3 = now_ms(NULL);
         const uint64_t resp[4] = {seq, t1, t2, t3};
-        seds_router_log_ts((SedsRouter *) pkt->user, SEDS_DT_TIME_SYNC_RESPONSE, t3, resp, 4);
+        if (g_router != NULL) {
+            (void)seds_router_log_queue_ts(g_router, SEDS_DT_TIME_SYNC_RESPONSE, t3, resp, 4);
+        }
     }
     return SEDS_OK;
 }
@@ -63,6 +67,7 @@ void timesync_thread_entry(ULONG input)
         locals,
         sizeof(locals) / sizeof(locals[0])
     );
+    g_router = r;
     seds_router_add_side_serialized(r, "RADIO", 5, tx_send, NULL, true);
 
     uint64_t seq = 1;

@@ -355,10 +355,26 @@ The scripts:
 
 ## Embedded allocator + lock hook examples (C)
 
+For embedded (`--features embedded`) builds, provide these symbols:
+
+- `void *telemetryMalloc(size_t)`
+- `void telemetryFree(void *)`
+- `void telemetry_lock(void)`
+- `void telemetry_unlock(void)`
+- `void seds_error_msg(const char *, size_t)`
+- `void telemetry_panic_hook(const char *, size_t)`
+
+Notes:
+
+- `telemetry_lock`/`telemetry_unlock` must be recursive-safe.
+- Do not call router/logging APIs from ISR context (hooks may block).
+- Keep allocator non-blocking/fail-fast on RTOS targets (`NO_WAIT` style).
+
 ```C
 // telemetry_hooks.c
 #include <stddef.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 /*
  * Rust expects these functions to exist for heap allocations:
@@ -368,6 +384,7 @@ The scripts:
  *   void telemetry_lock(void);
  *   void telemetry_unlock(void);
  *   void seds_error_msg(const char *, const size_t);
+ *   void telemetry_panic_hook(const char *, const size_t);
  *
  */
 
@@ -383,7 +400,10 @@ void telemetry_unlock(void)
 
 void *telemetryMalloc(size_t xSize)
 {
-     return malloc(xSize);
+    if (xSize == 0) {
+        xSize = 1;
+    }
+    return malloc(xSize);
 }
 
 void telemetryFree(void *pv)
@@ -394,6 +414,14 @@ void telemetryFree(void *pv)
 void seds_error_msg(const char *str, const size_t len)
 {
     // Implement your logging mechanism here, for example:
+    fwrite(str, 1, len, stderr);
+    fwrite("\n", 1, 1, stderr);
+}
+
+void telemetry_panic_hook(const char *str, const size_t len)
+{
+    // Called from Rust panic handler in embedded/no_std builds.
+    fwrite("PANIC: ", 1, 7, stderr);
     fwrite(str, 1, len, stderr);
     fwrite("\n", 1, 1, stderr);
 }
@@ -423,20 +451,23 @@ void telemetry_init_lock(void)
 
 void telemetry_lock(void)
 {
-    if (g_telemetry_lock != NULL) {
+    if (g_telemetry_lock != NULL && xPortIsInsideInterrupt() == pdFALSE) {
         (void)xSemaphoreTakeRecursive(g_telemetry_lock, portMAX_DELAY);
     }
 }
 
 void telemetry_unlock(void)
 {
-    if (g_telemetry_lock != NULL) {
+    if (g_telemetry_lock != NULL && xPortIsInsideInterrupt() == pdFALSE) {
         (void)xSemaphoreGiveRecursive(g_telemetry_lock);
     }
 }
 
 void *telemetryMalloc(size_t xSize)
 {
+    if (xSize == 0) {
+        xSize = 1;
+    }
     return pvPortMalloc(xSize);
 }
 
@@ -449,6 +480,16 @@ void seds_error_msg(const char *str, size_t len)
 {
     (void)len;
     printf("%s\r\n", str);
+}
+
+void telemetry_panic_hook(const char *str, size_t len)
+{
+    (void)len;
+    printf("PANIC: %s\r\n", str ? str : "(null)");
+    taskDISABLE_INTERRUPTS();
+    for (;;)
+    {
+    }
 }
 ```
 
@@ -487,6 +528,11 @@ void telemetry_lock(void)
     }
 
     TX_THREAD *self = tx_thread_identify();
+    if (self == TX_NULL) {
+        /* Not in thread context; do not block in ISR/startup contexts. */
+        return;
+    }
+
     if (g_telemetry_mutex_owner == self) {
         g_telemetry_mutex_recursion++;
         return;
@@ -505,6 +551,10 @@ void telemetry_unlock(void)
     }
 
     TX_THREAD *self = tx_thread_identify();
+    if (self == TX_NULL) {
+        return;
+    }
+
     if (g_telemetry_mutex_owner != self) {
         return;
     }
@@ -526,6 +576,10 @@ void *telemetryMalloc(size_t xSize)
         return NULL;
     }
 
+    if (xSize == 0U) {
+        xSize = 1U;
+    }
+
     if (tx_byte_allocate(rust_byte_pool_external, &ptr, xSize, TX_NO_WAIT) != TX_SUCCESS) {
         return NULL;
     }
@@ -543,6 +597,15 @@ void seds_error_msg(const char *str, size_t len)
 {
     (void)len;
     printf("%s\r\n", str);
+}
+
+void telemetry_panic_hook(const char *str, size_t len)
+{
+    (void)len;
+    printf("PANIC: %s\r\n", str ? str : "(null)");
+    for (;;)
+    {
+    }
 }
 ```
 

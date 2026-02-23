@@ -123,7 +123,10 @@ Bare-metal builds must provide:
 
 - `void *telemetryMalloc(size_t)`
 - `void telemetryFree(void *)`
+- `void telemetry_lock(void)`
+- `void telemetry_unlock(void)`
 - `void seds_error_msg(const char *, size_t)`
+- `void telemetry_panic_hook(const char *, size_t)`
 
 A simple stub is shown in `README.md` and can be adapted for your platform.
 
@@ -131,3 +134,5 @@ A simple stub is shown in `README.md` and can be adapted for your platform.
 
 The router uses internal locking, so the C API is safe to call from multiple threads if your platform supports it. In
 bare-metal contexts, you may still want to serialize access around interrupts.
+
+Do not call router/logging APIs from ISR context on RTOS targets, because platform lock hooks may block.
