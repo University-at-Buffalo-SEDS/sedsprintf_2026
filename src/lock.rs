@@ -2,13 +2,14 @@
 //!
 //! This module provides a small wrapper type, [`RouterMutex`], which
 //! abstracts over `std::sync::Mutex` (when the `std` feature is enabled)
-//! and `spin::Mutex` (in `no_std` builds).
+//! and host-provided lock hooks (`telemetry_lock` / `telemetry_unlock`) in
+//! `no_std` builds.
 //!
 //! The goal is to provide a uniform API where:
 //! - In `std` builds, a poisoned mutex will **panic** with
 //!   `"RouterMutex poisoned"` rather than forcing callers to handle
 //!   `PoisonError` everywhere.
-//! - In `no_std` builds, we use `spin::Mutex`, which never poisons.
+//! - In `no_std` builds, locking delegates to platform hooks.
 //!
 //! Typical usage:
 //!
@@ -55,26 +56,70 @@ impl<T> RouterMutex<T> {
 }
 
 // ============================================================================
-//  no_std (spin) implementation
+//  no_std implementation via telemetry_lock / telemetry_unlock
 // ============================================================================
 
 #[cfg(not(feature = "std"))]
-pub struct RouterMutex<T>(spin::Mutex<T>);
+unsafe extern "C" {
+    fn telemetry_lock();
+    fn telemetry_unlock();
+}
+
+#[cfg(not(feature = "std"))]
+pub struct RouterMutex<T>(core::cell::UnsafeCell<T>);
+
+#[cfg(not(feature = "std"))]
+unsafe impl<T: Send> Send for RouterMutex<T> {}
+
+#[cfg(not(feature = "std"))]
+unsafe impl<T: Send> Sync for RouterMutex<T> {}
+
+#[cfg(not(feature = "std"))]
+pub struct RouterMutexGuard<'a, T> {
+    m: &'a RouterMutex<T>,
+}
+
+#[cfg(not(feature = "std"))]
+impl<T> core::ops::Deref for RouterMutexGuard<'_, T> {
+    type Target = T;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*self.m.0.get() }
+    }
+}
+
+#[cfg(not(feature = "std"))]
+impl<T> core::ops::DerefMut for RouterMutexGuard<'_, T> {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { &mut *self.m.0.get() }
+    }
+}
+
+#[cfg(not(feature = "std"))]
+impl<T> Drop for RouterMutexGuard<'_, T> {
+    #[inline]
+    fn drop(&mut self) {
+        unsafe { telemetry_unlock() }
+    }
+}
 
 #[cfg(not(feature = "std"))]
 impl<T> RouterMutex<T> {
     /// Create a new `RouterMutex` wrapping the given value.
     #[inline]
     pub fn new(v: T) -> Self {
-        Self(spin::Mutex::new(v))
+        Self(core::cell::UnsafeCell::new(v))
     }
 
     /// Acquire the lock.
     ///
-    /// In `no_std` builds we use `spin::Mutex`, which never poisons, so this
-    /// cannot fail.
+    /// In `no_std` builds this uses host-provided `telemetry_lock` /
+    /// `telemetry_unlock` hooks.
     #[inline]
-    pub fn lock(&self) -> spin::MutexGuard<'_, T> {
-        self.0.lock()
+    pub fn lock(&self) -> RouterMutexGuard<'_, T> {
+        unsafe { telemetry_lock() }
+        RouterMutexGuard { m: self }
     }
 }
