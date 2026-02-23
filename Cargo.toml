@@ -57,8 +57,8 @@ required-features = ["std", "compression", "timesync"]
 
 [dependencies]
 sedsprintf_macros = { path = "sedsprintf_macros" }
-strum_macros = { version = "0.27.2", default-features = false }
-strum = { version = "0.27.2", default-features = false }
+strum_macros = { version = "0.28.0", default-features = false }
+strum = { version = "0.28.0", default-features = false }
 crc32fast = { version = "1.5.0", default-features = false }
 
 # Optional dependencies enabled by features
@@ -66,7 +66,7 @@ pyo3 = { version = "0.28.2", optional = true, features = ["auto-initialize", "ex
 miniz_oxide = { version = "0.9.0", default-features = false, features = ["with-alloc"] }
 
 [build-dependencies]
-regex = "1.12.2"
+regex = "1.12.3"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 
