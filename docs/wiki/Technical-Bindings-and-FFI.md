@@ -66,6 +66,8 @@ appear in the JSON). Any schema change requires regenerating and redeploying the
 Bare‑metal builds expect allocator/error hooks:
 
 - `telemetryMalloc` / `telemetryFree`
+- `telemetry_lock` / `telemetry_unlock`
 - `seds_error_msg`
+- `telemetry_panic_hook`
 
 These allow the core to remain usable in `no_std` environments.

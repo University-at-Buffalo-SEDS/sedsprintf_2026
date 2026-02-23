@@ -148,6 +148,9 @@ Bare-metal builds expect the following symbols to be provided by the host enviro
 
 - `void *telemetryMalloc(size_t)`
 - `void telemetryFree(void *)`
+- `void telemetry_lock(void)`
+- `void telemetry_unlock(void)`
 - `void seds_error_msg(const char *, size_t)`
+- `void telemetry_panic_hook(const char *, size_t)`
 
 See [Usage-C-Cpp](Usage-C-Cpp) for an example stub implementation.
