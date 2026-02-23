@@ -8,9 +8,11 @@
 #include "FreeRTOS.h"
 #include "task.h"
 
+static SedsRouter *g_router = NULL;
+
 static uint64_t ticks_to_ms(TickType_t ticks)
 {
-    return (uint64_t) ticks * (1000ULL / configTICK_RATE_HZ);
+    return ((uint64_t) ticks * 1000ULL) / (uint64_t) configTICK_RATE_HZ;
 }
 
 static uint64_t now_ms(void * user)
@@ -40,7 +42,9 @@ static SedsResult on_timesync(const SedsPacketView * pkt, void * user)
         uint64_t t2 = now_ms(NULL);
         uint64_t t3 = now_ms(NULL);
         const uint64_t resp[4] = {seq, t1, t2, t3};
-        seds_router_log_ts((SedsRouter *) pkt->user, SEDS_DT_TIME_SYNC_RESPONSE, t3, resp, 4);
+        if (g_router != NULL) {
+            (void)seds_router_log_queue_ts(g_router, SEDS_DT_TIME_SYNC_RESPONSE, t3, resp, 4);
+        }
     }
     return SEDS_OK;
 }
@@ -67,6 +71,7 @@ void timesync_task(void * arg)
         locals,
         sizeof(locals) / sizeof(locals[0])
     );
+    g_router = r;
     seds_router_add_side_serialized(r, "RADIO", 5, tx_send, NULL, true);
 
     uint64_t seq = 1;

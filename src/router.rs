@@ -1756,27 +1756,26 @@ impl Router {
                     for h in self.cfg.handlers.iter().filter(|h| h.endpoint == dest) {
                         match (&h.handler, &bytes_opt) {
                             (EndpointHandlerFn::Serialized(_), Some(bytes)) => {
-                                let _ = self.call_handler_with_retries(
+                                self.call_handler_with_retries(
                                     dest,
                                     h,
                                     Some(bytes.as_ref()),
                                     Some(pkt),
                                     None,
-                                );
+                                )?;
                             }
                             (EndpointHandlerFn::Serialized(_), None) => {
                                 let bytes = serialize::serialize_packet(pkt);
-                                let _ = self.call_handler_with_retries(
+                                self.call_handler_with_retries(
                                     dest,
                                     h,
                                     Some(bytes.as_ref()),
                                     Some(pkt),
                                     None,
-                                );
+                                )?;
                             }
                             (EndpointHandlerFn::Packet(_), _) => {
-                                let _ =
-                                    self.call_handler_with_retries(dest, h, None, Some(pkt), None);
+                                self.call_handler_with_retries(dest, h, None, Some(pkt), None)?;
                             }
                         }
                     }
@@ -1807,13 +1806,13 @@ impl Router {
                     for h in self.cfg.handlers.iter().filter(|h| h.endpoint == dest) {
                         match &h.handler {
                             EndpointHandlerFn::Serialized(_) => {
-                                let _ = self.call_handler_with_retries(
+                                self.call_handler_with_retries(
                                     dest,
                                     h,
                                     Some(bytes.as_ref()),
                                     pkt_opt.as_ref(),
                                     Some(&env),
-                                );
+                                )?;
                             }
                             EndpointHandlerFn::Packet(_) => {
                                 if pkt_opt.is_none() {
@@ -1822,13 +1821,13 @@ impl Router {
                                     pkt_opt = Some(pkt);
                                 }
                                 let pkt_ref = pkt_opt.as_ref().expect("just set");
-                                let _ = self.call_handler_with_retries(
+                                self.call_handler_with_retries(
                                     dest,
                                     h,
                                     None,
                                     Some(pkt_ref),
                                     Some(&env),
-                                );
+                                )?;
                             }
                         }
                     }
@@ -1851,7 +1850,7 @@ impl Router {
                     if self.is_duplicate_pkt(&data)? {
                         return Ok(());
                     }
-                    let _ = self.dispatch_local_for_item(&data);
+                    self.dispatch_local_for_item(&data)?;
                 }
 
                 let send_remote = match &data {
@@ -1903,7 +1902,7 @@ impl Router {
                     if self.is_duplicate_pkt(&data)? {
                         return Ok(());
                     }
-                    let _ = self.dispatch_local_for_item(&data);
+                    self.dispatch_local_for_item(&data)?;
                 }
                 if let Err(e) = self.send_reliable_to_side(dst, data.clone()) {
                     match &data {
