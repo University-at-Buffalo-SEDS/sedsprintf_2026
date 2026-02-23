@@ -441,7 +441,7 @@ fn fallback_stdout(msg: &str) {
     {
         eprintln!("{}", msg);
     }
-    #[cfg(not(feature = "std"))]
+    #[cfg(all(not(feature = "std"), target_os = "none"))]
     {
         let message = format!("{}\n", msg);
         unsafe {
@@ -495,6 +495,22 @@ fn has_remote_endpoint(eps: &[DataEndpoint], cfg: &RouterConfig) -> bool {
         (!cfg.is_local_endpoint(ep) && ep.get_broadcast_mode() != EndpointsBroadcastMode::Never)
             || ep.get_broadcast_mode() == EndpointsBroadcastMode::Always
     })
+}
+
+#[inline]
+fn force_remote_for_type(ty: DataType) -> bool {
+    #[cfg(feature = "timesync")]
+    {
+        matches!(
+            ty,
+            DataType::TimeSyncAnnounce | DataType::TimeSyncRequest | DataType::TimeSyncResponse
+        )
+    }
+    #[cfg(not(feature = "timesync"))]
+    {
+        let _ = ty;
+        false
+    }
 }
 
 /// Helper function to call a handler with retries and error handling.
@@ -1045,23 +1061,32 @@ impl Router {
             ),
         };
 
-        let mut locals: Vec<DataEndpoint> = pkt
+        let mut recipients: Vec<DataEndpoint> = pkt
             .endpoints()
             .iter()
             .copied()
             .filter(|&ep| self.cfg.is_local_endpoint(ep))
             .collect();
-        locals.sort_unstable();
-        locals.dedup();
+        recipients.sort_unstable();
+        recipients.dedup();
 
         if let Some(failed_local) = dest {
-            locals.retain(|&ep| ep != failed_local);
+            recipients.retain(|&ep| ep != failed_local);
         }
 
-        if dest.is_none() && locals.is_empty() {
+        // If no local recipient exists, fall back to original packet endpoints
+        // so error telemetry can still egress to remote links.
+        if recipients.is_empty() {
+            recipients = pkt.endpoints().to_vec();
+            recipients.sort_unstable();
+            recipients.dedup();
+            if let Some(failed_local) = dest {
+                recipients.retain(|&ep| ep != failed_local);
+            }
+        }
+
+        if recipients.is_empty() {
             fallback_stdout(&error_msg);
-            return Ok(());
-        } else if dest.is_some() && locals.is_empty() {
             return Ok(());
         }
 
@@ -1069,7 +1094,7 @@ impl Router {
 
         let error_pkt = TelemetryPacket::new(
             DataType::TelemetryError,
-            &locals,
+            &recipients,
             self.sender,
             self.clock.now_ms(),
             payload,
@@ -1375,23 +1400,32 @@ impl Router {
         dest: Option<DataEndpoint>,
         e: TelemetryError,
     ) -> TelemetryResult<()> {
-        let mut locals: Vec<DataEndpoint> = env
+        let mut recipients: Vec<DataEndpoint> = env
             .endpoints
             .iter()
             .copied()
             .filter(|&ep| self.cfg.is_local_endpoint(ep))
             .collect();
-        locals.sort_unstable();
-        locals.dedup();
+        recipients.sort_unstable();
+        recipients.dedup();
         if let Some(failed) = dest {
-            locals.retain(|&ep| ep != failed);
+            recipients.retain(|&ep| ep != failed);
+        }
+
+        if recipients.is_empty() {
+            recipients = env.endpoints.to_vec();
+            recipients.sort_unstable();
+            recipients.dedup();
+            if let Some(failed) = dest {
+                recipients.retain(|&ep| ep != failed);
+            }
         }
 
         let error_msg = format!(
             "Handler for endpoint {:?} failed on device {:?}: {:?}",
             dest, DEVICE_IDENTIFIER, e
         );
-        if locals.is_empty() {
+        if recipients.is_empty() {
             fallback_stdout(&error_msg);
             return Ok(());
         }
@@ -1400,7 +1434,7 @@ impl Router {
 
         let error_pkt = TelemetryPacket::new(
             DataType::TelemetryError,
-            &locals,
+            &recipients,
             &env.sender.clone(),
             env.timestamp_ms,
             payload,
@@ -1581,26 +1615,27 @@ impl Router {
                         any_matched = true;
                         match (&h.handler, &bytes_opt) {
                             (EndpointHandlerFn::Serialized(_), Some(bytes)) => {
-                                self.call_handler_with_retries(
+                                let _ = self.call_handler_with_retries(
                                     dest,
                                     h,
                                     Some(bytes.as_ref()),
                                     Some(pkt),
                                     None,
-                                )?;
+                                );
                             }
                             (EndpointHandlerFn::Serialized(_), None) => {
                                 let bytes = serialize::serialize_packet(pkt);
-                                self.call_handler_with_retries(
+                                let _ = self.call_handler_with_retries(
                                     dest,
                                     h,
                                     Some(bytes.as_ref()),
                                     Some(pkt),
                                     None,
-                                )?;
+                                );
                             }
                             (EndpointHandlerFn::Packet(_), _) => {
-                                self.call_handler_with_retries(dest, h, None, Some(pkt), None)?;
+                                let _ =
+                                    self.call_handler_with_retries(dest, h, None, Some(pkt), None);
                             }
                         }
                     }
@@ -1651,13 +1686,13 @@ impl Router {
                         any_matched = true;
                         match &h.handler {
                             EndpointHandlerFn::Serialized(_) => {
-                                self.call_handler_with_retries(
+                                let _ = self.call_handler_with_retries(
                                     dest,
                                     h,
                                     Some(bytes.as_ref()),
                                     pkt_opt.as_ref(),
                                     Some(&env),
-                                )?;
+                                );
                             }
                             EndpointHandlerFn::Packet(_) => {
                                 if pkt_opt.is_none() {
@@ -1666,13 +1701,13 @@ impl Router {
                                     pkt_opt = Some(pkt);
                                 }
                                 let pkt_ref = pkt_opt.as_ref().expect("just set");
-                                self.call_handler_with_retries(
+                                let _ = self.call_handler_with_retries(
                                     dest,
                                     h,
                                     None,
                                     Some(pkt_ref),
                                     Some(&env),
-                                )?;
+                                );
                             }
                         }
                     }
@@ -1721,26 +1756,27 @@ impl Router {
                     for h in self.cfg.handlers.iter().filter(|h| h.endpoint == dest) {
                         match (&h.handler, &bytes_opt) {
                             (EndpointHandlerFn::Serialized(_), Some(bytes)) => {
-                                self.call_handler_with_retries(
+                                let _ = self.call_handler_with_retries(
                                     dest,
                                     h,
                                     Some(bytes.as_ref()),
                                     Some(pkt),
                                     None,
-                                )?;
+                                );
                             }
                             (EndpointHandlerFn::Serialized(_), None) => {
                                 let bytes = serialize::serialize_packet(pkt);
-                                self.call_handler_with_retries(
+                                let _ = self.call_handler_with_retries(
                                     dest,
                                     h,
                                     Some(bytes.as_ref()),
                                     Some(pkt),
                                     None,
-                                )?;
+                                );
                             }
                             (EndpointHandlerFn::Packet(_), _) => {
-                                self.call_handler_with_retries(dest, h, None, Some(pkt), None)?;
+                                let _ =
+                                    self.call_handler_with_retries(dest, h, None, Some(pkt), None);
                             }
                         }
                     }
@@ -1771,13 +1807,13 @@ impl Router {
                     for h in self.cfg.handlers.iter().filter(|h| h.endpoint == dest) {
                         match &h.handler {
                             EndpointHandlerFn::Serialized(_) => {
-                                self.call_handler_with_retries(
+                                let _ = self.call_handler_with_retries(
                                     dest,
                                     h,
                                     Some(bytes.as_ref()),
                                     pkt_opt.as_ref(),
                                     Some(&env),
-                                )?;
+                                );
                             }
                             EndpointHandlerFn::Packet(_) => {
                                 if pkt_opt.is_none() {
@@ -1786,13 +1822,13 @@ impl Router {
                                     pkt_opt = Some(pkt);
                                 }
                                 let pkt_ref = pkt_opt.as_ref().expect("just set");
-                                self.call_handler_with_retries(
+                                let _ = self.call_handler_with_retries(
                                     dest,
                                     h,
                                     None,
                                     Some(pkt_ref),
                                     Some(&env),
-                                )?;
+                                );
                             }
                         }
                     }
@@ -1815,7 +1851,7 @@ impl Router {
                     if self.is_duplicate_pkt(&data)? {
                         return Ok(());
                     }
-                    self.dispatch_local_for_item(&data)?;
+                    let _ = self.dispatch_local_for_item(&data);
                 }
 
                 let send_remote = match &data {
@@ -1825,6 +1861,7 @@ impl Router {
                         eps.sort_unstable();
                         eps.dedup();
                         has_remote_endpoint(&eps, &self.cfg)
+                            || force_remote_for_type(pkt.data_type())
                     }
                     RouterItem::Serialized(bytes) => {
                         let env = serialize::peek_envelope(bytes.as_ref())?;
@@ -1832,6 +1869,7 @@ impl Router {
                         eps.sort_unstable();
                         eps.dedup();
                         has_remote_endpoint(&eps, &self.cfg)
+                            || force_remote_for_type(env.ty)
                     }
                 };
 
@@ -1865,7 +1903,7 @@ impl Router {
                     if self.is_duplicate_pkt(&data)? {
                         return Ok(());
                     }
-                    self.dispatch_local_for_item(&data)?;
+                    let _ = self.dispatch_local_for_item(&data);
                 }
                 if let Err(e) = self.send_reliable_to_side(dst, data.clone()) {
                     match &data {
