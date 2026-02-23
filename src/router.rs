@@ -35,9 +35,13 @@ use alloc::{
     vec,
     vec::Vec,
 };
+use core::cell::UnsafeCell;
 use core::fmt;
 use core::fmt::{Debug, Formatter};
+use core::hint::spin_loop;
 use core::mem::size_of;
+use core::ops::{Deref, DerefMut};
+use core::sync::atomic::{AtomicBool, Ordering};
 
 /// The mode the router is operating in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
@@ -464,6 +468,85 @@ struct RouterInner {
     reliable_rx: BTreeMap<(RouterSideId, u32), ReliableRxState>,
 }
 
+/// Non-blocking RX queue used by ISR-safe `rx_queue*` APIs.
+///
+/// Uses a tiny atomic try-lock so enqueue never blocks. If contended, push/pop
+/// operations return `TelemetryError::Io("rx queue busy")`.
+struct IsrRxQueue {
+    busy: AtomicBool,
+    q: UnsafeCell<BoundedDeque<RouterRxItem>>,
+}
+
+unsafe impl Send for IsrRxQueue {}
+unsafe impl Sync for IsrRxQueue {}
+
+struct IsrRxQueueGuard<'a> {
+    owner: &'a IsrRxQueue,
+}
+
+impl Deref for IsrRxQueueGuard<'_> {
+    type Target = BoundedDeque<RouterRxItem>;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*self.owner.q.get() }
+    }
+}
+
+impl DerefMut for IsrRxQueueGuard<'_> {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { &mut *self.owner.q.get() }
+    }
+}
+
+impl Drop for IsrRxQueueGuard<'_> {
+    #[inline]
+    fn drop(&mut self) {
+        self.owner.busy.store(false, Ordering::Release);
+    }
+}
+
+impl IsrRxQueue {
+    #[inline]
+    fn new(max_bytes: usize, starting_bytes: usize, grow_mult: f64) -> Self {
+        Self {
+            busy: AtomicBool::new(false),
+            q: UnsafeCell::new(BoundedDeque::new(max_bytes, starting_bytes, grow_mult)),
+        }
+    }
+
+    #[inline]
+    fn try_lock(&self) -> TelemetryResult<IsrRxQueueGuard<'_>> {
+        match self
+            .busy
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+        {
+            Ok(_) => Ok(IsrRxQueueGuard { owner: self }),
+            Err(_) => Err(TelemetryError::Io("rx queue busy")),
+        }
+    }
+
+    #[inline]
+    fn push_back(&self, item: RouterRxItem) -> TelemetryResult<()> {
+        let mut g = self.try_lock()?;
+        g.push_back(item)
+    }
+
+    #[inline]
+    fn pop_front(&self) -> TelemetryResult<Option<RouterRxItem>> {
+        let mut g = self.try_lock()?;
+        Ok(g.pop_front())
+    }
+
+    #[inline]
+    fn clear(&self) -> TelemetryResult<()> {
+        let mut g = self.try_lock()?;
+        g.clear();
+        Ok(())
+    }
+}
+
 /// Telemetry Router for handling incoming and outgoing telemetry packets.
 /// Supports queuing, processing, and dispatching to local endpoint handlers.
 /// Thread-safe via internal locking.
@@ -473,6 +556,7 @@ pub struct Router {
     mode: RouterMode,
     cfg: RouterConfig,
     state: RouterMutex<RouterInner>,
+    isr_rx_queue: IsrRxQueue,
     clock: Box<dyn Clock + Send + Sync>,
 }
 
@@ -541,6 +625,17 @@ where
 }
 /// Router implementation
 impl Router {
+    #[inline]
+    fn enqueue_rx_wait(&self, item: RouterRxItem) -> TelemetryResult<()> {
+        loop {
+            match self.isr_rx_queue.push_back(item.clone()) {
+                Ok(()) => return Ok(()),
+                Err(TelemetryError::Io("rx queue busy")) => spin_loop(),
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
     ///Helper function for relay_send
     #[inline]
     fn enqueue_to_sides(
@@ -942,6 +1037,7 @@ impl Router {
                 reliable_tx: BTreeMap::new(),
                 reliable_rx: BTreeMap::new(),
             }),
+            isr_rx_queue: IsrRxQueue::new(MAX_QUEUE_SIZE, STARTING_QUEUE_SIZE, QUEUE_GROW_STEP),
             clock,
         }
     }
@@ -1123,6 +1219,8 @@ impl Router {
         let mut st = self.state.lock();
         st.transmit_queue.clear();
         st.received_queue.clear();
+        drop(st);
+        let _ = self.isr_rx_queue.clear();
     }
 
     /// Clear only the receive queue without processing.
@@ -1130,6 +1228,8 @@ impl Router {
     pub fn clear_rx_queue(&self) {
         let mut st = self.state.lock();
         st.received_queue.clear();
+        drop(st);
+        let _ = self.isr_rx_queue.clear();
     }
 
     /// Clear only the transmit queue without processing.
@@ -1169,10 +1269,14 @@ impl Router {
     pub fn process_rx_queue_with_timeout(&self, timeout_ms: u32) -> TelemetryResult<()> {
         let start = self.clock.now_ms();
         loop {
-            let item_opt = {
+            let item_opt = match self.isr_rx_queue.pop_front() {
+                Ok(v) => v,
+                Err(_) => None,
+            }
+            .or_else(|| {
                 let mut st = self.state.lock();
                 st.received_queue.pop_front()
-            };
+            });
             let Some(item) = item_opt else { break };
             self.process_rx_queue_item(item)?;
             if timeout_ms != 0 && self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
@@ -1205,10 +1309,14 @@ impl Router {
             }
 
             // Then RX
-            if let Some(item) = {
+            if let Some(item) = match self.isr_rx_queue.pop_front() {
+                Ok(v) => v,
+                Err(_) => None,
+            }
+            .or_else(|| {
                 let mut st = self.state.lock();
                 st.received_queue.pop_front()
-            } {
+            }) {
                 self.process_rx_queue_item(item)?;
                 did_any = true;
             }
@@ -1255,24 +1363,45 @@ impl Router {
     /// Enqueue serialized bytes for RX processing (local source).
     #[inline]
     pub fn rx_serialized_queue(&self, bytes: &[u8]) -> TelemetryResult<()> {
-        let mut st = self.state.lock();
-        st.received_queue.push_back(RouterRxItem {
+        self.enqueue_rx_wait(RouterRxItem {
             src: None,
             data: RouterItem::Serialized(Arc::from(bytes)),
-        })?;
-        Ok(())
+        })
+    }
+
+    /// ISR-safe, non-blocking enqueue of serialized bytes for RX processing.
+    ///
+    /// Returns `TelemetryError::Io("rx queue busy")` if another context is
+    /// currently mutating the ISR RX queue.
+    #[inline]
+    pub fn rx_serialized_queue_isr(&self, bytes: &[u8]) -> TelemetryResult<()> {
+        self.isr_rx_queue.push_back(RouterRxItem {
+            src: None,
+            data: RouterItem::Serialized(Arc::from(bytes)),
+        })
     }
 
     /// Enqueue a packet for RX processing (local source).
     #[inline]
     pub fn rx_queue(&self, pkt: TelemetryPacket) -> TelemetryResult<()> {
         pkt.validate()?;
-        let mut st = self.state.lock();
-        st.received_queue.push_back(RouterRxItem {
+        self.enqueue_rx_wait(RouterRxItem {
             src: None,
             data: RouterItem::Packet(pkt),
-        })?;
-        Ok(())
+        })
+    }
+
+    /// ISR-safe, non-blocking enqueue of a packet for RX processing.
+    ///
+    /// Returns `TelemetryError::Io("rx queue busy")` if another context is
+    /// currently mutating the ISR RX queue.
+    #[inline]
+    pub fn rx_queue_isr(&self, pkt: TelemetryPacket) -> TelemetryResult<()> {
+        pkt.validate()?;
+        self.isr_rx_queue.push_back(RouterRxItem {
+            src: None,
+            data: RouterItem::Packet(pkt),
+        })
     }
 
     /// Enqueue a packet for RX processing with explicit source side.
@@ -1283,12 +1412,27 @@ impl Router {
         side: RouterSideId,
     ) -> TelemetryResult<()> {
         pkt.validate()?;
-        let mut st = self.state.lock();
-        st.received_queue.push_back(RouterRxItem {
+        self.enqueue_rx_wait(RouterRxItem {
             src: Some(side),
             data: RouterItem::Packet(pkt),
-        })?;
-        Ok(())
+        })
+    }
+
+    /// ISR-safe, non-blocking enqueue of a packet with explicit source side.
+    ///
+    /// Returns `TelemetryError::Io("rx queue busy")` if another context is
+    /// currently mutating the ISR RX queue.
+    #[inline]
+    pub fn rx_queue_from_side_isr(
+        &self,
+        pkt: TelemetryPacket,
+        side: RouterSideId,
+    ) -> TelemetryResult<()> {
+        pkt.validate()?;
+        self.isr_rx_queue.push_back(RouterRxItem {
+            src: Some(side),
+            data: RouterItem::Packet(pkt),
+        })
     }
 
     /// Enqueue serialized bytes for RX processing with explicit source side.
@@ -1298,12 +1442,26 @@ impl Router {
         bytes: &[u8],
         side: RouterSideId,
     ) -> TelemetryResult<()> {
-        let mut st = self.state.lock();
-        st.received_queue.push_back(RouterRxItem {
+        self.enqueue_rx_wait(RouterRxItem {
             src: Some(side),
             data: RouterItem::Serialized(Arc::from(bytes)),
-        })?;
-        Ok(())
+        })
+    }
+
+    /// ISR-safe, non-blocking enqueue of serialized bytes with source side.
+    ///
+    /// Returns `TelemetryError::Io("rx queue busy")` if another context is
+    /// currently mutating the ISR RX queue.
+    #[inline]
+    pub fn rx_serialized_queue_from_side_isr(
+        &self,
+        bytes: &[u8],
+        side: RouterSideId,
+    ) -> TelemetryResult<()> {
+        self.isr_rx_queue.push_back(RouterRxItem {
+            src: Some(side),
+            data: RouterItem::Serialized(Arc::from(bytes)),
+        })
     }
 
     /// Retry helper function to attempt a closure multiple times.
