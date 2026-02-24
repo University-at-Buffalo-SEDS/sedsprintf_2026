@@ -38,7 +38,6 @@ use alloc::{
 use core::cell::UnsafeCell;
 use core::fmt;
 use core::fmt::{Debug, Formatter};
-use core::hint::spin_loop;
 use core::mem::size_of;
 use core::ops::{Deref, DerefMut};
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -625,17 +624,6 @@ where
 }
 /// Router implementation
 impl Router {
-    #[inline]
-    fn enqueue_rx_wait(&self, item: RouterRxItem) -> TelemetryResult<()> {
-        loop {
-            match self.isr_rx_queue.push_back(item.clone()) {
-                Ok(()) => return Ok(()),
-                Err(TelemetryError::Io("rx queue busy")) => spin_loop(),
-                Err(e) => return Err(e),
-            }
-        }
-    }
-
     ///Helper function for relay_send
     #[inline]
     fn enqueue_to_sides(
@@ -1363,10 +1351,12 @@ impl Router {
     /// Enqueue serialized bytes for RX processing (local source).
     #[inline]
     pub fn rx_serialized_queue(&self, bytes: &[u8]) -> TelemetryResult<()> {
-        self.enqueue_rx_wait(RouterRxItem {
+        let mut st = self.state.lock();
+        st.received_queue.push_back(RouterRxItem {
             src: None,
             data: RouterItem::Serialized(Arc::from(bytes)),
-        })
+        })?;
+        Ok(())
     }
 
     /// ISR-safe, non-blocking enqueue of serialized bytes for RX processing.
@@ -1385,10 +1375,12 @@ impl Router {
     #[inline]
     pub fn rx_queue(&self, pkt: TelemetryPacket) -> TelemetryResult<()> {
         pkt.validate()?;
-        self.enqueue_rx_wait(RouterRxItem {
+        let mut st = self.state.lock();
+        st.received_queue.push_back(RouterRxItem {
             src: None,
             data: RouterItem::Packet(pkt),
-        })
+        })?;
+        Ok(())
     }
 
     /// ISR-safe, non-blocking enqueue of a packet for RX processing.
@@ -1412,10 +1404,12 @@ impl Router {
         side: RouterSideId,
     ) -> TelemetryResult<()> {
         pkt.validate()?;
-        self.enqueue_rx_wait(RouterRxItem {
+        let mut st = self.state.lock();
+        st.received_queue.push_back(RouterRxItem {
             src: Some(side),
             data: RouterItem::Packet(pkt),
-        })
+        })?;
+        Ok(())
     }
 
     /// ISR-safe, non-blocking enqueue of a packet with explicit source side.
@@ -1442,10 +1436,12 @@ impl Router {
         bytes: &[u8],
         side: RouterSideId,
     ) -> TelemetryResult<()> {
-        self.enqueue_rx_wait(RouterRxItem {
+        let mut st = self.state.lock();
+        st.received_queue.push_back(RouterRxItem {
             src: Some(side),
             data: RouterItem::Serialized(Arc::from(bytes)),
-        })
+        })?;
+        Ok(())
     }
 
     /// ISR-safe, non-blocking enqueue of serialized bytes with source side.

@@ -1370,7 +1370,7 @@ pub extern "C" fn seds_router_rx_serialized_packet_to_queue(
     }
     let router = unsafe { &(*r).inner };
     let slice = unsafe { slice::from_raw_parts(bytes, len) };
-    ok_or_status(router.rx_serialized_queue_isr(slice))
+    ok_or_status(router.rx_serialized_queue(slice))
 }
 
 #[unsafe(no_mangle)]
@@ -1386,7 +1386,7 @@ pub extern "C" fn seds_router_rx_packet_to_queue(
         Ok(p) => p,
         Err(_) => return status_from_err(TelemetryError::InvalidType),
     };
-    ok_or_status(router.rx_queue_isr(pkt))
+    ok_or_status(router.rx_queue(pkt))
 }
 
 #[unsafe(no_mangle)]
@@ -1512,7 +1512,7 @@ pub extern "C" fn seds_router_rx_serialized_packet_to_queue_from_side(
     }
     let router = unsafe { &(*r).inner };
     let slice = unsafe { slice::from_raw_parts(bytes, len) };
-    ok_or_status(router.rx_serialized_queue_from_side_isr(slice, side_id as usize))
+    ok_or_status(router.rx_serialized_queue_from_side(slice, side_id as usize))
 }
 
 #[unsafe(no_mangle)]
@@ -1529,7 +1529,7 @@ pub extern "C" fn seds_router_rx_packet_to_queue_from_side(
         Ok(p) => p,
         Err(_) => return status_from_err(TelemetryError::InvalidType),
     };
-    ok_or_status(router.rx_queue_from_side_isr(pkt, side_id as usize))
+    ok_or_status(router.rx_queue_from_side(pkt, side_id as usize))
 }
 
 // ============================================================================
