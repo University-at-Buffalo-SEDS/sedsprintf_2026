@@ -75,7 +75,6 @@ mod embedded_alloc {
     unsafe extern "C" {
         fn telemetryMalloc(size: usize) -> *mut core::ffi::c_void;
         fn telemetryFree(ptr: *mut core::ffi::c_void);
-        fn seds_error_msg(msg: *const u8, len: usize);
         fn telemetry_panic_hook(msg: *const u8, len: usize);
     }
 
