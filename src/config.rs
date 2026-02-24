@@ -67,7 +67,7 @@ pub const QUEUE_GROW_STEP: f64 = match option_env!("QUEUE_GROW_STEP") {
 /// Minimum payload size (in bytes) before we consider compression.
 pub const PAYLOAD_COMPRESS_THRESHOLD: usize = match option_env!("PAYLOAD_COMPRESS_THRESHOLD") {
     Some(val) => parse_usize(val),
-    None => 16,
+    None => 128,
 };
 
 /// Compression level to use when compressing telemetry payloads (0-10).
