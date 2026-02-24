@@ -2089,6 +2089,163 @@ mod concurrency_tests {
         );
     }
 
+    /// RTOS-like pattern: multiple ingress threads queue serialized packets while
+    /// another thread continuously drains router queues. This should not deadlock
+    /// and all queued packets should eventually be processed once.
+    #[test]
+    fn rtos_like_ingress_and_processing_no_deadlock() {
+        const THREADS: usize = 4;
+        const ITERS_PER_THREAD: usize = 80;
+        let total = THREADS * ITERS_PER_THREAD;
+
+        let hits = Arc::new(AtomicUsize::new(0));
+        let hits_c = hits.clone();
+        let handler = EndpointHandler::new_packet_handler(
+            DataEndpoint::SdCard,
+            move |_pkt: &TelemetryPacket| {
+                hits_c.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+        );
+
+        let router = Arc::new(Router::new(
+            RouterMode::Sink,
+            RouterConfig::new(vec![handler]),
+            zero_clock(),
+        ));
+
+        let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let proc_router = router.clone();
+        let done_c = done.clone();
+        let processor = thread::spawn(move || {
+            while !done_c.load(Ordering::SeqCst) {
+                proc_router.process_all_queues_with_timeout(1).unwrap();
+            }
+            proc_router.process_all_queues().unwrap();
+        });
+
+        let mut producers = Vec::new();
+        for tid in 0..THREADS {
+            let r = router.clone();
+            producers.push(thread::spawn(move || {
+                for i in 0..ITERS_PER_THREAD {
+                    let idx = (tid * ITERS_PER_THREAD + i) as u64;
+                    let base = 1.0_f32 + idx as f32 * 0.001;
+                    let pkt = TelemetryPacket::from_f32_slice(
+                        DataType::GpsData,
+                        &[base, 2.0, 3.0],
+                        &[DataEndpoint::SdCard],
+                        idx,
+                    )
+                    .unwrap();
+                    let wire = serialize::serialize_packet(&pkt);
+                    r.rx_serialized_queue(&wire).unwrap();
+                }
+            }));
+        }
+
+        for t in producers {
+            t.join().expect("producer thread panicked");
+        }
+
+        done.store(true, Ordering::SeqCst);
+        processor.join().expect("processor thread panicked");
+
+        assert_eq!(
+            hits.load(Ordering::SeqCst),
+            total,
+            "expected {total} handler invocations from RTOS-like queued ingress"
+        );
+    }
+
+    /// RTOS-like relay scenario: packets arrive from two sides while a worker
+    /// thread drains queues. Ensures side-tagged queue ingress remains stable.
+    #[test]
+    fn rtos_like_side_ingress_and_processing_no_deadlock() {
+        const THREADS: usize = 4;
+        const ITERS_PER_THREAD: usize = 60;
+        let total = THREADS * ITERS_PER_THREAD;
+
+        let hits = Arc::new(AtomicUsize::new(0));
+        let hits_c = hits.clone();
+        let local = EndpointHandler::new_packet_handler(
+            DataEndpoint::SdCard,
+            move |_pkt: &TelemetryPacket| {
+                hits_c.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+        );
+
+        let tx_count = Arc::new(AtomicUsize::new(0));
+        let tx_c0 = tx_count.clone();
+        let tx_c1 = tx_count.clone();
+
+        let router = Arc::new(Router::new(
+            RouterMode::Relay,
+            RouterConfig::new(vec![local]),
+            zero_clock(),
+        ));
+
+        let side0 = router.add_side_serialized("S0", move |_b| {
+            tx_c0.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        });
+        let side1 = router.add_side_serialized("S1", move |_b| {
+            tx_c1.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        });
+        assert_eq!(side0, 0);
+        assert_eq!(side1, 1);
+
+        let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let proc_router = router.clone();
+        let done_c = done.clone();
+        let processor = thread::spawn(move || {
+            while !done_c.load(Ordering::SeqCst) {
+                proc_router.process_all_queues_with_timeout(1).unwrap();
+            }
+            proc_router.process_all_queues().unwrap();
+        });
+
+        let mut producers = Vec::new();
+        for tid in 0..THREADS {
+            let r = router.clone();
+            producers.push(thread::spawn(move || {
+                for i in 0..ITERS_PER_THREAD {
+                    let idx = (tid * ITERS_PER_THREAD + i) as u64;
+                    let side = if (idx & 1) == 0 { 0 } else { 1 };
+                    let base = 10.0_f32 + idx as f32 * 0.01;
+                    let pkt = TelemetryPacket::from_f32_slice(
+                        DataType::GpsData,
+                        &[base, 2.0, 3.0],
+                        &[DataEndpoint::SdCard, DataEndpoint::Radio],
+                        idx,
+                    )
+                    .unwrap();
+                    let wire = serialize::serialize_packet(&pkt);
+                    r.rx_serialized_queue_from_side(&wire, side).unwrap();
+                }
+            }));
+        }
+
+        for t in producers {
+            t.join().expect("producer thread panicked");
+        }
+
+        done.store(true, Ordering::SeqCst);
+        processor.join().expect("processor thread panicked");
+
+        assert_eq!(
+            hits.load(Ordering::SeqCst),
+            total,
+            "expected local handler to see all side-tagged packets"
+        );
+        assert!(
+            tx_count.load(Ordering::SeqCst) > 0,
+            "relay mode should have forwarded packets to remote sides"
+        );
+    }
+
     // ------------------------------------------------------------------------
     // Concurrent calls to receive_serialized
     // ------------------------------------------------------------------------
