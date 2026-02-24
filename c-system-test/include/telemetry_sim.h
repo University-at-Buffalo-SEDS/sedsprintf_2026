@@ -39,6 +39,9 @@ struct SimNode
     unsigned radio_hits; // times RADIO handler ran
     unsigned sd_hits; // times SD handler ran
     unsigned time_sync_hits; // times TIME_SYNC handler ran
+    unsigned ts_announce_hits; // TIME_SYNC_ANNOUNCE packets seen
+    unsigned ts_request_hits; // TIME_SYNC_REQUEST packets seen
+    unsigned ts_response_hits; // TIME_SYNC_RESPONSE packets seen
 };
 
 // Bus API unchanged...

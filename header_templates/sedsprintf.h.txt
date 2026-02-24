@@ -74,22 +74,33 @@ typedef struct SedsLocalEndpointDesc
    String / error formatting
    ============================== */
 
+/** @brief Return required buffer length for formatting packet header text. */
 int32_t seds_pkt_header_string_len(const SedsPacketView * pkt);
 
+/** @brief Return required buffer length for formatting full packet text. */
 int32_t seds_pkt_to_string_len(const SedsPacketView * pkt);
 
+/** @brief Return required buffer length for formatting an error code string. */
 int32_t seds_error_to_string_len(const int32_t error_code);
 
+/** @brief Format only packet header fields into @p buf. */
 SedsResult seds_pkt_header_string(const SedsPacketView * pkt, char * buf, size_t buf_len);
 
+/** @brief Format full packet fields (header + payload) into @p buf. */
 SedsResult seds_pkt_to_string(const SedsPacketView * pkt, char * buf, size_t buf_len);
 
+/** @brief Convert a SedsResult / TelemetryError code to text. */
 SedsResult seds_error_to_string(int32_t error_code, char * buf, size_t buf_len);
 
 /* ==============================
    Router lifecycle
    ============================== */
 
+/**
+ * @brief Create a router instance.
+ *
+ * @return Non-NULL handle on success; NULL on failure.
+ */
 SedsRouter * seds_router_new(
                              SedsRouterMode mode,
                              SedsNowMsFn now_ms_cb,
@@ -98,12 +109,14 @@ SedsRouter * seds_router_new(
                              size_t n_handlers
                              );
 
+/** @brief Destroy a router created by seds_router_new(). */
 void seds_router_free(SedsRouter * r);
 
 /* ==============================
    Router side registration
    ============================== */
 
+/** @brief Add a serialized TX side. Returns side id or negative SedsResult. */
 int32_t seds_router_add_side_serialized(
     SedsRouter * r,
     const char * name,
@@ -113,6 +126,7 @@ int32_t seds_router_add_side_serialized(
     bool reliable_enabled
 );
 
+/** @brief Add a packet-view TX side. Returns side id or negative SedsResult. */
 int32_t seds_router_add_side_packet(
     SedsRouter * r,
     const char * name,
@@ -175,49 +189,70 @@ SedsResult seds_router_log_string_ex(SedsRouter * r,
    Legacy convenience (still supported)
    ============================== */
 
+/** @brief Receive serialized packet bytes immediately (non-queued). */
 SedsResult seds_router_receive_serialized(SedsRouter * r, const uint8_t * bytes, size_t len);
 
+/** @brief Receive a packet view immediately (non-queued). */
 SedsResult seds_router_receive(SedsRouter * r, const SedsPacketView * view);
 
+/** @brief Transmit a packet view immediately. */
 SedsResult seds_router_transmit_message(SedsRouter * r, const SedsPacketView * view);
 
+/** @brief Process TX queue until empty. */
 SedsResult seds_router_process_tx_queue(SedsRouter * r);
 
+/** @brief Enqueue a packet view for TX processing. */
 SedsResult seds_router_transmit_message_queue(SedsRouter * r, const SedsPacketView * view);
 
+/** @brief Enqueue serialized bytes for TX processing. */
 SedsResult seds_router_transmit_serialized_message_queue(SedsRouter * r, const uint8_t * bytes, size_t len);
 
+/** @brief Transmit serialized bytes immediately. */
 SedsResult seds_router_transmit_serialized_message(SedsRouter * r, const uint8_t * bytes, size_t len);
 
+/** @brief Process RX queue until empty. */
 SedsResult seds_router_process_rx_queue(SedsRouter * r);
 
+/** @brief Enqueue serialized bytes for RX processing. */
 SedsResult seds_router_rx_serialized_packet_to_queue(SedsRouter * r, const uint8_t * bytes, size_t len);
 
+/** @brief Enqueue a packet view for RX processing. */
 SedsResult seds_router_rx_packet_to_queue(SedsRouter * r, const SedsPacketView * view);
 
+/** @brief Process TX queue for up to @p timeout_ms (0 drains fully). */
 SedsResult seds_router_process_tx_queue_with_timeout(SedsRouter * r, uint32_t timeout_ms);
 
+/** @brief Process RX queue for up to @p timeout_ms (0 drains fully). */
 SedsResult seds_router_process_rx_queue_with_timeout(SedsRouter * r, uint32_t timeout_ms);
 
+/** @brief Process TX and RX queues for up to @p timeout_ms (0 drains fully). */
 SedsResult seds_router_process_all_queues_with_timeout(SedsRouter * r, uint32_t timeout_ms);
 
+/** @brief Process TX and RX queues until empty. */
 SedsResult seds_router_process_all_queues(SedsRouter * r);
 
+/** @brief Clear TX and RX queues without processing. */
 SedsResult seds_router_clear_queues(SedsRouter * r);
 
+/** @brief Clear RX queue without processing. */
 SedsResult seds_router_clear_rx_queue(SedsRouter * r);
 
+/** @brief Clear TX queue without processing. */
 SedsResult seds_router_clear_tx_queue(SedsRouter * r);
 
+/** @brief Immediate receive with explicit ingress side id. */
 SedsResult seds_router_receive_serialized_from_side(
     SedsRouter* r, uint32_t side_id, const uint8_t* bytes, size_t len);
 
+/** @brief Immediate packet receive with explicit ingress side id. */
 SedsResult seds_router_receive_from_side(
     SedsRouter* r, uint32_t side_id, const SedsPacketView* view);
 
+/** @brief Enqueue serialized receive with explicit ingress side id. */
 SedsResult seds_router_rx_serialized_packet_to_queue_from_side(
     SedsRouter* r, uint32_t side_id, const uint8_t* bytes, size_t len);
 
+/** @brief Enqueue packet receive with explicit ingress side id. */
 SedsResult seds_router_rx_packet_to_queue_from_side(
     SedsRouter* r, uint32_t side_id, const SedsPacketView* view);
 
@@ -226,12 +261,16 @@ SedsResult seds_router_rx_packet_to_queue_from_side(
    Payload extraction / serialization helpers
    ============================== */
 
+/** @brief Borrow raw payload bytes and optionally return length in bytes. */
 const void * seds_pkt_bytes_ptr(const SedsPacketView * pkt, size_t * out_len);
 
+/** @brief Borrow payload as elements of @p elem_size and optionally return count. */
 const void * seds_pkt_data_ptr(const SedsPacketView * pkt, size_t elem_size, size_t * out_count);
 
+/** @brief Copy raw payload bytes to @p dst. */
 int32_t seds_pkt_copy_bytes(const SedsPacketView * pkt, void * dst, size_t dst_len);
 
+/** @brief Copy payload elements to @p dst using caller-supplied element size. */
 int32_t seds_pkt_copy_data(const SedsPacketView * pkt, size_t elem_size, void * dst, size_t dst_elems);
 
 
@@ -278,39 +317,48 @@ int32_t seds_pkt_get_bool(const SedsPacketView * pkt, bool     * out, size_t out
  */
 int32_t seds_pkt_get_string(const SedsPacketView * pkt, char * buf, size_t buf_len);
 
-/* @breif Get the length of a string payload (Including NUL terminator).
+/* @brief Get the length of a string payload (Including NUL terminator).
  * @return length (>=0) on success; SedsResult on error.
  */
 int32_t seds_pkt_get_string_len(const SedsPacketView * pkt);
 
 
-
+/** @brief Generic typed payload extraction helper. */
 SedsResult seds_pkt_get_typed(const SedsPacketView * pkt,
                               void * out,
                               size_t count,
                               size_t elem_size,
                               SedsElemKind elem_kind);
 
+/** @brief Return required serialized length for @p view. */
 int32_t seds_pkt_serialize_len(const SedsPacketView * view);
 
+/** @brief Serialize packet view into @p out. */
 int32_t seds_pkt_serialize(const SedsPacketView * view, uint8_t * out, size_t out_len);
 
 typedef struct SedsOwnedPacket SedsOwnedPacket;
 
+/** @brief Deserialize bytes into an owned packet object. */
 SedsOwnedPacket * seds_pkt_deserialize_owned(const uint8_t * bytes, size_t len);
 
+/** @brief Convert owned packet into borrowed packet view fields. */
 SedsResult seds_owned_pkt_view(const SedsOwnedPacket * pkt, SedsPacketView * out_view);
 
+/** @brief Free owned packet object. */
 void seds_owned_pkt_free(SedsOwnedPacket * pkt);
 
+/** @brief Validate serialized packet bytes. */
 SedsResult seds_pkt_validate_serialized(const uint8_t * bytes, size_t len);
 
 typedef struct SedsOwnedHeader SedsOwnedHeader;
 
+/** @brief Deserialize only packet header fields into an owned header object. */
 SedsOwnedHeader * seds_pkt_deserialize_header_owned(const uint8_t * bytes, size_t len);
 
+/** @brief Convert owned header into borrowed packet-view-compatible fields. */
 SedsResult seds_owned_header_view(const SedsOwnedHeader * h, SedsPacketView * out_view);
 
+/** @brief Free owned header object. */
 void seds_owned_header_free(SedsOwnedHeader * h);
 
 /* ==============================
