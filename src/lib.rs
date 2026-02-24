@@ -141,7 +141,6 @@ mod embedded_alloc {
     fn panic(_info: &PanicInfo) -> ! {
         let msg = b"rust panic";
         unsafe {
-            seds_error_msg(msg.as_ptr(), msg.len());
             telemetry_panic_hook(msg.as_ptr(), msg.len());
         }
 

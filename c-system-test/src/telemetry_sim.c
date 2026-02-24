@@ -202,6 +202,7 @@ SedsResult timesync_handler(const SedsPacketView * pkt, void * user)
 
     if (pkt->ty == SEDS_DT_TIME_SYNC_REQUEST && pkt->payload_len >= 16)
     {
+        if (self) self->ts_request_hits++;
         const uint64_t seq = read_u64_le(pkt->payload);
         const uint64_t t1 = read_u64_le(pkt->payload + 8);
         const uint64_t t2 = node_now_since_bus_ms(self);
@@ -217,6 +218,7 @@ SedsResult timesync_handler(const SedsPacketView * pkt, void * user)
 
     if (pkt->ty == SEDS_DT_TIME_SYNC_ANNOUNCE && pkt->payload_len >= 16)
     {
+        if (self) self->ts_announce_hits++;
         const uint64_t priority = read_u64_le(pkt->payload);
         const uint64_t t_ms = read_u64_le(pkt->payload + 8);
         printf("[TIME_SYNC] announce priority=%llu time_ms=%llu\n",
@@ -226,6 +228,7 @@ SedsResult timesync_handler(const SedsPacketView * pkt, void * user)
 
     if (pkt->ty == SEDS_DT_TIME_SYNC_RESPONSE && pkt->payload_len >= 32)
     {
+        if (self) self->ts_response_hits++;
         const uint64_t seq = read_u64_le(pkt->payload);
         const uint64_t t1 = read_u64_le(pkt->payload + 8);
         const uint64_t t2 = read_u64_le(pkt->payload + 16);
@@ -265,6 +268,9 @@ SedsResult node_init(SimNode * n, SimBus * bus, const char * name, int radio, in
     n->radio_hits = 0;
     n->sd_hits = 0;
     n->time_sync_hits = 0;
+    n->ts_announce_hits = 0;
+    n->ts_request_hits = 0;
+    n->ts_response_hits = 0;
 
     SedsLocalEndpointDesc locals[3];
     uint32_t num = 0;
