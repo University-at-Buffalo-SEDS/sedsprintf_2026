@@ -9,8 +9,24 @@ add_executable(c_system_test
         src/telemetry_sim.c
 )
 
+add_executable(c_system_timesync_test
+        src/timesync_multinode_test.c
+        src/telemetry_sim.c
+)
+
+add_executable(c_system_board_topology_timesync_test
+        src/board_topology_timesync_test.c
+        src/telemetry_sim.c
+)
+
 # 2) Local includes (your own headers)
 target_include_directories(c_system_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+)
+target_include_directories(c_system_timesync_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+)
+target_include_directories(c_system_board_topology_timesync_test PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
 
@@ -26,3 +42,7 @@ add_subdirectory(
 # 4) Link + add the crate's public headers
 target_link_libraries(c_system_test PRIVATE sedsprintf_rs)
 target_include_directories(c_system_test PRIVATE "${SEDSPRINTF_RS_INCLUDE_DIR}")
+target_link_libraries(c_system_timesync_test PRIVATE sedsprintf_rs)
+target_include_directories(c_system_timesync_test PRIVATE "${SEDSPRINTF_RS_INCLUDE_DIR}")
+target_link_libraries(c_system_board_topology_timesync_test PRIVATE sedsprintf_rs)
+target_include_directories(c_system_board_topology_timesync_test PRIVATE "${SEDSPRINTF_RS_INCLUDE_DIR}")

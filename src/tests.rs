@@ -2008,6 +2008,7 @@ mod concurrency_tests {
     };
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::time::Duration;
     use std::thread;
 
     /// Simple clock that always returns 0 (blanket impl<Fn() -> u64> for Clock).
@@ -2243,6 +2244,88 @@ mod concurrency_tests {
         assert!(
             tx_count.load(Ordering::SeqCst) > 0,
             "relay mode should have forwarded packets to remote sides"
+        );
+    }
+
+    /// A local handler can safely call back into the same Router (enqueueing
+    /// new work) without deadlocking queue processing.
+    #[test]
+    fn handler_can_reenter_router_without_deadlock() {
+        use std::sync::atomic::AtomicBool;
+        use std::sync::mpsc;
+        use std::sync::OnceLock;
+
+        let router_ref: Arc<OnceLock<Arc<Router>>> = Arc::new(OnceLock::new());
+        let triggered = Arc::new(AtomicBool::new(false));
+
+        let h1_hits = Arc::new(AtomicUsize::new(0));
+        let h2_hits = Arc::new(AtomicUsize::new(0));
+        let h1_hits_c = h1_hits.clone();
+        let h2_hits_c = h2_hits.clone();
+        let triggered_c = triggered.clone();
+        let router_ref_c = router_ref.clone();
+
+        let h1 = EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt| {
+            h1_hits_c.fetch_add(1, Ordering::SeqCst);
+            if !triggered_c.swap(true, Ordering::SeqCst) {
+                let chained = TelemetryPacket::from_f32_slice(
+                    DataType::GpsData,
+                    &[9.0_f32, 8.0, 7.0],
+                    &[DataEndpoint::Radio],
+                    999,
+                )?;
+                let r = router_ref_c
+                    .get()
+                    .expect("router OnceLock should be initialized");
+                r.rx_queue(chained)?;
+            }
+            Ok(())
+        });
+
+        let h2 = EndpointHandler::new_packet_handler(DataEndpoint::Radio, move |_pkt| {
+            h2_hits_c.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        });
+
+        let router = Arc::new(Router::new(
+            RouterMode::Sink,
+            RouterConfig::new(vec![h1, h2]),
+            zero_clock(),
+        ));
+        router_ref
+            .set(router.clone())
+            .expect("router OnceLock should only be set once");
+
+        let first = TelemetryPacket::from_f32_slice(
+            DataType::GpsData,
+            &[1.0_f32, 2.0, 3.0],
+            &[DataEndpoint::SdCard],
+            100,
+        )
+        .unwrap();
+        router.rx_queue(first).unwrap();
+
+        let (tx_done, rx_done) = mpsc::channel();
+        let r = router.clone();
+        thread::spawn(move || {
+            let out = (|| -> TelemetryResult<()> {
+                r.process_rx_queue()?;
+                r.process_rx_queue()?;
+                Ok(())
+            })();
+            let _ = tx_done.send(out);
+        });
+
+        let done = rx_done
+            .recv_timeout(Duration::from_secs(2))
+            .expect("processing timed out (possible deadlock)");
+        done.expect("processing returned error");
+
+        assert_eq!(h1_hits.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            h2_hits.load(Ordering::SeqCst),
+            1,
+            "chained callback enqueue should be processed exactly once"
         );
     }
 
