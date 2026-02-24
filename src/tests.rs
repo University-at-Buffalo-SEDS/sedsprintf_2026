@@ -2004,7 +2004,6 @@ mod concurrency_tests {
         router::{Clock, EndpointHandler, Router, RouterConfig},
         serialize,
         telemetry_packet::TelemetryPacket,
-        TelemetryError,
         TelemetryResult,
     };
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -2090,11 +2089,11 @@ mod concurrency_tests {
         );
     }
 
-    /// Simulate ISR-style enqueue from multiple producers using the non-blocking
-    /// `rx_serialized_queue_isr` API. Contention may return `rx queue busy`,
-    /// but must not produce any other error and accepted packets must be delivered.
+    /// RTOS-like pattern: multiple ingress threads queue serialized packets while
+    /// another thread continuously drains router queues. This should not deadlock
+    /// and all queued packets should eventually be processed once.
     #[test]
-    fn isr_rx_serialized_queue_is_non_blocking_and_thread_safe() {
+    fn rtos_like_ingress_and_processing_no_deadlock() {
         const THREADS: usize = 4;
         const ITERS_PER_THREAD: usize = 80;
         let total = THREADS * ITERS_PER_THREAD;
@@ -2115,18 +2114,23 @@ mod concurrency_tests {
             zero_clock(),
         ));
 
-        let ok_count = Arc::new(AtomicUsize::new(0));
-        let busy_count = Arc::new(AtomicUsize::new(0));
+        let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let proc_router = router.clone();
+        let done_c = done.clone();
+        let processor = thread::spawn(move || {
+            while !done_c.load(Ordering::SeqCst) {
+                proc_router.process_all_queues_with_timeout(1).unwrap();
+            }
+            proc_router.process_all_queues().unwrap();
+        });
 
-        let mut threads_vec = Vec::new();
+        let mut producers = Vec::new();
         for tid in 0..THREADS {
-            let r_cloned = router.clone();
-            let ok_c = ok_count.clone();
-            let busy_c = busy_count.clone();
-            threads_vec.push(thread::spawn(move || {
+            let r = router.clone();
+            producers.push(thread::spawn(move || {
                 for i in 0..ITERS_PER_THREAD {
                     let idx = (tid * ITERS_PER_THREAD + i) as u64;
-                    let base = 10.0_f32 + idx as f32 * 0.01;
+                    let base = 1.0_f32 + idx as f32 * 0.001;
                     let pkt = TelemetryPacket::from_f32_slice(
                         DataType::GpsData,
                         &[base, 2.0, 3.0],
@@ -2135,45 +2139,36 @@ mod concurrency_tests {
                     )
                     .unwrap();
                     let wire = serialize::serialize_packet(&pkt);
-                    match r_cloned.rx_serialized_queue_isr(&wire) {
-                        Ok(()) => {
-                            ok_c.fetch_add(1, Ordering::SeqCst);
-                        }
-                        Err(TelemetryError::Io("rx queue busy")) => {
-                            busy_c.fetch_add(1, Ordering::SeqCst);
-                        }
-                        Err(e) => panic!("unexpected ISR enqueue error: {e:?}"),
-                    }
+                    r.rx_serialized_queue(&wire).unwrap();
                 }
             }));
         }
 
-        for t in threads_vec {
-            t.join().expect("ISR producer thread panicked");
+        for t in producers {
+            t.join().expect("producer thread panicked");
         }
 
-        let accepted = ok_count.load(Ordering::SeqCst);
-        let busy = busy_count.load(Ordering::SeqCst);
-        assert_eq!(
-            accepted + busy,
-            total,
-            "every enqueue attempt must be accounted for"
-        );
+        done.store(true, Ordering::SeqCst);
+        processor.join().expect("processor thread panicked");
 
-        router.process_rx_queue().unwrap();
         assert_eq!(
             hits.load(Ordering::SeqCst),
-            accepted,
-            "accepted ISR enqueues must be delivered exactly once"
+            total,
+            "expected {total} handler invocations from RTOS-like queued ingress"
         );
     }
 
-    /// Ensure queue clearing also drops packets added through ISR-safe enqueue.
+    /// RTOS-like relay scenario: packets arrive from two sides while a worker
+    /// thread drains queues. Ensures side-tagged queue ingress remains stable.
     #[test]
-    fn clear_rx_queue_drops_isr_enqueued_packets() {
+    fn rtos_like_side_ingress_and_processing_no_deadlock() {
+        const THREADS: usize = 4;
+        const ITERS_PER_THREAD: usize = 60;
+        let total = THREADS * ITERS_PER_THREAD;
+
         let hits = Arc::new(AtomicUsize::new(0));
         let hits_c = hits.clone();
-        let handler = EndpointHandler::new_packet_handler(
+        let local = EndpointHandler::new_packet_handler(
             DataEndpoint::SdCard,
             move |_pkt: &TelemetryPacket| {
                 hits_c.fetch_add(1, Ordering::SeqCst);
@@ -2181,31 +2176,73 @@ mod concurrency_tests {
             },
         );
 
-        let router = Router::new(
-            RouterMode::Sink,
-            RouterConfig::new(vec![handler]),
+        let tx_count = Arc::new(AtomicUsize::new(0));
+        let tx_c0 = tx_count.clone();
+        let tx_c1 = tx_count.clone();
+
+        let router = Arc::new(Router::new(
+            RouterMode::Relay,
+            RouterConfig::new(vec![local]),
             zero_clock(),
-        );
+        ));
 
-        let pkt = TelemetryPacket::from_f32_slice(
-            DataType::GpsData,
-            &[1.0_f32, 2.0, 3.0],
-            &[DataEndpoint::SdCard],
-            123,
-        )
-        .unwrap();
-        let wire = serialize::serialize_packet(&pkt);
-        router
-            .rx_serialized_queue_isr(&wire)
-            .expect("ISR enqueue should succeed");
+        let side0 = router.add_side_serialized("S0", move |_b| {
+            tx_c0.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        });
+        let side1 = router.add_side_serialized("S1", move |_b| {
+            tx_c1.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        });
+        assert_eq!(side0, 0);
+        assert_eq!(side1, 1);
 
-        router.clear_rx_queue();
-        router.process_rx_queue().unwrap();
+        let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let proc_router = router.clone();
+        let done_c = done.clone();
+        let processor = thread::spawn(move || {
+            while !done_c.load(Ordering::SeqCst) {
+                proc_router.process_all_queues_with_timeout(1).unwrap();
+            }
+            proc_router.process_all_queues().unwrap();
+        });
+
+        let mut producers = Vec::new();
+        for tid in 0..THREADS {
+            let r = router.clone();
+            producers.push(thread::spawn(move || {
+                for i in 0..ITERS_PER_THREAD {
+                    let idx = (tid * ITERS_PER_THREAD + i) as u64;
+                    let side = if (idx & 1) == 0 { 0 } else { 1 };
+                    let base = 10.0_f32 + idx as f32 * 0.01;
+                    let pkt = TelemetryPacket::from_f32_slice(
+                        DataType::GpsData,
+                        &[base, 2.0, 3.0],
+                        &[DataEndpoint::SdCard, DataEndpoint::Radio],
+                        idx,
+                    )
+                    .unwrap();
+                    let wire = serialize::serialize_packet(&pkt);
+                    r.rx_serialized_queue_from_side(&wire, side).unwrap();
+                }
+            }));
+        }
+
+        for t in producers {
+            t.join().expect("producer thread panicked");
+        }
+
+        done.store(true, Ordering::SeqCst);
+        processor.join().expect("processor thread panicked");
 
         assert_eq!(
             hits.load(Ordering::SeqCst),
-            0,
-            "cleared RX queue should not deliver ISR-enqueued packets"
+            total,
+            "expected local handler to see all side-tagged packets"
+        );
+        assert!(
+            tx_count.load(Ordering::SeqCst) > 0,
+            "relay mode should have forwarded packets to remote sides"
         );
     }
 
