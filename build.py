@@ -789,12 +789,6 @@ def main(argv: list[str]) -> None:
 
             print(f"info: Embedded output: {repo_root / 'target' / embedded_target / embedded_profile_name}")
             print_artifact_sizes(repo_root, target=embedded_target, profile=embedded_profile_name)
-            after_sizes = collect_artifact_sizes(
-                repo_root,
-                target=embedded_target,
-                profile=embedded_profile_name,
-            )
-            print_artifact_size_delta(before_sizes, after_sizes)
         else:
             expected = ", ".join(preferred_cross_compilers(embedded_target)) or "CC_<target>/TARGET_CC"
             print(
@@ -857,8 +851,6 @@ def main(argv: list[str]) -> None:
         )
         print(f"info: Output: {repo_root / 'target' / target / profile_name}")
         print_artifact_sizes(repo_root, target=target, profile=profile_name)
-        after_sizes = collect_artifact_sizes(repo_root, target=target, profile=profile_name)
-        print_artifact_size_delta(before_sizes, after_sizes)
         return
 
     if build_python:
