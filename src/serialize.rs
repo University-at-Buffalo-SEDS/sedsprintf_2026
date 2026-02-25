@@ -1015,7 +1015,7 @@ mod payload_compression {
     #[cfg(feature = "compression")]
     use crate::config::PAYLOAD_COMPRESS_THRESHOLD;
     #[cfg(feature = "compression")]
-    use heatshrink::Config;
+    use zstd_safe::CompressionLevel;
 
     /// Compress the given payload if it is beneficial to do so.
     /// # Arguments
@@ -1050,10 +1050,12 @@ mod payload_compression {
             return None;
         }
 
-        let cfg = Config::default();
         let mut out = vec![0u8; max_output];
-        let compressed = heatshrink::encode(input, &mut out, &cfg).ok()?;
-        Some(compressed.to_vec())
+        // Use default-level behavior for better compression ratio on typical telemetry payloads.
+        let level: CompressionLevel = 1;
+        let written = zstd_safe::compress(&mut out[..], input, level).ok()?;
+        out.truncate(written);
+        Some(out)
     }
 
     /// Decompress the given compressed payload.
@@ -1067,18 +1069,13 @@ mod payload_compression {
     ///   does not match `expected_len`.
     #[cfg(feature = "compression")]
     pub fn decompress(compressed: &[u8], expected_len: usize) -> Result<Vec<u8>, TelemetryError> {
-        let cfg = Config::default();
-        // Heatshrink bitstream flush can leave padded tail bits that decode into
-        // extra bytes with this crate's decoder. Decode with bounded slack and
-        // then enforce the wire-declared uncompressed length.
-        let slack = 16usize;
-        let mut out = vec![0u8; expected_len.saturating_add(slack)];
-        let decompressed = heatshrink::decode(compressed, &mut out, &cfg)
+        let mut out = vec![0u8; expected_len];
+        let written = zstd_safe::decompress(&mut out[..], compressed)
             .map_err(|_| TelemetryError::Deserialize("decompression failed"))?;
-        if decompressed.len() < expected_len {
+        if written != expected_len {
             return Err(TelemetryError::Deserialize("decompressed size mismatch"));
         }
-        Ok(decompressed[..expected_len].to_vec())
+        Ok(out)
     }
 
     // Stub when compression is disabled (never actually produces compressed payloads).

@@ -19,7 +19,7 @@ default = ["std", "compression", "timesync"]
 std = []
 embedded = ["compression", "timesync"]
 python = ["std", "pyo3/extension-module", "compression", "timesync"]
-compression = ["heatshrink"]
+compression = ["zstd-safe"]
 timesync = []
 
 [package.metadata.maturin]
@@ -68,7 +68,7 @@ crc32fast = { version = "1.5.0", default-features = false }
 
 # Optional dependencies enabled by features
 pyo3 = { version = "0.28.2", optional = true, features = ["auto-initialize", "extension-module", "multiple-pymethods"] }
-heatshrink = { version = "0.2.0", optional = true }
+zstd-safe = { version = "7.2.4", optional = true, default-features = false }
 [build-dependencies]
 regex = "1.12.3"
 serde = { version = "1.0.228", features = ["derive"] }

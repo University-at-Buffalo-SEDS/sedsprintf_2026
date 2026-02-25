@@ -1,5 +1,23 @@
 # Changelogs
 
+## Version 3.2.3 highlights
+
+- Compression backend consolidation:
+  - Switched to a single backend (`zstd-safe`) for sender/payload compression.
+  - Removed compression-level configuration knobs from build/docs/examples.
+  - Kept bounded compression behavior and added constrained-memory regression tests.
+- Router/FFI queueing and re-entrancy hardening:
+  - RX queue paths and lock behavior were tightened to avoid deadlocks under RTOS-like concurrency.
+  - Added tests for handler re-entry into router APIs and mixed ingress/processing concurrency.
+- Time sync validation expansion:
+  - Added C system tests for multi-node time sync and board-topology scenarios (grandmaster + consumers).
+  - Added failover coverage where backup sources are selected after source timeout.
+- C/C++ integration updates:
+  - Expanded C header template function descriptions.
+  - macOS C system-test builds now align deployment target settings with Rust staticlib builds to avoid linker mismatch warnings.
+- Full
+  changelog: [v3.2.2...v3.2.3](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/-/compare/v3.2.2...v3.2.3)
+
 ## Version 3.2.2 highlights
 
 - Script reliability and UX improvements: better error handling with actionable failure hints across update/build/docs

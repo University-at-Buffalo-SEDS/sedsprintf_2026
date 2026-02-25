@@ -69,6 +69,14 @@ Queues are bounded. If traffic is bursty:
 
 Bare-metal targets must provide `telemetryMalloc`, `telemetryFree`, and `seds_error_msg`.
 
+## macOS C system test linker target warnings
+
+If C system tests print warnings like "object file ... built for newer 'macOS' version than being linked":
+
+- Ensure Rust staticlib and CMake link use the same deployment target.
+- In this repo, `c-system-test/CMakeLists.txt` pins `CMAKE_OSX_DEPLOYMENT_TARGET` and forwards it into Rust builds.
+- If you maintain a custom CMake integration, set `CMAKE_OSX_DEPLOYMENT_TARGET` explicitly and keep it consistent.
+
 ## Python import fails
 
 - Ensure you built the extension: `./build.py python` or `maturin develop`. (
