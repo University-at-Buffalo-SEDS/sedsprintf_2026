@@ -160,7 +160,7 @@ Design choices:
 
 - **ULEB128 varints** minimize size for small values.
 - **Endpoint bitmap** avoids repeated endpoint IDs; size is based on `MAX_VALUE_DATA_ENDPOINT`.
-- **Sender/payload compression** (deflate) is applied only when it makes the payload smaller.
+- **Sender/payload compression** uses a low-memory backend (`heatshrink`) and is applied only when it makes the payload smaller.
 
 `packet_id_from_wire` parses only as much as needed to compute the same packet ID as `TelemetryPacket::packet_id`. It
 always hashes **decompressed** sender/payload bytes, so dedupe works across compressed and uncompressed links.

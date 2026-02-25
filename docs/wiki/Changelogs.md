@@ -121,7 +121,7 @@ What's included:
 
 ## Version 1.5.0 highlights
 
-- Added payload and sender string compression with configurable thresholds and compression level.
+- Added payload and sender string compression with configurable thresholds.
 - Full
   changelog: [v1.4.0...v1.5.0](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/-/compare/v1.4.0...v1.5.0)
 

@@ -2,12 +2,15 @@
 mod timesync_system_test {
     use sedsprintf_rs::config::{DataEndpoint, DataType};
     use sedsprintf_rs::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
+    use sedsprintf_rs::serialize;
+    use sedsprintf_rs::telemetry_packet::TelemetryPacket;
     use sedsprintf_rs::timesync::{
         build_timesync_announce_with_sender, build_timesync_request, build_timesync_response,
         compute_offset_delay, TimeSyncConfig, TimeSyncRole, TimeSyncTracker,
     };
 
     use std::sync::{Arc, Mutex};
+    use std::thread;
 
     fn zero_clock() -> Box<dyn Clock + Send + Sync> {
         Box::new(|| 0u64)
@@ -66,5 +69,47 @@ mod timesync_system_test {
         tracker.handle_announce(&pkt_b_late, 6_500).unwrap();
         assert_eq!(tracker.current_source().unwrap().sender, "SRC_B");
         assert!(!tracker.should_announce(6_500));
+    }
+
+    #[cfg(feature = "compression")]
+    #[test]
+    fn compression_mixed_workload_threaded_system_stability() {
+        let worker_count = 4usize;
+        let iters_per_worker = 600usize;
+
+        let mut joins = Vec::new();
+        for tid in 0..worker_count {
+            joins.push(thread::spawn(move || {
+                for i in 0..iters_per_worker {
+                    let ts = (tid as u64) * 10_000 + (i as u64);
+                    let payload = if i % 2 == 0 {
+                        vec![b'Q'; 224]
+                    } else {
+                        let mut v = Vec::with_capacity(224);
+                        for j in 0..224u16 {
+                            v.push(32u8 + (((i as u16 + j + tid as u16) as u8) % 95));
+                        }
+                        v
+                    };
+
+                    let pkt = TelemetryPacket::new(
+                        DataType::MessageData,
+                        &[DataEndpoint::SdCard],
+                        "SYS_COMP",
+                        ts,
+                        Arc::<[u8]>::from(payload.as_slice()),
+                    )
+                    .expect("packet build failed");
+
+                    let wire = serialize::serialize_packet(&pkt);
+                    let decoded = serialize::deserialize_packet(&wire).expect("deserialize failed");
+                    assert_eq!(decoded.payload(), payload.as_slice());
+                }
+            }));
+        }
+
+        for j in joins {
+            j.join().expect("compression worker panicked");
+        }
     }
 }

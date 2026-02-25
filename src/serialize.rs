@@ -1009,32 +1009,51 @@ impl DataEndpoint {
 
 mod payload_compression {
     use crate::TelemetryError;
-    use alloc::vec::Vec;
+    use alloc::borrow::Cow;
+    use alloc::{vec::Vec, vec};
 
     #[cfg(feature = "compression")]
-    use crate::config::{PAYLOAD_COMPRESSION_LEVEL, PAYLOAD_COMPRESS_THRESHOLD};
+    use crate::config::PAYLOAD_COMPRESS_THRESHOLD;
+    #[cfg(feature = "compression")]
+    use heatshrink::Config;
 
     /// Compress the given payload if it is beneficial to do so.
     /// # Arguments
     /// - `payload`: Original uncompressed payload bytes.
     /// # Returns
-    /// - `(bool, Vec<u8>)`: Tuple where the first element indicates whether
+    /// - `(bool, Cow<[u8]>)`: Tuple where the first element indicates whether
     ///   compression was applied, and the second element is the resulting
     ///   payload bytes (compressed or original).
     #[cfg(feature = "compression")]
-    pub fn compress_if_beneficial(payload: &[u8]) -> (bool, Vec<u8>) {
+    pub fn compress_if_beneficial(payload: &'_ [u8]) -> (bool, Cow<'_, [u8]>) {
         if payload.len() < PAYLOAD_COMPRESS_THRESHOLD {
-            return (false, payload.to_vec());
+            return (false, Cow::Borrowed(payload));
         }
 
-        let compressed = miniz_oxide::deflate::compress_to_vec(payload, PAYLOAD_COMPRESSION_LEVEL);
+        // Bound output and avoid growth beyond useful threshold.
+        let Some(compressed) = compress_to_vec_bounded(payload, payload.len().saturating_sub(2))
+        else {
+            return (false, Cow::Borrowed(payload));
+        };
 
         // Only use compressed form if it actually saves space.
         if compressed.len() + 1 >= payload.len() {
-            (false, payload.to_vec())
+            (false, Cow::Borrowed(payload))
         } else {
-            (true, compressed)
+            (true, Cow::Owned(compressed))
         }
+    }
+
+    #[cfg(feature = "compression")]
+    fn compress_to_vec_bounded(input: &[u8], max_output: usize) -> Option<Vec<u8>> {
+        if input.is_empty() || max_output == 0 {
+            return None;
+        }
+
+        let cfg = Config::default();
+        let mut out = vec![0u8; max_output];
+        let compressed = heatshrink::encode(input, &mut out, &cfg).ok()?;
+        Some(compressed.to_vec())
     }
 
     /// Decompress the given compressed payload.
@@ -1048,18 +1067,24 @@ mod payload_compression {
     ///   does not match `expected_len`.
     #[cfg(feature = "compression")]
     pub fn decompress(compressed: &[u8], expected_len: usize) -> Result<Vec<u8>, TelemetryError> {
-        let decompressed = miniz_oxide::inflate::decompress_to_vec(compressed)
+        let cfg = Config::default();
+        // Heatshrink bitstream flush can leave padded tail bits that decode into
+        // extra bytes with this crate's decoder. Decode with bounded slack and
+        // then enforce the wire-declared uncompressed length.
+        let slack = 16usize;
+        let mut out = vec![0u8; expected_len.saturating_add(slack)];
+        let decompressed = heatshrink::decode(compressed, &mut out, &cfg)
             .map_err(|_| TelemetryError::Deserialize("decompression failed"))?;
-        if decompressed.len() != expected_len {
+        if decompressed.len() < expected_len {
             return Err(TelemetryError::Deserialize("decompressed size mismatch"));
         }
-        Ok(decompressed)
+        Ok(decompressed[..expected_len].to_vec())
     }
 
     // Stub when compression is disabled (never actually produces compressed payloads).
     #[cfg(not(feature = "compression"))]
-    pub fn compress_if_beneficial(payload: &[u8]) -> (bool, Vec<u8>) {
-        (false, payload.to_vec())
+    pub fn compress_if_beneficial<'a>(payload: &'a [u8]) -> (bool, Cow<'a, [u8]>) {
+        (false, Cow::Borrowed(payload))
     }
 
     #[cfg(not(feature = "compression"))]
@@ -1068,4 +1093,5 @@ mod payload_compression {
             "compressed payloads not supported (compression feature disabled)",
         ))
     }
+
 }

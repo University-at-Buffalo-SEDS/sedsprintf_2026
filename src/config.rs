@@ -7,7 +7,7 @@
 //!   - [`get_endpoint_meta`]
 //!   - [`get_message_meta`]
 
-use crate::{parse_f64, parse_strings, parse_u8, parse_usize, EndpointMeta, EndpointsBroadcastMode, MessageClass, MessageDataType, MessageElement, MessageMeta};
+use crate::{parse_f64, parse_strings, parse_usize, EndpointMeta, EndpointsBroadcastMode, MessageClass, MessageDataType, MessageElement, MessageMeta};
 use sedsprintf_macros::{define_stack_payload, define_telemetry_schema};
 use strum_macros::EnumCount;
 // -----------------------------------------------------------------------------
@@ -70,17 +70,11 @@ pub const PAYLOAD_COMPRESS_THRESHOLD: usize = match option_env!("PAYLOAD_COMPRES
     None => 128,
 };
 
-/// Compression level to use when compressing telemetry payloads (0-10).
-pub const PAYLOAD_COMPRESSION_LEVEL: u8 = match option_env!("PAYLOAD_COMPRESSION_LEVEL") {
-    Some(val) => parse_u8(val),
-    None => 10,
-};
-
 /// Maximum length, in bytes, of any **static** UTF-8 string payload.
 ///
 /// Dynamic string messages may be longer, but many tests and error paths
 /// assume this bound when generating placeholder data.
-pub const STATIC_STRING_LENGTH: usize = match option_env!("PAYLOAD_COMPRESSION_LEVEL") {
+pub const STATIC_STRING_LENGTH: usize = match option_env!("STATIC_STRING_LENGTH") {
     Some(val) => parse_usize(val),
     None => 1024,
 };
