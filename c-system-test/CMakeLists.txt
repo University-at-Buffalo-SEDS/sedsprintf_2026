@@ -3,6 +3,12 @@ project(c_system_test C)
 
 set(CMAKE_C_STANDARD 11)
 
+if (APPLE)
+    # Align deployment target across CMake C-link and Rust staticlib builds.
+    # Force here so stale cache values (e.g. invalid "25.3") cannot persist.
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "26.0" CACHE STRING "" FORCE)
+endif ()
+
 # 1) Define the target first
 add_executable(c_system_test
         src/main.c

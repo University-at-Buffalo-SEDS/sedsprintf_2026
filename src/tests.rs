@@ -25,6 +25,71 @@ impl Clock for UnixClock {
     }
 }
 
+#[cfg(feature = "compression")]
+mod compression_memory_tests {
+    use crate::config::{DataEndpoint, DataType};
+    use crate::serialize;
+    use crate::telemetry_packet::TelemetryPacket;
+    use std::sync::Arc;
+
+    const FLAG_COMPRESSED_PAYLOAD: u8 = 0x01;
+
+    fn make_message_packet(payload: &[u8], ts: u64) -> TelemetryPacket {
+        TelemetryPacket::new(
+            DataType::MessageData,
+            &[DataEndpoint::SdCard],
+            "CMP_NODE",
+            ts,
+            Arc::<[u8]>::from(payload),
+        )
+        .expect("packet build failed")
+    }
+
+    #[test]
+    fn compressible_payload_sets_compressed_flag_and_roundtrips() {
+        let payload = vec![0u8; 4096];
+        let pkt = make_message_packet(&payload, 11);
+
+        let wire = serialize::serialize_packet(&pkt);
+        assert_eq!(wire[0] & FLAG_COMPRESSED_PAYLOAD, FLAG_COMPRESSED_PAYLOAD);
+
+        let decoded = serialize::deserialize_packet(&wire).expect("deserialize failed");
+        assert_eq!(decoded.payload(), payload.as_slice());
+    }
+
+    #[test]
+    fn below_threshold_payload_stays_uncompressed_and_roundtrips() {
+        let payload = b"small-msg".to_vec();
+        let pkt = make_message_packet(&payload, 22);
+
+        let wire = serialize::serialize_packet(&pkt);
+        assert_eq!(wire[0] & FLAG_COMPRESSED_PAYLOAD, 0);
+
+        let decoded = serialize::deserialize_packet(&wire).expect("deserialize failed");
+        assert_eq!(decoded.payload(), payload.as_slice());
+    }
+
+    #[test]
+    fn mixed_payload_workload_roundtrips_without_failures() {
+        for i in 0..1500u64 {
+            let payload = if i % 2 == 0 {
+                vec![b'Z'; 192]
+            } else {
+                let mut v = Vec::with_capacity(192);
+                for j in 0..192u16 {
+                    v.push(32u8 + (((i as u16 + j) as u8) % 95));
+                }
+                v
+            };
+
+            let pkt = make_message_packet(&payload, i);
+            let wire = serialize::serialize_packet(&pkt);
+            let decoded = serialize::deserialize_packet(&wire).expect("deserialize failed");
+            assert_eq!(decoded.payload(), payload.as_slice());
+        }
+    }
+}
+
 fn test_payload_len_for(ty: DataType) -> usize {
     match message_meta(ty).element {
         crate::MessageElement::Static(_, _, _) => get_needed_message_size(ty),
@@ -1042,10 +1107,23 @@ mod tests_extra {
         use crate::config::{DataEndpoint, DataType};
         use crate::{serialize, telemetry_packet::TelemetryPacket};
 
-        // Helper to build a TelemetryError string payload of given length.
+        fn non_rle_ascii(len: usize) -> Vec<u8> {
+            let mut out = Vec::with_capacity(len);
+            for i in 0..len {
+                // Alternating lowercase letters with no >=3-byte runs and valid UTF-8 bytes.
+                out.push(b'a' + ((i % 26) as u8));
+            }
+            out
+        }
+
+        // Helper to build a TelemetryError payload and sender of given lengths.
         fn pkt_with(len: usize, sender_len: usize, ts: u64) -> TelemetryPacket {
-            let s = "x".repeat(sender_len);
-            let payload = vec![b'A'; len]; // dynamic payload
+            let sender_bytes = non_rle_ascii(sender_len);
+            let s: String = sender_bytes
+                .iter()
+                .map(|b| char::from(*b))
+                .collect();
+            let payload = non_rle_ascii(len); // dynamic payload (String type)
             TelemetryPacket::new(
                 DataType::TelemetryError,
                 &[DataEndpoint::SdCard],

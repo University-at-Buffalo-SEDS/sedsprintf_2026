@@ -61,17 +61,14 @@ environments.
 
 ---
 
-## Version 3.0.0 highlights
+## Version 3.2.3 highlights
 
-- Router side tracking is now internal. You generally call `rx_serialized(...)` / `rx(...)` without threading a side ID
-  through your own handlers. Use the `*_from_side` variants only when you must override ingress (e.g. custom relays or
-  multi-link bridges).
-- TCP-like reliability is available for schema types marked `reliable` / `reliable_mode`, including ACKs, retransmits,
-  and optional ordering. Enable it per side (`RouterSideOptions`) and disable it when your transport is already
-  reliable.
-- All serialized frames include a CRC32 trailer for integrity checks. Corrupt frames are dropped; reliable modes trigger
-  retransmit requests.
-- Full changelog: [v2.4.0...v3.0.0](https://github.com/Rylan-Meilutis/sedsprintf_rs/compare/v2.4.0...v3.0.0)
+- Compression backend is now `zstd-safe` (single backend), with bounded output buffers in the compression path and
+  no compression-level build option.
+- Queueing and re-entrancy behavior was hardened for RTOS-like usage, with added stress tests for deadlock scenarios.
+- Time sync system coverage expanded with multi-node C tests, including grandmaster/consumer topologies and failover.
+- C system test builds on macOS now enforce a consistent deployment target to avoid linker target-mismatch warnings.
+- Full changelog: [v3.2.2...v3.2.3](https://github.com/Rylan-Meilutis/sedsprintf_rs/compare/v3.2.2...v3.2.3)
 
 ---
 
