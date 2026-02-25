@@ -154,13 +154,19 @@ endforeach ()
 # Ensure include dir exists
 file(MAKE_DIRECTORY "${RS_INCLUDE}")
 
+# Keep Rust staticlib object deployment target aligned with C/C++ link target on macOS.
+set(_RS_ENV_CMD ${CMAKE_COMMAND} -E env)
+if (APPLE AND CMAKE_OSX_DEPLOYMENT_TARGET)
+    list(APPEND _RS_ENV_CMD "MACOSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+endif ()
+
 # ============================================================
 # Bootstrap build if header missing
 # ============================================================
 if (NOT EXISTS "${RS_HEADER}")
     message(STATUS "sedsprintf_rs: header not found (${RS_HEADER}); building once…")
     execute_process(
-        COMMAND "${PYTHON_EXECUTABLE}" build.py ${RS_ARGS_BOOTSTRAP}
+        COMMAND ${_RS_ENV_CMD} "${PYTHON_EXECUTABLE}" build.py ${RS_ARGS_BOOTSTRAP}
         WORKING_DIRECTORY "${RUST_DIR}"
         RESULT_VARIABLE _hdr_build_res
     )
@@ -184,8 +190,8 @@ file(GLOB_RECURSE RS_SRC CONFIGURE_DEPENDS
 # ============================================================
 add_custom_command(
     OUTPUT "${RS_LIB_DBG}" "${RS_LIB_REL}" "${RS_HEADER}"
-    COMMAND ${CMAKE_COMMAND} -E chdir "${RUST_DIR}"
-            "${PYTHON_EXECUTABLE}" build.py ${RS_ARGS_BOOTSTRAP}
+    COMMAND ${_RS_ENV_CMD} "${PYTHON_EXECUTABLE}" build.py ${RS_ARGS_BOOTSTRAP}
+    WORKING_DIRECTORY "${RUST_DIR}"
     DEPENDS ${RS_SRC}
     COMMENT "Building sedsprintf_rs (${RUST_PROFILE}) ${RS_ARGS_STR}"
     USES_TERMINAL

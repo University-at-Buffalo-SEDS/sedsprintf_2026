@@ -1009,32 +1009,53 @@ impl DataEndpoint {
 
 mod payload_compression {
     use crate::TelemetryError;
-    use alloc::vec::Vec;
+    use alloc::borrow::Cow;
+    use alloc::{vec::Vec, vec};
 
     #[cfg(feature = "compression")]
-    use crate::config::{PAYLOAD_COMPRESSION_LEVEL, PAYLOAD_COMPRESS_THRESHOLD};
+    use crate::config::PAYLOAD_COMPRESS_THRESHOLD;
+    #[cfg(feature = "compression")]
+    use zstd_safe::CompressionLevel;
 
     /// Compress the given payload if it is beneficial to do so.
     /// # Arguments
     /// - `payload`: Original uncompressed payload bytes.
     /// # Returns
-    /// - `(bool, Vec<u8>)`: Tuple where the first element indicates whether
+    /// - `(bool, Cow<[u8]>)`: Tuple where the first element indicates whether
     ///   compression was applied, and the second element is the resulting
     ///   payload bytes (compressed or original).
     #[cfg(feature = "compression")]
-    pub fn compress_if_beneficial(payload: &[u8]) -> (bool, Vec<u8>) {
+    pub fn compress_if_beneficial(payload: &'_ [u8]) -> (bool, Cow<'_, [u8]>) {
         if payload.len() < PAYLOAD_COMPRESS_THRESHOLD {
-            return (false, payload.to_vec());
+            return (false, Cow::Borrowed(payload));
         }
 
-        let compressed = miniz_oxide::deflate::compress_to_vec(payload, PAYLOAD_COMPRESSION_LEVEL);
+        // Bound output and avoid growth beyond useful threshold.
+        let Some(compressed) = compress_to_vec_bounded(payload, payload.len().saturating_sub(2))
+        else {
+            return (false, Cow::Borrowed(payload));
+        };
 
         // Only use compressed form if it actually saves space.
         if compressed.len() + 1 >= payload.len() {
-            (false, payload.to_vec())
+            (false, Cow::Borrowed(payload))
         } else {
-            (true, compressed)
+            (true, Cow::Owned(compressed))
         }
+    }
+
+    #[cfg(feature = "compression")]
+    fn compress_to_vec_bounded(input: &[u8], max_output: usize) -> Option<Vec<u8>> {
+        if input.is_empty() || max_output == 0 {
+            return None;
+        }
+
+        let mut out = vec![0u8; max_output];
+        // Use default-level behavior for better compression ratio on typical telemetry payloads.
+        let level: CompressionLevel = 1;
+        let written = zstd_safe::compress(&mut out[..], input, level).ok()?;
+        out.truncate(written);
+        Some(out)
     }
 
     /// Decompress the given compressed payload.
@@ -1048,18 +1069,19 @@ mod payload_compression {
     ///   does not match `expected_len`.
     #[cfg(feature = "compression")]
     pub fn decompress(compressed: &[u8], expected_len: usize) -> Result<Vec<u8>, TelemetryError> {
-        let decompressed = miniz_oxide::inflate::decompress_to_vec(compressed)
+        let mut out = vec![0u8; expected_len];
+        let written = zstd_safe::decompress(&mut out[..], compressed)
             .map_err(|_| TelemetryError::Deserialize("decompression failed"))?;
-        if decompressed.len() != expected_len {
+        if written != expected_len {
             return Err(TelemetryError::Deserialize("decompressed size mismatch"));
         }
-        Ok(decompressed)
+        Ok(out)
     }
 
     // Stub when compression is disabled (never actually produces compressed payloads).
     #[cfg(not(feature = "compression"))]
-    pub fn compress_if_beneficial(payload: &[u8]) -> (bool, Vec<u8>) {
-        (false, payload.to_vec())
+    pub fn compress_if_beneficial<'a>(payload: &'a [u8]) -> (bool, Cow<'a, [u8]>) {
+        (false, Cow::Borrowed(payload))
     }
 
     #[cfg(not(feature = "compression"))]
@@ -1068,4 +1090,5 @@ mod payload_compression {
             "compressed payloads not supported (compression feature disabled)",
         ))
     }
+
 }
