@@ -44,6 +44,8 @@ New (compile-time env vars):
                           Example: env:MAX_QUEUE_SIZE=65536 env:QUEUE_GROW_STEP=2.0
   env:SEDSPRINTF_RS_INSTALL_C_TOOLCHAIN_CMD="..."  Optional command used to auto-install
                           cross C toolchain when embedded checks need it.
+  env:SEDSPRINTF_RS_EMBEDDED_CFLAGS_AUTO=0         Disable automatic size-oriented CFLAGS/defines
+                          injection for embedded C dependencies.
 
 Special:
   -h, --help, help        Show this help message and exit.
@@ -126,6 +128,43 @@ def print_artifact_sizes(repo_root: Path, *, target: str, profile: str) -> None:
             printed = True
     if not printed:
         print(f"info: no direct crate artifacts found in {out_dir}")
+
+
+def collect_artifact_sizes(repo_root: Path, *, target: str, profile: str) -> dict[str, int]:
+    out_dir = repo_root / "target" / target / profile if target else repo_root / "target" / profile
+    staticlib = out_dir / "libsedsprintf_rs.a"
+    rlib = out_dir / "libsedsprintf_rs.rlib"
+    out: dict[str, int] = {}
+    if staticlib.exists():
+        out["staticlib"] = staticlib.stat().st_size
+    if rlib.exists():
+        out["rlib"] = rlib.stat().st_size
+    return out
+
+
+def print_artifact_size_delta(before: dict[str, int], after: dict[str, int]) -> None:
+    labels = ("staticlib", "rlib")
+    any_delta = False
+    for label in labels:
+        b = before.get(label)
+        a = after.get(label)
+        if b is None and a is None:
+            continue
+        if b is None and a is not None:
+            print(f"info: {label} size delta: +{_fmt_bytes(a)} (new artifact)")
+            any_delta = True
+            continue
+        if b is not None and a is None:
+            print(f"info: {label} size delta: artifact removed (was {_fmt_bytes(b)})")
+            any_delta = True
+            continue
+        if b is not None and a is not None:
+            d = a - b
+            sign = "+" if d >= 0 else "-"
+            print(f"info: {label} size delta: {sign}{_fmt_bytes(abs(d))} ({_fmt_bytes(b)} -> {_fmt_bytes(a)})")
+            any_delta = True
+    if not any_delta:
+        print("info: no prior artifacts available for size delta comparison.")
 
 
 def _format_cmd(cmd: list[str]) -> str:
@@ -407,6 +446,57 @@ def try_install_embedded_c_toolchain(target: str, env: dict[str, str]) -> bool:
     return False
 
 
+def _append_flag(existing: str, flag: str) -> str:
+    if not existing:
+        return flag
+    tokens = existing.split()
+    if flag in tokens:
+        return existing
+    return existing + " " + flag
+
+
+def apply_embedded_cflags_defaults(target: str, env: dict[str, str]) -> None:
+    """
+    For embedded cross builds with C deps (e.g. zstd-sys), apply size-oriented
+    defaults unless the caller opts out.
+    """
+    if not target:
+        return
+
+    if env.get("SEDSPRINTF_RS_EMBEDDED_CFLAGS_AUTO", "1") in ("0", "false", "False"):
+        print("info: embedded CFLAGS auto-tuning disabled by SEDSPRINTF_RS_EMBEDDED_CFLAGS_AUTO.")
+        return
+
+    defaults = [
+        "-Oz",
+        "-ffunction-sections",
+        "-fdata-sections",
+        "-fomit-frame-pointer",
+        "-fno-unwind-tables",
+        "-fno-asynchronous-unwind-tables",
+        "-DZSTD_DISABLE_ASM=1",
+        "-DZSTD_LEGACY_SUPPORT=0",
+    ]
+
+    keys = [
+        "CFLAGS",
+        "TARGET_CFLAGS",
+        f"CFLAGS_{target}",
+        f"CFLAGS_{target.replace('-', '_')}",
+    ]
+    for k in keys:
+        cur = env.get(k, "")
+        new_val = cur
+        for f in defaults:
+            new_val = _append_flag(new_val, f)
+        env[k] = new_val
+
+    print(
+        "info: applied embedded CFLAGS defaults for size (override with env:CFLAGS... "
+        "or disable via env:SEDSPRINTF_RS_EMBEDDED_CFLAGS_AUTO=0)."
+    )
+
+
 def _comment_out_pyi_ignore(gitignore: Path) -> None:
     if not gitignore.exists():
         return
@@ -662,12 +752,21 @@ def main(argv: list[str]) -> None:
 
         if can_check_embedded:
             ensure_rust_target_installed(embedded_target)
+            apply_embedded_cflags_defaults(embedded_target, env)
 
             embedded_mode: list[str] = []
-            embedded_profile_name: str | None = None
+            embedded_profile_name = "release" if release_build else "debug"
+            uses_custom_profile = False
             if release_build:
                 embedded_mode = ["--profile", "release-embedded"]
                 embedded_profile_name = "release-embedded"
+                uses_custom_profile = True
+
+            before_sizes = collect_artifact_sizes(
+                repo_root,
+                target=embedded_target,
+                profile=embedded_profile_name,
+            )
 
             run_cmd(
                 [
@@ -685,16 +784,17 @@ def main(argv: list[str]) -> None:
                 title=f"{total_steps}/{total_steps} cargo build (embedded feature)",
                 target=embedded_target,
                 release_build=release_build,
-                embedded_profile=bool(embedded_profile_name),
+                embedded_profile=uses_custom_profile,
             )
 
-            if embedded_profile_name:
-                print(f"info: Embedded output: {repo_root / 'target' / embedded_target / embedded_profile_name}")
-                print_artifact_sizes(repo_root, target=embedded_target, profile=embedded_profile_name)
-            else:
-                prof = "release" if release_build else "debug"
-                print(f"info: Embedded output: {repo_root / 'target' / embedded_target / prof}")
-                print_artifact_sizes(repo_root, target=embedded_target, profile=prof)
+            print(f"info: Embedded output: {repo_root / 'target' / embedded_target / embedded_profile_name}")
+            print_artifact_sizes(repo_root, target=embedded_target, profile=embedded_profile_name)
+            after_sizes = collect_artifact_sizes(
+                repo_root,
+                target=embedded_target,
+                profile=embedded_profile_name,
+            )
+            print_artifact_size_delta(before_sizes, after_sizes)
         else:
             expected = ", ".join(preferred_cross_compilers(embedded_target)) or "CC_<target>/TARGET_CC"
             print(
@@ -717,6 +817,7 @@ def main(argv: list[str]) -> None:
         if not target:
             print("info: no target specified using thumbv7em-none-eabihf")
             target = "thumbv7em-none-eabihf"
+        apply_embedded_cflags_defaults(target, env)
         if not has_embedded_c_toolchain(target, env):
             expected = ", ".join(preferred_cross_compilers(target)) or "CC_<target>/TARGET_CC"
             print(
@@ -739,6 +840,11 @@ def main(argv: list[str]) -> None:
         if release_build:
             build_mode = ["--profile", "release-embedded"]
             embedded_profile = True
+            profile_name = "release-embedded"
+        else:
+            profile_name = "release" if release_build else "debug"
+
+        before_sizes = collect_artifact_sizes(repo_root, target=target, profile=profile_name)
 
         run_cmd(
             ["cargo", "build", *build_mode, *build_args],
@@ -749,13 +855,10 @@ def main(argv: list[str]) -> None:
             release_build=release_build,
             embedded_profile=embedded_profile,
         )
-        if embedded_profile:
-            print(f"info: Output: {repo_root / 'target' / target / 'release-embedded'}")
-            print_artifact_sizes(repo_root, target=target, profile="release-embedded")
-        else:
-            prof = "release" if release_build else "debug"
-            print(f"info: Output: {repo_root / 'target' / target / prof}")
-            print_artifact_sizes(repo_root, target=target, profile=prof)
+        print(f"info: Output: {repo_root / 'target' / target / profile_name}")
+        print_artifact_sizes(repo_root, target=target, profile=profile_name)
+        after_sizes = collect_artifact_sizes(repo_root, target=target, profile=profile_name)
+        print_artifact_size_delta(before_sizes, after_sizes)
         return
 
     if build_python:
