@@ -96,7 +96,7 @@ by creating shims that expose pvPortMalloc and vPortFree.
 
 Options:
   release                 Build in release mode.
-  test                    Run cargo tests (also validates embedded+python builds).
+  test                    Run cargo tests (also validates python, plus embedded when cross C toolchain exists).
   embedded                Build for the embedded target (enables embedded feature).
   python                  Build with Python bindings (enables python feature).
   timesync                Build with time sync helpers (enables timesync feature).

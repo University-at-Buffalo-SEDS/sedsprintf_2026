@@ -36,7 +36,7 @@ From
 Cargo.toml ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/Cargo.toml) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/Cargo.toml)):
 
 - `std` (default): host build with std.
-- `embedded`: enables embedded defaults and no_std-friendly behavior.
+- `embedded`: enables embedded defaults, `timesync`, and no_std-friendly behavior.
 - `python`: enables pyo3 bindings.
 - `compression` (default): enables payload compression (implemented with `zstd-safe`).
 - `timesync`: enables time sync helpers and built-in time sync packet types.
@@ -44,13 +44,15 @@ Cargo.toml ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_
 Examples:
 
 - Disable compression: `default-features = false` and omit `compression`.
-- Embedded + compression: enable `embedded` and keep `compression`.
+- Embedded + compression: enable both `embedded` and `compression`.
 
 Compression notes:
 
 - Compression is opportunistic (only used when it reduces size).
 - Backend is fixed to `zstd-safe` for simplicity/consistency across builds.
 - There is no compression-level build option.
+- For cross-target embedded builds, enabling `compression` requires a usable target C toolchain
+  (for `zstd-sys`, e.g. `arm-none-eabi-gcc` or `CC_<target>` override).
 
 When `timesync` is enabled, the build adds the `TIME_SYNC` endpoint and
 `TIME_SYNC_*` packet types directly in code (like `TelemetryError`).

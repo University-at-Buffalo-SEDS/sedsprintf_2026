@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -26,7 +27,7 @@ def print_help(error: str | None = None) -> None:
 
 Options (can be combined where it makes sense):
   release                 Build in release mode.
-  test                    Run `cargo test` (and in test mode also validate embedded+python builds).
+  test                    Run `cargo test` (and also validate python + embedded build if cross C toolchain exists).
   embedded                Build for the embedded target (enables `embedded` feature).
   python                  Build with Python bindings (enables `python` feature).
   timesync                Build with time sync helpers (enables `timesync` feature).
@@ -41,6 +42,10 @@ New (compile-time env vars):
   max_stack_payload=<n>   Set MAX_STACK_PAYLOAD for define_stack_payload!(env="MAX_STACK_PAYLOAD", ...).
   env:KEY=VALUE           Set arbitrary environment variable(s) for the build (repeatable).
                           Example: env:MAX_QUEUE_SIZE=65536 env:QUEUE_GROW_STEP=2.0
+  env:SEDSPRINTF_RS_INSTALL_C_TOOLCHAIN_CMD="..."  Optional command used to auto-install
+                          cross C toolchain when embedded checks need it.
+  env:SEDSPRINTF_RS_EMBEDDED_CFLAGS_AUTO=0         Disable automatic size-oriented CFLAGS/defines
+                          injection for embedded C dependencies.
 
 Special:
   -h, --help, help        Show this help message and exit.
@@ -96,6 +101,70 @@ def _success(msg: str) -> None:
 def _fail(msg: str) -> None:
     prefix = "❌" if _EMOJI_OK else "ERROR"
     print(f"{prefix} {msg}", file=sys.stderr)
+
+
+def _fmt_bytes(n: int) -> str:
+    units = ["B", "KiB", "MiB", "GiB"]
+    x = float(n)
+    u = 0
+    while x >= 1024.0 and u < len(units) - 1:
+        x /= 1024.0
+        u += 1
+    if u == 0:
+        return f"{int(x)} {units[u]}"
+    return f"{x:.2f} {units[u]}"
+
+
+def print_artifact_sizes(repo_root: Path, *, target: str, profile: str) -> None:
+    out_dir = repo_root / "target" / target / profile if target else repo_root / "target" / profile
+    staticlib = out_dir / "libsedsprintf_rs.a"
+    rlib = out_dir / "libsedsprintf_rs.rlib"
+
+    printed = False
+    for p, label in ((staticlib, "staticlib"), (rlib, "rlib")):
+        if p.exists():
+            sz = p.stat().st_size
+            print(f"info: {label} size: {_fmt_bytes(sz)} ({p})")
+            printed = True
+    if not printed:
+        print(f"info: no direct crate artifacts found in {out_dir}")
+
+
+def collect_artifact_sizes(repo_root: Path, *, target: str, profile: str) -> dict[str, int]:
+    out_dir = repo_root / "target" / target / profile if target else repo_root / "target" / profile
+    staticlib = out_dir / "libsedsprintf_rs.a"
+    rlib = out_dir / "libsedsprintf_rs.rlib"
+    out: dict[str, int] = {}
+    if staticlib.exists():
+        out["staticlib"] = staticlib.stat().st_size
+    if rlib.exists():
+        out["rlib"] = rlib.stat().st_size
+    return out
+
+
+def print_artifact_size_delta(before: dict[str, int], after: dict[str, int]) -> None:
+    labels = ("staticlib", "rlib")
+    any_delta = False
+    for label in labels:
+        b = before.get(label)
+        a = after.get(label)
+        if b is None and a is None:
+            continue
+        if b is None and a is not None:
+            print(f"info: {label} size delta: +{_fmt_bytes(a)} (new artifact)")
+            any_delta = True
+            continue
+        if b is not None and a is None:
+            print(f"info: {label} size delta: artifact removed (was {_fmt_bytes(b)})")
+            any_delta = True
+            continue
+        if b is not None and a is not None:
+            d = a - b
+            sign = "+" if d >= 0 else "-"
+            print(f"info: {label} size delta: {sign}{_fmt_bytes(abs(d))} ({_fmt_bytes(b)} -> {_fmt_bytes(a)})")
+            any_delta = True
+    if not any_delta:
+        print("info: no prior artifacts available for size delta comparison.")
 
 
 def _format_cmd(cmd: list[str]) -> str:
@@ -256,6 +325,176 @@ def ensure_rust_target_installed(target: str) -> None:
             f"Failed to install Rust target `{target}` (exit code {e.returncode})."
         ) from e
     _success(f"Installed Rust target `{target}`.")
+
+
+def _first_token(cmd: str) -> str:
+    s = cmd.strip()
+    if not s:
+        return ""
+    return s.split()[0]
+
+
+def _has_cmd(cmd: str) -> bool:
+    exe = _first_token(cmd)
+    return bool(exe) and shutil.which(exe) is not None
+
+
+def preferred_cross_compilers(target: str) -> list[str]:
+    t = target.lower()
+
+    if t.startswith("thumb") or "none-eabi" in t:
+        return ["arm-none-eabi-gcc"]
+    if t.startswith("riscv"):
+        return ["riscv64-unknown-elf-gcc", "riscv-none-elf-gcc"]
+    if t.startswith("avr-"):
+        return ["avr-gcc"]
+    if t.startswith("msp430-"):
+        return ["msp430-elf-gcc"]
+    if t.startswith("aarch64-") and "none" in t:
+        return ["aarch64-none-elf-gcc"]
+
+    return []
+
+
+def has_embedded_c_toolchain(target: str, env: dict[str, str]) -> bool:
+    """
+    Best-effort check for a usable C compiler for cross-target C deps (e.g. zstd-sys).
+    """
+    if not target:
+        return True
+
+    k_dash = f"CC_{target}"
+    k_us = f"CC_{target.replace('-', '_')}"
+    candidates = [
+        env.get(k_dash, ""),
+        env.get(k_us, ""),
+        env.get("TARGET_CC", ""),
+    ]
+    for c in candidates:
+        if c and _has_cmd(c):
+            return True
+
+    for cc in preferred_cross_compilers(target):
+        if _has_cmd(cc):
+            return True
+    return False
+
+
+def _run_install_cmd(cmd: list[str]) -> bool:
+    print("info: running install command:", " ".join(cmd))
+    try:
+        subprocess.run(cmd, check=True)
+        return True
+    except FileNotFoundError as e:
+        print(f"warning: install command not found: {e.filename}", file=sys.stderr)
+        return False
+    except subprocess.CalledProcessError as e:
+        print(f"warning: install command failed ({e.returncode}): {' '.join(cmd)}", file=sys.stderr)
+        return False
+
+
+def try_install_embedded_c_toolchain(target: str, env: dict[str, str]) -> bool:
+    """
+    Try to install a cross C toolchain for the requested embedded target.
+    Returns True if a usable compiler is found after the attempt.
+    """
+    if has_embedded_c_toolchain(target, env):
+        return True
+
+    # Allow caller/CI to provide an explicit install command.
+    override = env.get("SEDSPRINTF_RS_INSTALL_C_TOOLCHAIN_CMD", "").strip()
+    if override:
+        cmd = shlex.split(override)
+        if not cmd:
+            return has_embedded_c_toolchain(target, env)
+        _run_install_cmd(cmd)
+        return has_embedded_c_toolchain(target, env)
+
+    # Best-effort built-in installers.
+    pref = preferred_cross_compilers(target)
+
+    if shutil.which("apt-get"):
+        _run_install_cmd(["sudo", "apt-get", "update"])
+        if "arm-none-eabi-gcc" in pref:
+            _run_install_cmd(["sudo", "apt-get", "install", "-y", "gcc-arm-none-eabi"])
+        elif "riscv64-unknown-elf-gcc" in pref or "riscv-none-elf-gcc" in pref:
+            _run_install_cmd(["sudo", "apt-get", "install", "-y", "gcc-riscv64-unknown-elf"])
+        elif "avr-gcc" in pref:
+            _run_install_cmd(["sudo", "apt-get", "install", "-y", "gcc-avr"])
+        elif "msp430-elf-gcc" in pref:
+            _run_install_cmd(["sudo", "apt-get", "install", "-y", "gcc-msp430"])
+        return has_embedded_c_toolchain(target, env)
+
+    if shutil.which("brew"):
+        if "arm-none-eabi-gcc" in pref:
+            _run_install_cmd(["brew", "install", "arm-none-eabi-gcc"])
+        elif "riscv64-unknown-elf-gcc" in pref or "riscv-none-elf-gcc" in pref:
+            _run_install_cmd(["brew", "install", "riscv-gnu-toolchain"])
+        elif "avr-gcc" in pref:
+            _run_install_cmd(["brew", "install", "avr-gcc"])
+        elif "msp430-elf-gcc" in pref:
+            _run_install_cmd(["brew", "install", "msp430-gcc"])
+        elif "aarch64-none-elf-gcc" in pref:
+            _run_install_cmd(["brew", "install", "aarch64-elf-gcc"])
+        return has_embedded_c_toolchain(target, env)
+
+    print(
+        "warning: no supported package manager detected for auto-install "
+        "(tried apt-get, brew), or target has no built-in package mapping.",
+        file=sys.stderr,
+    )
+    return False
+
+
+def _append_flag(existing: str, flag: str) -> str:
+    if not existing:
+        return flag
+    tokens = existing.split()
+    if flag in tokens:
+        return existing
+    return existing + " " + flag
+
+
+def apply_embedded_cflags_defaults(target: str, env: dict[str, str]) -> None:
+    """
+    For embedded cross builds with C deps (e.g. zstd-sys), apply size-oriented
+    defaults unless the caller opts out.
+    """
+    if not target:
+        return
+
+    if env.get("SEDSPRINTF_RS_EMBEDDED_CFLAGS_AUTO", "1") in ("0", "false", "False"):
+        print("info: embedded CFLAGS auto-tuning disabled by SEDSPRINTF_RS_EMBEDDED_CFLAGS_AUTO.")
+        return
+
+    defaults = [
+        "-Oz",
+        "-ffunction-sections",
+        "-fdata-sections",
+        "-fomit-frame-pointer",
+        "-fno-unwind-tables",
+        "-fno-asynchronous-unwind-tables",
+        "-DZSTD_DISABLE_ASM=1",
+        "-DZSTD_LEGACY_SUPPORT=0",
+    ]
+
+    keys = [
+        "CFLAGS",
+        "TARGET_CFLAGS",
+        f"CFLAGS_{target}",
+        f"CFLAGS_{target.replace('-', '_')}",
+    ]
+    for k in keys:
+        cur = env.get(k, "")
+        new_val = cur
+        for f in defaults:
+            new_val = _append_flag(new_val, f)
+        env[k] = new_val
+
+    print(
+        "info: applied embedded CFLAGS defaults for size (override with env:CFLAGS... "
+        "or disable via env:SEDSPRINTF_RS_EMBEDDED_CFLAGS_AUTO=0)."
+    )
 
 
 def _comment_out_pyi_ignore(gitignore: Path) -> None:
@@ -477,12 +716,22 @@ def main(argv: list[str]) -> None:
     if tests:
         _banner("TEST MODE")
         feature_suffix = ",timesync" if build_timesync else ""
+        embedded_target = target or "thumbv7em-none-eabihf"
+        can_check_embedded = has_embedded_c_toolchain(embedded_target, env)
+        if not can_check_embedded:
+            expected = ", ".join(preferred_cross_compilers(embedded_target)) or "CC_<target>/TARGET_CC"
+            print(
+                "info: embedded cross C toolchain missing; attempting auto-install "
+                "(set SEDSPRINTF_RS_INSTALL_C_TOOLCHAIN_CMD to override)."
+            )
+            can_check_embedded = try_install_embedded_c_toolchain(embedded_target, env)
+        total_steps = 3 if can_check_embedded else 2
 
         run_cmd(
             ["cargo", "test", "--features", "timesync"],
             env=env,
             repo_root=repo_root,
-            title="1/3 cargo test",
+            title=f"1/{total_steps} cargo test",
             release_build=release_build,
         )
         _success("Tests passed.")
@@ -491,44 +740,68 @@ def main(argv: list[str]) -> None:
             ["cargo", "build", "--features", f"python{feature_suffix}", *build_mode],
             env=env,
             repo_root=repo_root,
-            title="2/3 cargo build (python feature)",
+            title=f"2/{total_steps} cargo build (python feature)",
             release_build=release_build,
         )
         _success(f"Python-feature build finished. Output is under: {repo_root / 'target'}")
-
-        embedded_target = target or "thumbv7em-none-eabihf"
-        ensure_rust_target_installed(embedded_target)
-
-        embedded_mode: list[str] = []
-        embedded_profile_name: str | None = None
-        if release_build:
-            embedded_mode = ["--profile", "release-embedded"]
-            embedded_profile_name = "release-embedded"
-
-        run_cmd(
-            [
-                "cargo",
-                "build",
-                *embedded_mode,
-                "--no-default-features",
-                "--target",
-                embedded_target,
-                "--features",
-                f"embedded{feature_suffix}",
-            ],
-            env=env,
-            repo_root=repo_root,
-            title="3/3 cargo build (embedded feature)",
-            target=embedded_target,
-            release_build=release_build,
-            embedded_profile=bool(embedded_profile_name),
+        print_artifact_sizes(
+            repo_root,
+            target=target,
+            profile="release" if release_build else "debug",
         )
 
-        if embedded_profile_name:
+        if can_check_embedded:
+            ensure_rust_target_installed(embedded_target)
+            apply_embedded_cflags_defaults(embedded_target, env)
+
+            embedded_mode: list[str] = []
+            embedded_profile_name = "release" if release_build else "debug"
+            uses_custom_profile = False
+            if release_build:
+                embedded_mode = ["--profile", "release-embedded"]
+                embedded_profile_name = "release-embedded"
+                uses_custom_profile = True
+
+            before_sizes = collect_artifact_sizes(
+                repo_root,
+                target=embedded_target,
+                profile=embedded_profile_name,
+            )
+
+            run_cmd(
+                [
+                    "cargo",
+                    "build",
+                    *embedded_mode,
+                    "--no-default-features",
+                    "--target",
+                    embedded_target,
+                    "--features",
+                    f"embedded{feature_suffix}",
+                ],
+                env=env,
+                repo_root=repo_root,
+                title=f"{total_steps}/{total_steps} cargo build (embedded feature)",
+                target=embedded_target,
+                release_build=release_build,
+                embedded_profile=uses_custom_profile,
+            )
+
             print(f"info: Embedded output: {repo_root / 'target' / embedded_target / embedded_profile_name}")
+            print_artifact_sizes(repo_root, target=embedded_target, profile=embedded_profile_name)
+            after_sizes = collect_artifact_sizes(
+                repo_root,
+                target=embedded_target,
+                profile=embedded_profile_name,
+            )
+            print_artifact_size_delta(before_sizes, after_sizes)
         else:
-            prof = "release" if release_build else "debug"
-            print(f"info: Embedded output: {repo_root / 'target' / embedded_target / prof}")
+            expected = ", ".join(preferred_cross_compilers(embedded_target)) or "CC_<target>/TARGET_CC"
+            print(
+                "info: Skipping embedded build check in test mode: "
+                f"no cross C toolchain found for target `{embedded_target}` "
+                f"(expected {expected} or CC_<target>/TARGET_CC override)."
+            )
 
         _success("All test-mode checks passed.")
         return
@@ -544,6 +817,19 @@ def main(argv: list[str]) -> None:
         if not target:
             print("info: no target specified using thumbv7em-none-eabihf")
             target = "thumbv7em-none-eabihf"
+        apply_embedded_cflags_defaults(target, env)
+        if not has_embedded_c_toolchain(target, env):
+            expected = ", ".join(preferred_cross_compilers(target)) or "CC_<target>/TARGET_CC"
+            print(
+                "info: embedded cross C toolchain missing; attempting auto-install "
+                "(set SEDSPRINTF_RS_INSTALL_C_TOOLCHAIN_CMD to override)."
+            )
+            if not try_install_embedded_c_toolchain(target, env):
+                print(
+                    "warning: could not auto-install embedded cross C toolchain; "
+                    f"embedded build may fail if C deps are enabled (expected {expected}).",
+                    file=sys.stderr,
+                )
         build_args = [
             "--no-default-features",
             "--target",
@@ -554,6 +840,11 @@ def main(argv: list[str]) -> None:
         if release_build:
             build_mode = ["--profile", "release-embedded"]
             embedded_profile = True
+            profile_name = "release-embedded"
+        else:
+            profile_name = "release" if release_build else "debug"
+
+        before_sizes = collect_artifact_sizes(repo_root, target=target, profile=profile_name)
 
         run_cmd(
             ["cargo", "build", *build_mode, *build_args],
@@ -564,11 +855,10 @@ def main(argv: list[str]) -> None:
             release_build=release_build,
             embedded_profile=embedded_profile,
         )
-        if embedded_profile:
-            print(f"info: Output: {repo_root / 'target' / target / 'release-embedded'}")
-        else:
-            prof = "release" if release_build else "debug"
-            print(f"info: Output: {repo_root / 'target' / target / prof}")
+        print(f"info: Output: {repo_root / 'target' / target / profile_name}")
+        print_artifact_sizes(repo_root, target=target, profile=profile_name)
+        after_sizes = collect_artifact_sizes(repo_root, target=target, profile=profile_name)
+        print_artifact_size_delta(before_sizes, after_sizes)
         return
 
     if build_python:
@@ -581,6 +871,11 @@ def main(argv: list[str]) -> None:
             release_build=release_build,
         )
         _success(f"Build finished. Output is under: {repo_root / 'target'}")
+        print_artifact_sizes(
+            repo_root,
+            target=target,
+            profile="release" if release_build else "debug",
+        )
         return
 
     if build_wheel:
@@ -624,9 +919,11 @@ def main(argv: list[str]) -> None:
     if target:
         prof = "release" if release_build else "debug"
         _success(f"Build finished. Output: {repo_root / 'target' / target / prof}")
+        print_artifact_sizes(repo_root, target=target, profile=prof)
     else:
         prof = "release" if release_build else "debug"
         _success(f"Build finished. Output: {repo_root / 'target' / prof}")
+        print_artifact_sizes(repo_root, target="", profile=prof)
 
 
 if __name__ == "__main__":
