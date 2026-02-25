@@ -336,7 +336,18 @@ def _first_token(cmd: str) -> str:
 
 def _has_cmd(cmd: str) -> bool:
     exe = _first_token(cmd)
-    return bool(exe) and shutil.which(exe) is not None
+    if not exe:
+        return False
+    try:
+        subprocess.run(
+            [exe, "--version"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        return True
+    except (FileNotFoundError, PermissionError, OSError):
+        return False
 
 
 def preferred_cross_compilers(target: str) -> list[str]:
@@ -413,7 +424,7 @@ def try_install_embedded_c_toolchain(target: str, env: dict[str, str]) -> bool:
     # Best-effort built-in installers.
     pref = preferred_cross_compilers(target)
 
-    if shutil.which("apt-get"):
+    if _has_cmd("apt-get"):
         _run_install_cmd(["sudo", "apt-get", "update"])
         if "arm-none-eabi-gcc" in pref:
             _run_install_cmd(["sudo", "apt-get", "install", "-y", "gcc-arm-none-eabi"])
@@ -425,7 +436,7 @@ def try_install_embedded_c_toolchain(target: str, env: dict[str, str]) -> bool:
             _run_install_cmd(["sudo", "apt-get", "install", "-y", "gcc-msp430"])
         return has_embedded_c_toolchain(target, env)
 
-    if shutil.which("brew"):
+    if _has_cmd("brew"):
         if "arm-none-eabi-gcc" in pref:
             _run_install_cmd(["brew", "install", "arm-none-eabi-gcc"])
         elif "riscv64-unknown-elf-gcc" in pref or "riscv-none-elf-gcc" in pref:
