@@ -5,6 +5,7 @@ Requires the wiki repos to exist (create the first wiki page in the UI first).
 """
 
 import argparse
+import re
 import shutil
 import subprocess
 import sys
@@ -63,8 +64,84 @@ def git_output(cmd, cwd=None):
         ) from e
 
 
+def parse_git_remote_url(url: str) -> tuple[str, str, str]:
+    """Return (host, owner_path, repo_name) from a git remote URL."""
+    u = url.strip()
+
+    # https://host/owner/repo(.git)
+    m = re.match(r"^https?://([^/]+)/(.+?)/([^/]+?)(?:\.git)?/?$", u)
+    if m:
+        return m.group(1), m.group(2), m.group(3)
+
+    # ssh://git@host/owner/repo(.git)
+    m = re.match(r"^ssh://git@([^/]+)/(.+?)/([^/]+?)(?:\.git)?/?$", u)
+    if m:
+        return m.group(1), m.group(2), m.group(3)
+
+    # git@host:owner/repo(.git)
+    m = re.match(r"^git@([^:]+):(.+?)/([^/]+?)(?:\.git)?/?$", u)
+    if m:
+        return m.group(1), m.group(2), m.group(3)
+
+    raise SystemExit(
+        f"Unsupported git remote URL format: {url}. "
+        "Use --github-url/--gitlab-url explicitly, or set a standard HTTPS/SSH remote."
+    )
+
+
+def wiki_url(host: str, owner: str, repo: str) -> str:
+    return f"https://{host}/{owner}/{repo}.wiki.git"
+
+
+def derive_wiki_urls(
+    remote: str,
+    github_url: str | None,
+    gitlab_url: str | None,
+    gitlab_from_github: bool,
+    gitlab_host: str,
+) -> tuple[str | None, str | None]:
+    if github_url and gitlab_url:
+        return github_url, gitlab_url
+
+    remote_url = git_output(["git", "remote", "get-url", remote])
+    host, owner, repo = parse_git_remote_url(remote_url)
+    host_l = host.lower()
+
+    resolved_github = github_url
+    resolved_gitlab = gitlab_url
+
+    if resolved_github is None and "github.com" in host_l:
+        resolved_github = wiki_url(host, owner, repo)
+
+    if resolved_gitlab is None:
+        if "gitlab" in host_l:
+            resolved_gitlab = wiki_url(host, owner, repo)
+        elif "github.com" in host_l and gitlab_from_github:
+            resolved_gitlab = wiki_url(gitlab_host, owner, repo)
+
+    return resolved_github, resolved_gitlab
+
+
 def ensure_repo(url: str, repo_dir: Path):
-    if not (repo_dir / ".git").is_dir():
+    def _is_git_repo(path: Path) -> bool:
+        try:
+            subprocess.run(
+                ["git", "rev-parse", "--is-inside-work-tree"],
+                cwd=path,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return False
+
+    if not repo_dir.exists():
+        run(["git", "clone", url, str(repo_dir)])
+        return
+
+    if not _is_git_repo(repo_dir):
+        shutil.rmtree(repo_dir, ignore_errors=True)
         run(["git", "clone", url, str(repo_dir)])
         return
 
@@ -141,14 +218,29 @@ def main():
         help="Directory for cloning wiki repos",
     )
     parser.add_argument(
+        "--remote",
+        default="origin",
+        help="Git remote name used to derive wiki URLs (default: origin)",
+    )
+    parser.add_argument(
         "--github-url",
-        default="https://github.com/Rylan-Meilutis/sedsprintf_rs.wiki.git",
-        help="GitHub wiki repo URL",
+        default=None,
+        help="GitHub wiki repo URL (overrides remote-derived URL)",
     )
     parser.add_argument(
         "--gitlab-url",
-        default="https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs.wiki.git",
-        help="GitLab wiki repo URL",
+        default=None,
+        help="GitLab wiki repo URL (overrides remote-derived URL)",
+    )
+    parser.add_argument(
+        "--gitlab-from-github",
+        action="store_true",
+        help="If remote host is GitHub, derive GitLab wiki URL using --gitlab-host and same owner/repo",
+    )
+    parser.add_argument(
+        "--gitlab-host",
+        default="gitlab.rylanswebsite.com",
+        help="GitLab host used with --gitlab-from-github",
     )
     parser.add_argument(
         "--commit-message",
@@ -174,8 +266,29 @@ def main():
             "Choose a writable directory with `--workdir`."
         ) from e
 
-    sync_one("github_wiki", args.github_url, source_dir, workdir, args.commit_message)
-    sync_one("gitlab_wiki", args.gitlab_url, source_dir, workdir, args.commit_message)
+    github_url, gitlab_url = derive_wiki_urls(
+        remote=args.remote,
+        github_url=args.github_url,
+        gitlab_url=args.gitlab_url,
+        gitlab_from_github=args.gitlab_from_github,
+        gitlab_host=args.gitlab_host,
+    )
+
+    if not github_url and not gitlab_url:
+        raise SystemExit(
+            "Could not derive any wiki URLs from remote. "
+            "Set --github-url/--gitlab-url explicitly, or use --gitlab-from-github."
+        )
+
+    if github_url:
+        sync_one("github_wiki", github_url, source_dir, workdir, args.commit_message)
+    else:
+        print("[github_wiki] skipped (no URL resolved)")
+
+    if gitlab_url:
+        sync_one("gitlab_wiki", gitlab_url, source_dir, workdir, args.commit_message)
+    else:
+        print("[gitlab_wiki] skipped (no URL resolved)")
 
 
 if __name__ == "__main__":
