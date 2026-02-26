@@ -29,18 +29,11 @@ pub enum RelayTxHandlerFn {
     Packet(Arc<PacketHandlerFn>),
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct RelaySideOptions {
     pub reliable_enabled: bool,
 }
 
-impl Default for RelaySideOptions {
-    fn default() -> Self {
-        Self {
-            reliable_enabled: false,
-        }
-    }
-}
 
 /// One side of the relay – a name + TX handler.
 #[derive(Clone)]
@@ -605,57 +598,46 @@ impl Relay {
             let frame = match serialize::peek_frame_info(bytes.as_ref()) {
                 Ok(frame) => frame,
                 Err(e) => {
-                    if matches!(e, TelemetryError::Deserialize(msg) if msg == "crc32 mismatch") {
-                        if opts.reliable_enabled && handler_is_serialized {
-                            if let Ok(frame) =
-                                serialize::peek_frame_info_unchecked(bytes.as_ref())
-                            {
-                                if is_reliable_type(frame.envelope.ty)
-                                    && let Some(hdr) = frame.reliable
-                                {
-                                    if (hdr.flags & serialize::RELIABLE_FLAG_ACK_ONLY) != 0 {
-                                        return Ok(());
-                                    }
+                    if matches!(e, TelemetryError::Deserialize(msg) if msg == "crc32 mismatch")
+                        && opts.reliable_enabled
+                        && handler_is_serialized
+                        && let Ok(frame) = serialize::peek_frame_info_unchecked(bytes.as_ref())
+                    {
+                        if is_reliable_type(frame.envelope.ty) && let Some(hdr) = frame.reliable {
+                            if (hdr.flags & serialize::RELIABLE_FLAG_ACK_ONLY) != 0 {
+                                return Ok(());
+                            }
 
-                                    let unordered =
-                                        (hdr.flags & serialize::RELIABLE_FLAG_UNORDERED) != 0;
-                                    let unsequenced =
-                                        (hdr.flags & serialize::RELIABLE_FLAG_UNSEQUENCED) != 0;
+                            let unordered = (hdr.flags & serialize::RELIABLE_FLAG_UNORDERED) != 0;
+                            let unsequenced =
+                                (hdr.flags & serialize::RELIABLE_FLAG_UNSEQUENCED) != 0;
 
-                                    if !unsequenced {
-                                        if unordered {
-                                            let ack = {
-                                                let mut st = self.state.lock();
-                                                let rx_state = self.reliable_rx_state_mut(
-                                                    &mut st,
-                                                    item.src,
-                                                    frame.envelope.ty,
-                                                );
-                                                rx_state.last_ack
-                                            };
-                                            let _ = self.send_reliable_ack(
-                                                item.src,
-                                                frame.envelope.ty,
-                                                ack,
-                                            );
-                                        } else {
-                                            let expected = {
-                                                let mut st = self.state.lock();
-                                                let rx_state = self.reliable_rx_state_mut(
-                                                    &mut st,
-                                                    item.src,
-                                                    frame.envelope.ty,
-                                                );
-                                                rx_state.expected_seq
-                                            };
-                                            let ack = expected.saturating_sub(1);
-                                            let _ = self.send_reliable_ack(
-                                                item.src,
-                                                frame.envelope.ty,
-                                                ack,
-                                            );
-                                        }
-                                    }
+                            if !unsequenced {
+                                if unordered {
+                                    let ack = {
+                                        let mut st = self.state.lock();
+                                        let rx_state = self.reliable_rx_state_mut(
+                                            &mut st,
+                                            item.src,
+                                            frame.envelope.ty,
+                                        );
+                                        rx_state.last_ack
+                                    };
+                                    let _ =
+                                        self.send_reliable_ack(item.src, frame.envelope.ty, ack);
+                                } else {
+                                    let expected = {
+                                        let mut st = self.state.lock();
+                                        let rx_state = self.reliable_rx_state_mut(
+                                            &mut st,
+                                            item.src,
+                                            frame.envelope.ty,
+                                        );
+                                        rx_state.expected_seq
+                                    };
+                                    let ack = expected.saturating_sub(1);
+                                    let _ =
+                                        self.send_reliable_ack(item.src, frame.envelope.ty, ack);
                                 }
                             }
                         }
@@ -665,71 +647,58 @@ impl Relay {
                 }
             };
 
-            if opts.reliable_enabled && handler_is_serialized {
-                if is_reliable_type(frame.envelope.ty)
-                    && let Some(hdr) = frame.reliable
-                {
-                    if (hdr.flags & serialize::RELIABLE_FLAG_ACK_ONLY) != 0 {
-                        self.handle_reliable_ack(item.src, frame.envelope.ty, hdr.ack);
-                        return Ok(());
-                    }
+            if opts.reliable_enabled
+                && handler_is_serialized
+                && is_reliable_type(frame.envelope.ty)
+                && let Some(hdr) = frame.reliable
+            {
+                if (hdr.flags & serialize::RELIABLE_FLAG_ACK_ONLY) != 0 {
                     self.handle_reliable_ack(item.src, frame.envelope.ty, hdr.ack);
-
-                    let unordered = (hdr.flags & serialize::RELIABLE_FLAG_UNORDERED) != 0;
-                    let unsequenced = (hdr.flags & serialize::RELIABLE_FLAG_UNSEQUENCED) != 0;
-
-                    if !unsequenced {
-                        if unordered {
-                            {
-                                let mut st = self.state.lock();
-                                let rx_state = self.reliable_rx_state_mut(
-                                    &mut st,
-                                    item.src,
-                                    frame.envelope.ty,
-                                );
-                                rx_state.last_ack = hdr.seq;
-                            }
-                            let _ =
-                                self.send_reliable_ack(item.src, frame.envelope.ty, hdr.seq);
-                        } else {
-                            let expected = {
-                                let mut st = self.state.lock();
-                                let rx_state = self.reliable_rx_state_mut(
-                                    &mut st,
-                                    item.src,
-                                    frame.envelope.ty,
-                                );
-                                rx_state.expected_seq
-                            };
-
-                            if hdr.seq != expected {
-                                let ack = expected.saturating_sub(1);
-                                let _ =
-                                    self.send_reliable_ack(item.src, frame.envelope.ty, ack);
-                                return Ok(());
-                            }
-
-                            {
-                                let mut st = self.state.lock();
-                                let rx_state = self.reliable_rx_state_mut(
-                                    &mut st,
-                                    item.src,
-                                    frame.envelope.ty,
-                                );
-                                let next = rx_state.expected_seq.wrapping_add(1);
-                                rx_state.expected_seq = if next == 0 { 1 } else { next };
-                                rx_state.last_ack = expected;
-                            }
-
-                            let ack = expected;
-                            let _ = self.send_reliable_ack(item.src, frame.envelope.ty, ack);
-                        }
-                    }
-                }
-            } else {
-                if frame.ack_only() {
                     return Ok(());
                 }
+                self.handle_reliable_ack(item.src, frame.envelope.ty, hdr.ack);
+
+                let unordered = (hdr.flags & serialize::RELIABLE_FLAG_UNORDERED) != 0;
+                let unsequenced = (hdr.flags & serialize::RELIABLE_FLAG_UNSEQUENCED) != 0;
+
+                if !unsequenced {
+                    if unordered {
+                        {
+                            let mut st = self.state.lock();
+                            let rx_state =
+                                self.reliable_rx_state_mut(&mut st, item.src, frame.envelope.ty);
+                            rx_state.last_ack = hdr.seq;
+                        }
+                        let _ = self.send_reliable_ack(item.src, frame.envelope.ty, hdr.seq);
+                    } else {
+                        let expected = {
+                            let mut st = self.state.lock();
+                            let rx_state =
+                                self.reliable_rx_state_mut(&mut st, item.src, frame.envelope.ty);
+                            rx_state.expected_seq
+                        };
+
+                        if hdr.seq != expected {
+                            let ack = expected.saturating_sub(1);
+                            let _ = self.send_reliable_ack(item.src, frame.envelope.ty, ack);
+                            return Ok(());
+                        }
+
+                        {
+                            let mut st = self.state.lock();
+                            let rx_state =
+                                self.reliable_rx_state_mut(&mut st, item.src, frame.envelope.ty);
+                            let next = rx_state.expected_seq.wrapping_add(1);
+                            rx_state.expected_seq = if next == 0 { 1 } else { next };
+                            rx_state.last_ack = expected;
+                        }
+
+                        let ack = expected;
+                        let _ = self.send_reliable_ack(item.src, frame.envelope.ty, ack);
+                    }
+                }
+            } else if frame.ack_only() {
+                return Ok(());
             }
         }
 

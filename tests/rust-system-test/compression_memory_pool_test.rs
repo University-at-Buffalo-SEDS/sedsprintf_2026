@@ -158,7 +158,7 @@ mod compression_memory_pool_test {
             ts,
             Arc::<[u8]>::from(payload),
         )
-        .expect("packet build failed")
+            .expect("packet build failed")
     }
 
     #[test]
