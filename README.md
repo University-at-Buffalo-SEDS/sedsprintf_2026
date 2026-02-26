@@ -246,8 +246,18 @@ Example `telemetry_config.json`:
 ```json
 {
   "endpoints": [
-    { "rust": "Radio", "name": "RADIO", "doc": "Downlink radio", "broadcast_mode": "Default" },
-    { "rust": "SdCard", "name": "SD_CARD", "doc": "Onboard logging", "broadcast_mode": "Default" }
+    {
+      "rust": "Radio",
+      "name": "RADIO",
+      "doc": "Downlink radio",
+      "broadcast_mode": "Default"
+    },
+    {
+      "rust": "SdCard",
+      "name": "SD_CARD",
+      "doc": "Onboard logging",
+      "broadcast_mode": "Default"
+    }
   ],
   "types": [
     {
@@ -255,8 +265,15 @@ Example `telemetry_config.json`:
       "name": "GPS_DATA",
       "doc": "Lat/Lon/Alt",
       "class": "Data",
-      "element": { "kind": "Static", "data_type": "Float32", "count": 3 },
-      "endpoints": ["Radio", "SdCard"]
+      "element": {
+        "kind": "Static",
+        "data_type": "Float32",
+        "count": 3
+      },
+      "endpoints": [
+        "Radio",
+        "SdCard"
+      ]
     }
   ]
 }

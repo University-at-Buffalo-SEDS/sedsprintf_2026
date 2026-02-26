@@ -1,4 +1,5 @@
 mod c_system_test {
+    use std::fs;
     use std::path::PathBuf;
     use std::process::Command;
 
@@ -24,34 +25,52 @@ mod c_system_test {
     fn run_c_system_test() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("c-system-test");
         let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let build_dir = root.join("build");
+        let macos_deployment_target = "26.0";
+
+        if build_dir.exists() {
+            fs::remove_dir_all(&build_dir).expect("Failed to remove stale c-system-test/build");
+        }
 
         // Force-refresh Rust staticlib in non-python mode so C linking never
         // picks up stale pyo3-enabled artifacts from unrelated local builds.
-        let status = Command::new("python3")
+        let mut prebuild = Command::new("python3");
+        prebuild
             .arg("build.py")
             .arg("timesync")
             .arg("device_id=SYSTEM_TEST")
-            .current_dir(&repo_root)
+            .current_dir(&repo_root);
+        if cfg!(target_os = "macos") {
+            prebuild.env("MACOSX_DEPLOYMENT_TARGET", macos_deployment_target);
+        }
+        let status = prebuild
             .status()
             .expect("Failed to run build.py for c-system-test");
         assert!(status.success(), "build.py prebuild failed");
 
-        let status = Command::new("cmake")
+        let mut cmake_config = Command::new("cmake");
+        cmake_config
             .arg("-S")
             .arg(".")
             .arg("-B")
-            .arg("build")
+            .arg(&build_dir)
             .arg("-DCMAKE_BUILD_TYPE=Debug")
-            .current_dir(&root)
+            .current_dir(&root);
+        if cfg!(target_os = "macos") {
+            cmake_config.env("MACOSX_DEPLOYMENT_TARGET", macos_deployment_target);
+        }
+        let status = cmake_config
             .status()
             .expect("Failed to config cmake build");
         assert!(status.success(), "CMake config failed");
 
         // Build the C project
-        let status = Command::new("cmake")
-            .arg("--build")
-            .arg("build")
-            .current_dir(&root)
+        let mut cmake_build = Command::new("cmake");
+        cmake_build.arg("--build").arg(&build_dir).current_dir(&root);
+        if cfg!(target_os = "macos") {
+            cmake_build.env("MACOSX_DEPLOYMENT_TARGET", macos_deployment_target);
+        }
+        let status = cmake_build
             .status()
             .expect("Failed to invoke cmake build");
         assert!(status.success(), "CMake build failed");

@@ -135,26 +135,22 @@ impl TimeSyncTracker {
             last_time_ms: ann.time_ms,
         };
 
-        if let Some(cur) = &mut self.source {
-            if incoming.sender == cur.sender {
-                cur.priority = incoming.priority;
-                cur.last_announce_ms = incoming.last_announce_ms;
-                cur.last_time_ms = incoming.last_time_ms;
-                return Ok(TimeSyncUpdate::NoChange);
-            }
+        if let Some(cur) = &mut self.source
+            && incoming.sender == cur.sender
+        {
+            cur.priority = incoming.priority;
+            cur.last_announce_ms = incoming.last_announce_ms;
+            cur.last_time_ms = incoming.last_time_ms;
+            return Ok(TimeSyncUpdate::NoChange);
         }
 
         let replace = match &self.source {
             None => true,
             Some(cur) => {
-                if !self.is_source_active(recv_ms) {
-                    true
-                } else if incoming.priority < cur.priority {
-                    true
-                } else if incoming.priority == cur.priority && incoming.sender < cur.sender {
+                if !self.is_source_active(recv_ms) && incoming.priority < cur.priority {
                     true
                 } else {
-                    false
+                    incoming.priority == cur.priority && incoming.sender < cur.sender
                 }
             }
         };
@@ -191,10 +187,7 @@ pub fn compute_offset_delay(t1_ms: u64, t2_ms: u64, t3_ms: u64, t4_ms: u64) -> T
     }
 }
 
-pub fn build_timesync_announce(
-    priority: u64,
-    time_ms: u64,
-) -> TelemetryResult<TelemetryPacket> {
+pub fn build_timesync_announce(priority: u64, time_ms: u64) -> TelemetryResult<TelemetryPacket> {
     let meta = message_meta(DataType::TimeSyncAnnounce);
     TelemetryPacket::from_u64_slice(
         DataType::TimeSyncAnnounce,

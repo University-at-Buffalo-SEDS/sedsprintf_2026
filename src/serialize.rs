@@ -1010,9 +1010,9 @@ impl DataEndpoint {
 mod payload_compression {
     use crate::TelemetryError;
     use alloc::borrow::Cow;
-    use alloc::vec::Vec;
     #[cfg(feature = "compression")]
     use alloc::vec;
+    use alloc::vec::Vec;
 
     #[cfg(feature = "compression")]
     use crate::config::PAYLOAD_COMPRESS_THRESHOLD;
@@ -1092,5 +1092,4 @@ mod payload_compression {
             "compressed payloads not supported (compression feature disabled)",
         ))
     }
-
 }

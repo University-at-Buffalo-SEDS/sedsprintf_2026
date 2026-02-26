@@ -10,13 +10,14 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional, Tuple
 
 
 def _cmd_text(cmd: list[str]) -> str:
     return " ".join(cmd)
 
 
-def _hint_for_cmd(cmd: list[str], returncode: int) -> str | None:
+def _hint_for_cmd(cmd: list[str], returncode: int) -> Optional[str]:
     if not cmd or cmd[0] != "git":
         return None
     if cmd[:2] == ["git", "clone"]:
@@ -94,12 +95,12 @@ def wiki_url(host: str, owner: str, repo: str) -> str:
 
 
 def derive_wiki_urls(
-    remote: str,
-    github_url: str | None,
-    gitlab_url: str | None,
-    gitlab_from_github: bool,
-    gitlab_host: str,
-) -> tuple[str | None, str | None]:
+        remote: str,
+        github_url: Optional[str],
+        gitlab_url: Optional[str],
+        gitlab_from_github: bool,
+        gitlab_host: str,
+) -> Tuple[Optional[str], Optional[str]]:
     if github_url and gitlab_url:
         return github_url, gitlab_url
 
