@@ -42,7 +42,7 @@ mod compression_memory_tests {
             ts,
             Arc::<[u8]>::from(payload),
         )
-        .expect("packet build failed")
+            .expect("packet build failed")
     }
 
     #[test]
@@ -2086,8 +2086,8 @@ mod concurrency_tests {
     };
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
-    use std::time::Duration;
     use std::thread;
+    use std::time::Duration;
 
     /// Simple clock that always returns 0 (blanket impl<Fn() -> u64> for Clock).
     fn zero_clock() -> Box<dyn Clock + Send + Sync> {
@@ -2216,7 +2216,7 @@ mod concurrency_tests {
                         &[DataEndpoint::SdCard],
                         idx,
                     )
-                    .unwrap();
+                        .unwrap();
                     let wire = serialize::serialize_packet(&pkt);
                     r.rx_serialized_queue(&wire).unwrap();
                 }
@@ -2300,7 +2300,7 @@ mod concurrency_tests {
                         &[DataEndpoint::SdCard, DataEndpoint::Radio],
                         idx,
                     )
-                    .unwrap();
+                        .unwrap();
                     let wire = serialize::serialize_packet(&pkt);
                     r.rx_serialized_queue_from_side(&wire, side).unwrap();
                 }
@@ -2380,7 +2380,7 @@ mod concurrency_tests {
             &[DataEndpoint::SdCard],
             100,
         )
-        .unwrap();
+            .unwrap();
         router.rx_queue(first).unwrap();
 
         let (tx_done, rx_done) = mpsc::channel();

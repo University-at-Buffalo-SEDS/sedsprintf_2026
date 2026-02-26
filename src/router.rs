@@ -1257,14 +1257,11 @@ impl Router {
     pub fn process_rx_queue_with_timeout(&self, timeout_ms: u32) -> TelemetryResult<()> {
         let start = self.clock.now_ms();
         loop {
-            let item_opt = match self.isr_rx_queue.pop_front() {
-                Ok(v) => v,
-                Err(_) => None,
-            }
-            .or_else(|| {
-                let mut st = self.state.lock();
-                st.received_queue.pop_front()
-            });
+            let item_opt = self.isr_rx_queue.pop_front().unwrap_or(None)
+                .or_else(|| {
+                    let mut st = self.state.lock();
+                    st.received_queue.pop_front()
+                });
             let Some(item) = item_opt else { break };
             self.process_rx_queue_item(item)?;
             if timeout_ms != 0 && self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
@@ -1297,14 +1294,11 @@ impl Router {
             }
 
             // Then RX
-            if let Some(item) = match self.isr_rx_queue.pop_front() {
-                Ok(v) => v,
-                Err(_) => None,
-            }
-            .or_else(|| {
-                let mut st = self.state.lock();
-                st.received_queue.pop_front()
-            }) {
+            if let Some(item) = self.isr_rx_queue.pop_front().unwrap_or(None)
+                .or_else(|| {
+                    let mut st = self.state.lock();
+                    st.received_queue.pop_front()
+                }) {
                 self.process_rx_queue_item(item)?;
                 did_any = true;
             }
