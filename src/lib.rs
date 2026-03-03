@@ -22,7 +22,7 @@
 //! Most user-facing APIs live in:
 //! - [`config`]: schema + data type/endpoint configuration.
 //! - [`router`]: the core Router abstraction.
-//! - [`telemetry_packet`]: `TelemetryPacket` and friends.
+//! - [`packet`]: `Packet` and friends.
 //! - [`serialize`]: wire serialization helpers.
 
 extern crate alloc;
@@ -167,7 +167,7 @@ pub mod relay;
 pub mod router;
 pub mod serialize;
 mod small_payload;
-pub mod telemetry_packet;
+pub mod packet;
 #[cfg(feature = "timesync")]
 pub mod timesync;
 // ============================================================================
@@ -326,7 +326,7 @@ pub struct EndpointMeta {
 
 impl EndpointMeta {
     /// Return a stable string representation used in logs and in
-    /// `TelemetryPacket::to_string()` output.
+    /// `Packet::to_string()` output.
     ///
     /// This should remain stable over time for compatibility with tests and
     /// external tooling.
@@ -344,7 +344,7 @@ impl EndpointMeta {
 
 impl DataEndpoint {
     /// Return a stable string representation used in logs and in
-    /// `TelemetryPacket::to_string()` output.
+    /// `Packet::to_string()` output.
     ///
     /// This should remain stable over time for compatibility with tests and
     /// external tooling.

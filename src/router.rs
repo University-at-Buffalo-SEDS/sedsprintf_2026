@@ -14,7 +14,7 @@ use crate::config::{
 use crate::queue::{BoundedDeque, ByteCost};
 #[cfg(all(not(feature = "std"), target_os = "none"))]
 use crate::seds_error_msg;
-use crate::telemetry_packet::hash_bytes_u64;
+use crate::packet::hash_bytes_u64;
 use crate::{
     config::{
         DataEndpoint, DataType, DEVICE_IDENTIFIER, MAX_HANDLER_RETRIES, RELIABLE_MAX_PENDING,
@@ -22,7 +22,7 @@ use crate::{
     }, get_needed_message_size, impl_letype_num, is_reliable_type,
     lock::RouterMutex,
     message_meta, reliable_mode, serialize,
-    telemetry_packet::TelemetryPacket,
+    packet::Packet,
     EndpointsBroadcastMode, MessageElement, TelemetryError,
     TelemetryResult,
 };
@@ -63,7 +63,7 @@ pub type RouterSideId = usize;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RouterItem {
-    Packet(TelemetryPacket),
+    Packet(Packet),
     Serialized(Arc<[u8]>),
 }
 
@@ -163,15 +163,15 @@ struct ReliableRxState {
 
 // -------------------- endpoint + board config --------------------
 /// Packet Handler function type
-type PacketHandlerFn = dyn Fn(&TelemetryPacket) -> TelemetryResult<()> + Send + Sync + 'static;
+type PacketHandlerFn = dyn Fn(&Packet) -> TelemetryResult<()> + Send + Sync + 'static;
 
 /// Serialized Handler function type
 type SerializedHandlerFn = dyn Fn(&[u8]) -> TelemetryResult<()> + Send + Sync + 'static;
 
 // Make handlers usable across tasks
 /// Endpoint handler function enum.
-/// Holds either a `TelemetryPacket` handler or a serialized byte-slice handler.
-/// /// - Packet handler signature: `Fn(&TelemetryPacket) -> TelemetryResult<()>`
+/// Holds either a `Packet` handler or a serialized byte-slice handler.
+/// /// - Packet handler signature: `Fn(&Packet) -> TelemetryResult<()>`
 /// /// - Serialized handler signature: `Fn(&[u8]) -> TelemetryResult<()>`
 #[derive(Clone)]
 pub enum EndpointHandlerFn {
@@ -241,13 +241,13 @@ impl Debug for EndpointHandler {
 }
 
 impl EndpointHandler {
-    /// Create a new endpoint handler for `TelemetryPacket` callbacks.
+    /// Create a new endpoint handler for `Packet` callbacks.
     ///
-    /// Handler signature is `Fn(&TelemetryPacket) -> TelemetryResult<()>`.
+    /// Handler signature is `Fn(&Packet) -> TelemetryResult<()>`.
     #[inline]
     pub fn new_packet_handler<F>(endpoint: DataEndpoint, f: F) -> Self
     where
-        F: Fn(&TelemetryPacket) -> TelemetryResult<()> + Send + Sync + 'static,
+        F: Fn(&Packet) -> TelemetryResult<()> + Send + Sync + 'static,
     {
         Self {
             endpoint,
@@ -395,7 +395,7 @@ fn make_error_payload(msg: &str) -> Arc<[u8]> {
 }
 
 /// Generic raw logger function used by Router::log and Router::log_queue.
-/// Builds a TelemetryPacket from the provided data slice and passes it to the
+/// Builds a Packet from the provided data slice and passes it to the
 /// provided transmission function.
 fn log_raw<T, F>(
     sender: &'static str,
@@ -406,7 +406,7 @@ fn log_raw<T, F>(
 ) -> TelemetryResult<()>
 where
     T: LeBytes,
-    F: FnMut(TelemetryPacket) -> TelemetryResult<()>,
+    F: FnMut(Packet) -> TelemetryResult<()>,
 {
     let meta = message_meta(ty);
     let got = data.len() * T::WIDTH;
@@ -432,7 +432,7 @@ where
     }
 
     let payload = encode_slice_le(data);
-    let pkt = TelemetryPacket::new(ty, meta.endpoints, sender, timestamp, payload)?;
+    let pkt = Packet::new(ty, meta.endpoints, sender, timestamp, payload)?;
     tx_function(pkt)
 }
 
@@ -601,7 +601,7 @@ fn with_retries<F>(
     this: &Router,
     dest: DataEndpoint,
     data: &RouterItem,
-    pkt_for_ctx: Option<&TelemetryPacket>,
+    pkt_for_ctx: Option<&Packet>,
     env_for_ctx: Option<&serialize::TelemetryEnvelope>,
     run: F,
 ) -> TelemetryResult<()>
@@ -1060,7 +1060,7 @@ impl Router {
     /// Add a new side with a **packet handler**.
     pub fn add_side_packet<F>(&self, name: &'static str, tx: F) -> RouterSideId
     where
-        F: Fn(&TelemetryPacket) -> TelemetryResult<()> + Send + Sync + 'static,
+        F: Fn(&Packet) -> TelemetryResult<()> + Send + Sync + 'static,
     {
         self.add_side_packet_with_options(name, tx, RouterSideOptions::default())
     }
@@ -1072,7 +1072,7 @@ impl Router {
         opts: RouterSideOptions,
     ) -> RouterSideId
     where
-        F: Fn(&TelemetryPacket) -> TelemetryResult<()> + Send + Sync + 'static,
+        F: Fn(&Packet) -> TelemetryResult<()> + Send + Sync + 'static,
     {
         let mut st = self.state.lock();
         let id = st.sides.len();
@@ -1124,13 +1124,13 @@ impl Router {
         }
     }
 
-    /// Error helper when we have a full TelemetryPacket.
+    /// Error helper when we have a full Packet.
     ///
     /// Sends a TelemetryError packet to all local endpoints except the failed one (if any).
     /// If no local endpoints remain, falls back to `fallback_stdout`.
     fn handle_callback_error(
         &self,
-        pkt: &TelemetryPacket,
+        pkt: &Packet,
         dest: Option<DataEndpoint>,
         e: TelemetryError,
     ) -> TelemetryResult<()> {
@@ -1176,7 +1176,7 @@ impl Router {
 
         let payload = make_error_payload(&error_msg);
 
-        let error_pkt = TelemetryPacket::new(
+        let error_pkt = Packet::new(
             DataType::TelemetryError,
             &recipients,
             self.sender,
@@ -1367,7 +1367,7 @@ impl Router {
 
     /// Enqueue a packet for RX processing (local source).
     #[inline]
-    pub fn rx_queue(&self, pkt: TelemetryPacket) -> TelemetryResult<()> {
+    pub fn rx_queue(&self, pkt: Packet) -> TelemetryResult<()> {
         pkt.validate()?;
         let mut st = self.state.lock();
         st.received_queue.push_back(RouterRxItem {
@@ -1382,7 +1382,7 @@ impl Router {
     /// Returns `TelemetryError::Io("rx queue busy")` if another context is
     /// currently mutating the ISR RX queue.
     #[inline]
-    pub fn rx_queue_isr(&self, pkt: TelemetryPacket) -> TelemetryResult<()> {
+    pub fn rx_queue_isr(&self, pkt: Packet) -> TelemetryResult<()> {
         pkt.validate()?;
         self.isr_rx_queue.push_back(RouterRxItem {
             src: None,
@@ -1394,7 +1394,7 @@ impl Router {
     #[inline]
     pub fn rx_queue_from_side(
         &self,
-        pkt: TelemetryPacket,
+        pkt: Packet,
         side: RouterSideId,
     ) -> TelemetryResult<()> {
         pkt.validate()?;
@@ -1413,7 +1413,7 @@ impl Router {
     #[inline]
     pub fn rx_queue_from_side_isr(
         &self,
-        pkt: TelemetryPacket,
+        pkt: Packet,
         side: RouterSideId,
     ) -> TelemetryResult<()> {
         pkt.validate()?;
@@ -1497,7 +1497,7 @@ impl Router {
         dest: DataEndpoint,
         handler: &EndpointHandler,
         data: Option<&[u8]>,
-        pkt_for_ctx: Option<&TelemetryPacket>,
+        pkt_for_ctx: Option<&Packet>,
         env_for_ctx: Option<&serialize::TelemetryEnvelope>,
     ) -> TelemetryResult<()> {
         let owned_tmp: Option<RouterItem>;
@@ -1522,7 +1522,7 @@ impl Router {
 
         match (&handler.handler, data) {
             (EndpointHandlerFn::Packet(f), _) => {
-                let pkt = pkt_for_ctx.expect("Packet handler requires TelemetryPacket context");
+                let pkt = pkt_for_ctx.expect("Packet handler requires Packet context");
                 with_retries(self, dest, item_for_ctx, pkt_for_ctx, env_for_ctx, || {
                     f(pkt)
                 })
@@ -1580,7 +1580,7 @@ impl Router {
 
         let payload = make_error_payload(&error_msg);
 
-        let error_pkt = TelemetryPacket::new(
+        let error_pkt = Packet::new(
             DataType::TelemetryError,
             &recipients,
             &env.sender.clone(),
@@ -2091,7 +2091,7 @@ impl Router {
 
     /// Receive a packet (local source).
     #[inline]
-    pub fn rx(&self, pkt: &TelemetryPacket) -> TelemetryResult<()> {
+    pub fn rx(&self, pkt: &Packet) -> TelemetryResult<()> {
         let item = RouterRxItem {
             src: None,
             data: RouterItem::Packet(pkt.clone()),
@@ -2101,7 +2101,7 @@ impl Router {
 
     /// Receive a packet with explicit ingress side.
     #[inline]
-    pub fn rx_from_side(&self, pkt: &TelemetryPacket, side: RouterSideId) -> TelemetryResult<()> {
+    pub fn rx_from_side(&self, pkt: &Packet, side: RouterSideId) -> TelemetryResult<()> {
         let item = RouterRxItem {
             src: Some(side),
             data: RouterItem::Packet(pkt.clone()),
@@ -2123,7 +2123,7 @@ impl Router {
 
     /// Transmit a packet immediately (broadcast to all sides).
     #[inline]
-    pub fn tx(&self, pkt: TelemetryPacket) -> TelemetryResult<()> {
+    pub fn tx(&self, pkt: Packet) -> TelemetryResult<()> {
         self.tx_item(RouterTxItem::Broadcast(RouterItem::Packet(pkt)))
     }
 
@@ -2137,7 +2137,7 @@ impl Router {
 
     /// Queue a packet for later TX (broadcast to all sides).
     #[inline]
-    pub fn tx_queue(&self, pkt: TelemetryPacket) -> TelemetryResult<()> {
+    pub fn tx_queue(&self, pkt: Packet) -> TelemetryResult<()> {
         self.tx_queue_item(RouterTxItem::Broadcast(RouterItem::Packet(pkt)))
     }
 

@@ -2,7 +2,7 @@
 mod compression_memory_pool_test {
     use sedsprintf_rs::config::{DataEndpoint, DataType};
     use sedsprintf_rs::serialize;
-    use sedsprintf_rs::telemetry_packet::TelemetryPacket;
+    use sedsprintf_rs::packet::Packet;
 
     use std::alloc::{GlobalAlloc, Layout, System};
     use std::ptr::null_mut;
@@ -150,8 +150,8 @@ mod compression_memory_pool_test {
         ENABLE_LIMIT.store(false, Ordering::Relaxed);
     }
 
-    fn make_packet(payload: &[u8], ts: u64) -> TelemetryPacket {
-        TelemetryPacket::new(
+    fn make_packet(payload: &[u8], ts: u64) -> Packet {
+        Packet::new(
             DataType::MessageData,
             &[DataEndpoint::SdCard],
             "POOL_TEST",

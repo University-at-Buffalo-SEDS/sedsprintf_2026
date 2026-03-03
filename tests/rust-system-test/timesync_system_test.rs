@@ -3,7 +3,7 @@ mod timesync_system_test {
     use sedsprintf_rs::config::{DataEndpoint, DataType};
     use sedsprintf_rs::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
     use sedsprintf_rs::serialize;
-    use sedsprintf_rs::telemetry_packet::TelemetryPacket;
+    use sedsprintf_rs::packet::Packet;
     use sedsprintf_rs::timesync::{
         build_timesync_announce_with_sender, build_timesync_request, build_timesync_response,
         compute_offset_delay, TimeSyncConfig, TimeSyncRole, TimeSyncTracker,
@@ -92,7 +92,7 @@ mod timesync_system_test {
                         v
                     };
 
-                    let pkt = TelemetryPacket::new(
+                    let pkt = Packet::new(
                         DataType::MessageData,
                         &[DataEndpoint::SdCard],
                         "SYS_COMP",

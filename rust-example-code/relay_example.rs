@@ -1,7 +1,7 @@
 use sedsprintf_rs::config::{DataEndpoint, DataType};
 use sedsprintf_rs::relay::Relay;
 use sedsprintf_rs::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
-use sedsprintf_rs::telemetry_packet::TelemetryPacket;
+use sedsprintf_rs::telemetry_packet::Packet;
 use sedsprintf_rs::TelemetryResult;
 
 fn now_ms() -> u64 {
@@ -26,7 +26,7 @@ fn main() -> TelemetryResult<()> {
     let _side_a = relay.add_side_serialized("CAN", |_bytes| Ok(()));
     let _side_b = relay.add_side_serialized("RADIO", |_bytes| Ok(()));
 
-    let pkt = TelemetryPacket::from_f32_slice(
+    let pkt = Packet::from_f32_slice(
         DataType::GpsData,
         &[1.0, 2.0, 3.0],
         &[DataEndpoint::Radio],

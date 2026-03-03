@@ -275,7 +275,7 @@ int32_t seds_pkt_copy_data(const SedsPacketView * pkt, size_t elem_size, void * 
 
 
 /**
- * Typed payload getters using TelemetryPacket::data_as_* helpers.
+ * Typed payload getters using Packet::data_as_* helpers.
  *
  * Semantics (matching seds_pkt_copy_data / Rust side):
  *  - If out is NULL or out_elems == 0 or out_elems < needed:
@@ -448,7 +448,7 @@ SedsResult seds_relay_rx_serialized_from_side(SedsRelay * r,
 
 
 /**
- * @brief Feed a TelemetryPacket (described by SedsPacketView) that arrived on
+ * @brief Feed a Packet (described by SedsPacketView) that arrived on
  *        a given side into the relay.
  *
  * This is the packet-based counterpart to seds_relay_rx_serialized_from_side().

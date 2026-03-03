@@ -5,7 +5,7 @@ mod reliable_drop_tests {
         Clock, EndpointHandler, Router, RouterConfig, RouterMode, RouterSideOptions,
     };
     use sedsprintf_rs::serialize;
-    use sedsprintf_rs::telemetry_packet::TelemetryPacket;
+    use sedsprintf_rs::packet::Packet;
     use sedsprintf_rs::TelemetryResult;
 
     use std::collections::VecDeque;
@@ -88,7 +88,7 @@ mod reliable_drop_tests {
 
         const TOTAL: u32 = 6;
         for i in 0..TOTAL {
-            let pkt = TelemetryPacket::from_f32_slice(
+            let pkt = Packet::from_f32_slice(
                 DataType::GpsData,
                 &[i as f32, 0.0, 0.0],
                 &[DataEndpoint::Radio],
@@ -193,14 +193,14 @@ mod reliable_drop_tests {
             },
         );
 
-        let pkt1 = TelemetryPacket::from_f32_slice(
+        let pkt1 = Packet::from_f32_slice(
             DataType::GpsData,
             &[1.0_f32, 0.0, 0.0],
             &[DataEndpoint::Radio],
             1,
         )
             .expect("failed to build packet");
-        let pkt2 = TelemetryPacket::from_f32_slice(
+        let pkt2 = Packet::from_f32_slice(
             DataType::GpsData,
             &[2.0_f32, 0.0, 0.0],
             &[DataEndpoint::Radio],

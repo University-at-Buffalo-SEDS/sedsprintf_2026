@@ -36,7 +36,7 @@ Detailed pages that describe internals, data structures, and formats.
 - [Technical-Wire-Format](Technical-Wire-Format)
 - [Technical-Router-Details](Technical-Router-Details)
 - [Technical-Queues-and-Memory](Technical-Queues-and-Memory)
-- [Technical-TelemetryPacket-Details](Technical-TelemetryPacket-Details)
+- [Technical-Packet-Details](Technical-Packet-Details)
 - [Technical-Bindings-and-FFI](Technical-Bindings-and-FFI)
 
 ## Repo layout (high level)

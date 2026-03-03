@@ -4,7 +4,7 @@ use crate::config::{
 };
 use crate::queue::{BoundedDeque, ByteCost};
 use crate::serialize;
-use crate::telemetry_packet::{hash_bytes_u64, TelemetryPacket};
+use crate::packet::{hash_bytes_u64, Packet};
 use crate::{is_reliable_type, reliable_mode};
 use crate::{
     router::Clock,
@@ -17,7 +17,7 @@ use alloc::{sync::Arc, vec::Vec};
 /// Logical side index (CAN, UART, RADIO, etc.)
 pub type RelaySideId = usize;
 /// Packet Handler function type
-type PacketHandlerFn = dyn Fn(&TelemetryPacket) -> TelemetryResult<()> + Send + Sync + 'static;
+type PacketHandlerFn = dyn Fn(&Packet) -> TelemetryResult<()> + Send + Sync + 'static;
 
 /// Serialized Handler function type
 type SerializedHandlerFn = dyn Fn(&[u8]) -> TelemetryResult<()> + Send + Sync + 'static;
@@ -46,7 +46,7 @@ pub struct RelaySide {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RelayItem {
     Serialized(Arc<[u8]>),
-    Packet(Arc<TelemetryPacket>),
+    Packet(Arc<Packet>),
 }
 
 /// Item that was received by the relay from some side.
@@ -115,7 +115,7 @@ struct RelayInner {
 }
 
 /// Relay that fans out packets from one side to all others.
-/// - Supports both serialized bytes and full TelemetryPacket.
+/// - Supports both serialized bytes and full Packet.
 /// - Has RX & TX queues, like Router.
 /// - Uses a Clock for the *_with_timeout APIs, same style as Router.
 pub struct Relay {
@@ -499,10 +499,10 @@ impl Relay {
     }
 
     /// Add a new side with a **packet handler**.
-    /// The handler receives a fully decoded TelemetryPacket.
+    /// The handler receives a fully decoded Packet.
     pub fn add_side_packet<F>(&self, name: &'static str, tx: F) -> RelaySideId
     where
-        F: Fn(&TelemetryPacket) -> TelemetryResult<()> + Send + Sync + 'static,
+        F: Fn(&Packet) -> TelemetryResult<()> + Send + Sync + 'static,
     {
         self.add_side_packet_with_options(name, tx, RelaySideOptions::default())
     }
@@ -514,7 +514,7 @@ impl Relay {
         opts: RelaySideOptions,
     ) -> RelaySideId
     where
-        F: Fn(&TelemetryPacket) -> TelemetryResult<()> + Send + Sync + 'static,
+        F: Fn(&Packet) -> TelemetryResult<()> + Send + Sync + 'static,
     {
         let mut st = self.state.lock();
         let id = st.sides.len();
@@ -543,10 +543,10 @@ impl Relay {
         })
     }
 
-    /// Enqueue a full TelemetryPacket that originated from `src` into the relay RX queue.
+    /// Enqueue a full Packet that originated from `src` into the relay RX queue.
     ///
-    /// The packet is wrapped in `Arc<TelemetryPacket>` so fanout can clone the pointer cheaply.
-    pub fn rx_from_side(&self, src: RelaySideId, packet: TelemetryPacket) -> TelemetryResult<()> {
+    /// The packet is wrapped in `Arc<Packet>` so fanout can clone the pointer cheaply.
+    pub fn rx_from_side(&self, src: RelaySideId, packet: Packet) -> TelemetryResult<()> {
         let mut st = self.state.lock();
 
         if src >= st.sides.len() {

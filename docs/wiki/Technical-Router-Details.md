@@ -15,7 +15,7 @@ and how routing decisions are made.
 
 Handlers are typed:
 
-- `EndpointHandlerFn::Packet`: receives `TelemetryPacket`.
+- `EndpointHandlerFn::Packet`: receives `Packet`.
 - `EndpointHandlerFn::Serialized`: receives raw bytes (already on wire).
 
 ## Side model
@@ -33,7 +33,7 @@ Side TX handlers are either:
 
 ```
 Fn(&[u8]) -> TelemetryResult<()>
-Fn(&TelemetryPacket) -> TelemetryResult<()>
+Fn(&Packet) -> TelemetryResult<()>
 ```
 
 Reliable delivery (`reliable: true` / `reliable_mode` in the schema) is only applied when:
@@ -93,7 +93,7 @@ Local handlers are invoked via `with_retries`:
 
 - Retries up to `MAX_HANDLER_RETRIES`.
 - On permanent failure, the packet ID is removed from the dedupe cache.
-- If a `TelemetryPacket` or envelope is available, the router emits a `TelemetryError` packet to local handlers.
+- If a `Packet` or envelope is available, the router emits a `TelemetryError` packet to local handlers.
 
 This makes local handlers idempotent: a resent packet can be processed again after a failure.
 

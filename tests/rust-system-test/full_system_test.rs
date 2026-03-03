@@ -3,7 +3,7 @@ mod mega_library_system_tests {
     use sedsprintf_rs::config::{DataEndpoint, DataType};
     use sedsprintf_rs::relay::Relay;
     use sedsprintf_rs::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
-    use sedsprintf_rs::telemetry_packet::TelemetryPacket;
+    use sedsprintf_rs::packet::Packet;
     use sedsprintf_rs::TelemetryResult;
 
     use sedsprintf_rs::serialize::serialize_packet;
@@ -20,7 +20,7 @@ mod mega_library_system_tests {
     type BusMsg = (&'static str, Vec<u8>);
 
     fn mk_counter_handler(endpoint: DataEndpoint, counter: Arc<AtomicUsize>) -> EndpointHandler {
-        EndpointHandler::new_packet_handler(endpoint, move |_pkt: &TelemetryPacket| {
+        EndpointHandler::new_packet_handler(endpoint, move |_pkt: &Packet| {
             counter.fetch_add(1, Ordering::SeqCst);
             Ok(())
         })
@@ -32,9 +32,9 @@ mod mega_library_system_tests {
         }
     }
 
-    fn make_packet(ty: DataType, vals: &[f32], ts: u64) -> TelemetryPacket {
+    fn make_packet(ty: DataType, vals: &[f32], ts: u64) -> Packet {
         // Every packet targets BOTH endpoints (full coverage)
-        TelemetryPacket::from_f32_slice(ty, vals, &[DataEndpoint::SdCard, DataEndpoint::Radio], ts).unwrap()
+        Packet::from_f32_slice(ty, vals, &[DataEndpoint::SdCard, DataEndpoint::Radio], ts).unwrap()
     }
 
     #[test]
@@ -309,7 +309,7 @@ mod mega_library_system_tests {
             thread::spawn(move || {
                 for i in 0..8 {
                     let msg = format!("hello-{i}");
-                    let pkt = TelemetryPacket::from_str_slice(
+                    let pkt = Packet::from_str_slice(
                         DataType::TelemetryError,
                         &msg,
                         &[DataEndpoint::SdCard, DataEndpoint::Radio],
@@ -342,7 +342,7 @@ mod mega_library_system_tests {
                     hub.tx_serialized(wire_b.clone()).unwrap();
                     hub.tx_serialized_queue(wire_b).unwrap();
 
-                    let pkt_c = TelemetryPacket::from_str_slice(
+                    let pkt_c = Packet::from_str_slice(
                         DataType::TelemetryError,
                         "hub-msg",
                         &[DataEndpoint::SdCard, DataEndpoint::Radio],

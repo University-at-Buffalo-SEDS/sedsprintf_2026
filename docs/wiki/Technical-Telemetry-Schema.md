@@ -119,9 +119,9 @@ Helpers:
 
 ## How the schema is used at runtime
 
-- `TelemetryPacket::new` validates payload sizes against `message_meta`.
+- `Packet::new` validates payload sizes against `message_meta`.
 - `Router::log*` uses the schema to validate payload lengths before serialization.
-- `TelemetryPacket::to_string` uses `MessageClass` and `MessageDataType` to format payloads.
+- `Packet::to_string` uses `MessageClass` and `MessageDataType` to format payloads.
 
 ## Example
 

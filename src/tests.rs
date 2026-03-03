@@ -1,7 +1,7 @@
 use crate::config::{get_message_meta, STATIC_HEX_LENGTH, STATIC_STRING_LENGTH};
 use crate::get_needed_message_size;
 use crate::router::{Clock, EndpointHandler};
-use crate::telemetry_packet::TelemetryPacket;
+use crate::packet::Packet;
 use crate::{get_data_type, message_meta, DataEndpoint, DataType, MessageDataType, TelemetryError};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -29,13 +29,13 @@ impl Clock for UnixClock {
 mod compression_memory_tests {
     use crate::config::{DataEndpoint, DataType};
     use crate::serialize;
-    use crate::telemetry_packet::TelemetryPacket;
+    use crate::packet::Packet;
     use std::sync::Arc;
 
     const FLAG_COMPRESSED_PAYLOAD: u8 = 0x01;
 
-    fn make_message_packet(payload: &[u8], ts: u64) -> TelemetryPacket {
-        TelemetryPacket::new(
+    fn make_message_packet(payload: &[u8], ts: u64) -> Packet {
+        Packet::new(
             DataType::MessageData,
             &[DataEndpoint::SdCard],
             "CMP_NODE",
@@ -126,7 +126,7 @@ fn test_payload_len_for(ty: DataType) -> usize {
 ///
 /// Used by various queue/timeout and concurrency tests.
 fn get_handler(rx_count_c: Arc<AtomicUsize>) -> EndpointHandler {
-    EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt: &TelemetryPacket| {
+    EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt: &Packet| {
         rx_count_c.fetch_add(1, Ordering::SeqCst);
         Ok(())
     })
@@ -137,7 +137,7 @@ fn get_handler(rx_count_c: Arc<AtomicUsize>) -> EndpointHandler {
 /// - decodes the payload as little-endian `f32`,
 /// - stores `(DataType, Vec<f32>)` into the shared `Mutex`.
 fn get_sd_card_handler(sd_seen_c: SeenType) -> EndpointHandler {
-    EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |pkt: &TelemetryPacket| {
+    EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |pkt: &Packet| {
         // sanity: element sizing must be 4 bytes (f32) for GPS_DATA
         let elems = get_message_meta(pkt.data_type()).element.into().max(1);
         let per_elem = get_needed_message_size(pkt.data_type()) / elems;
@@ -183,7 +183,7 @@ mod tests2 {
         config::{DataEndpoint, DataType},
         router::Router,
         serialize,
-        telemetry_packet::TelemetryPacket,
+        packet::Packet,
         TelemetryResult,
     };
     use std::sync::{Arc, Mutex};
@@ -195,7 +195,7 @@ mod tests2 {
     fn serialize_roundtrip_gps() {
         // GPS: 3 * f32
         let endpoints = &[DataEndpoint::SdCard, DataEndpoint::Radio];
-        let pkt = TelemetryPacket::from_f32_slice(
+        let pkt = Packet::from_f32_slice(
             DataType::GpsData,
             &[5.2141414, 3.1342144, 1.1231232],
             endpoints,
@@ -221,7 +221,7 @@ mod tests2 {
     fn header_string_matches_expectation() {
         let endpoints = &[DataEndpoint::SdCard, DataEndpoint::Radio];
         let pkt =
-            TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], endpoints, 0)
+            Packet::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], endpoints, 0)
                 .unwrap();
         let s = pkt.header_string();
         assert_eq!(
@@ -235,7 +235,7 @@ mod tests2 {
     fn packet_to_string_formats_floats() {
         let endpoints = &[DataEndpoint::SdCard, DataEndpoint::Radio];
         let pkt =
-            TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.5, 3.25], endpoints, 0)
+            Packet::from_f32_slice(DataType::GpsData, &[1.0, 2.5, 3.25], endpoints, 0)
                 .unwrap();
 
         let text = pkt.as_string();
@@ -254,7 +254,7 @@ mod tests2 {
         use crate::router::{Router, RouterConfig};
 
         // capture spaces
-        let tx_seen: Arc<Mutex<Option<TelemetryPacket>>> = Arc::new(Mutex::new(None));
+        let tx_seen: Arc<Mutex<Option<Packet>>> = Arc::new(Mutex::new(None));
         let sd_seen_decoded: SeenType = Arc::new(Mutex::new(None));
 
         // transmitter: record the deserialized packet we "sent"
@@ -423,13 +423,13 @@ mod tests2 {
 ///
 /// We intentionally do not call `validate()` because `GPS_DATA` usually expects
 /// 3×`f32` (12 bytes) and this is for formatting/copying tests only.
-fn fake_telemetry_packet_bytes() -> TelemetryPacket {
+fn fake_telemetry_packet_bytes() -> Packet {
     use crate::config::{DataEndpoint, DataType};
 
     let payload = [0x13 as f32, 0x21 as f32, 0x34 as f32]; // f32 values
     let endpoints = [DataEndpoint::SdCard, DataEndpoint::Radio];
 
-    TelemetryPacket::from_f32_slice(DataType::GpsData, &payload, &endpoints, 1123581321).unwrap()
+    Packet::from_f32_slice(DataType::GpsData, &payload, &endpoints, 1123581321).unwrap()
 }
 
 /// Copy helper that mirrors the C++ behavior, but uses raw pointers so we can
@@ -437,13 +437,13 @@ fn fake_telemetry_packet_bytes() -> TelemetryPacket {
 ///
 /// Safety: Caller must ensure `dest` and `src` are valid for reads/writes.
 unsafe fn copy_telemetry_packet_raw(
-    dest: *mut TelemetryPacket,
-    src: *const TelemetryPacket,
+    dest: *mut Packet,
+    src: *const Packet,
 ) -> Result<(), &'static str> {
     if dest.is_null() || src.is_null() {
         return Err("null packet");
     }
-    if core::ptr::eq(dest, src as *mut TelemetryPacket) {
+    if core::ptr::eq(dest, src as *mut Packet) {
         // same object → OK no-op
         return Ok(());
     }
@@ -455,7 +455,7 @@ unsafe fn copy_telemetry_packet_raw(
     let endpoints_vec: Vec<DataEndpoint> = s.endpoints().to_vec();
     let payload_arc: Arc<[u8]> = Arc::from(s.payload());
 
-    let new_pkt = TelemetryPacket::new(
+    let new_pkt = Packet::new(
         s.data_type(),
         &endpoints_vec,
         s.sender(),
@@ -480,7 +480,7 @@ fn helpers_packet_hex_to_string() {
     assert_eq!(got, expect);
 }
 
-/// Port of C++: TEST(Helpers, CopyTelemetryPacket).
+/// Port of C++: TEST(Helpers, CopyPacket).
 /// Exercises `copy_telemetry_packet_raw` for null, self-copy, and deep copy.
 #[test]
 fn helpers_copy_telemetry_packet() {
@@ -491,12 +491,12 @@ fn helpers_copy_telemetry_packet() {
 
     // (2) same pointer (no-op) → OK
     let mut same = fake_telemetry_packet_bytes();
-    let same_ptr: *mut TelemetryPacket = &mut same;
+    let same_ptr: *mut Packet = &mut same;
     let st = unsafe { copy_telemetry_packet_raw(same_ptr, same_ptr as *const _) };
     assert!(st.is_ok());
 
     // (3) distinct objects → deep copy and equal fields
-    let mut dest = TelemetryPacket::new(
+    let mut dest = Packet::new(
         src.data_type(),
         src.endpoints(), // &[DataEndpoint]
         src.sender(),    // Arc<str>
@@ -570,12 +570,12 @@ mod handler_failure_tests {
         let recv_count_c = recv_count.clone();
         let last_payload_c = last_payload.clone();
 
-        let failing = EndpointHandler::new_packet_handler(failing_ep, |_pkt: &TelemetryPacket| {
+        let failing = EndpointHandler::new_packet_handler(failing_ep, |_pkt: &Packet| {
             Err(TelemetryError::BadArg)
         });
 
         let capturing =
-            EndpointHandler::new_packet_handler(other_ep, move |pkt: &TelemetryPacket| {
+            EndpointHandler::new_packet_handler(other_ep, move |pkt: &Packet| {
                 if pkt.data_type() == DataType::TelemetryError {
                     *last_payload_c.lock().unwrap() = pkt.as_string();
                 }
@@ -591,7 +591,7 @@ mod handler_failure_tests {
             box_clock,
         );
 
-        let pkt = TelemetryPacket::new(
+        let pkt = Packet::new(
             ty,
             &[failing_ep, other_ep],
             DEVICE_IDENTIFIER,
@@ -639,7 +639,7 @@ mod handler_failure_tests {
         let last_payload_c = last_payload.clone();
 
         let capturing =
-            EndpointHandler::new_packet_handler(local_ep, move |pkt: &TelemetryPacket| {
+            EndpointHandler::new_packet_handler(local_ep, move |pkt: &Packet| {
                 if pkt.data_type() == DataType::TelemetryError {
                     *last_payload_c.lock().unwrap() = pkt.as_string();
                     saw_error_c.fetch_add(1, Ordering::SeqCst);
@@ -658,7 +658,7 @@ mod handler_failure_tests {
         );
         router.add_side_serialized("tx", tx_fail);
 
-        let pkt = TelemetryPacket::new(
+        let pkt = Packet::new(
             ty,
             // include both a local and a non-local endpoint so any_remote == true
             &[local_ep, remote_ep],
@@ -699,7 +699,7 @@ mod timeout_tests {
     use crate::router::{EndpointHandler, RouterMode};
     use crate::tests::{get_handler, UnixClock};
     use crate::{
-        router::Clock, router::Router, router::RouterConfig, telemetry_packet::TelemetryPacket, DataType,
+        router::Clock, router::Router, router::RouterConfig, packet::Packet, DataType,
         TelemetryResult,
     };
     use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -740,8 +740,8 @@ mod timeout_tests {
 
     /// Create a GPS packet with only a local endpoint (`SD_CARD`), avoiding any
     /// implicit re-TX during receive.
-    fn mk_rx_only_local(vals: &[f32], ts: u64) -> TelemetryPacket {
-        TelemetryPacket::from_f32_slice(
+    fn mk_rx_only_local(vals: &[f32], ts: u64) -> Packet {
+        Packet::from_f32_slice(
             DataType::GpsData,
             vals,
             &[DataEndpoint::SdCard], // <- only local
@@ -772,7 +772,7 @@ mod timeout_tests {
         let rx_count_c = rx_count.clone();
         let handler = EndpointHandler::new_packet_handler(
             DataEndpoint::SdCard,
-            move |_pkt: &TelemetryPacket| {
+            move |_pkt: &Packet| {
                 rx_count_c.fetch_add(1, Ordering::SeqCst);
                 Ok(())
             },
@@ -843,7 +843,7 @@ mod timeout_tests {
 
             // RX with only-local endpoint, unique payload + timestamp
             r.rx_queue(
-                TelemetryPacket::from_f32_slice(
+                Packet::from_f32_slice(
                     DataType::GpsData,
                     &[4.0 + i as f32, 5.0, 6.0],
                     &[DataEndpoint::SdCard],
@@ -900,7 +900,7 @@ mod timeout_tests {
                 .unwrap();
 
             r.rx_queue(
-                TelemetryPacket::from_f32_slice(
+                Packet::from_f32_slice(
                     DataType::GpsData,
                     &[4.0 + i as f32, 5.0, 6.0],
                     &[DataEndpoint::SdCard],
@@ -979,7 +979,7 @@ mod tests_extra {
     use crate::tests::test_payload_len_for;
     use crate::{
         config::DataType, router::{Clock, EndpointHandler, Router, RouterConfig}, serialize,
-        telemetry_packet::TelemetryPacket,
+        packet::Packet,
         TelemetryError,
         TelemetryErrorCode,
         TelemetryResult,
@@ -1040,7 +1040,7 @@ mod tests_extra {
     /// Ensure header size is a valid prefix of the serialized wire image.
     #[test]
     fn header_size_is_prefix_of_wire_image() {
-        let pkt = TelemetryPacket::from_f32_slice(
+        let pkt = Packet::from_f32_slice(
             DataType::GpsData,
             &[1.0, 2.0, 3.0],
             &[DataEndpoint::SdCard, DataEndpoint::Radio],
@@ -1080,11 +1080,11 @@ mod tests_extra {
     #[test]
     fn serializer_is_canonical_roundtrip() {
         use crate::config::{DataEndpoint, DataType};
-        use crate::{serialize, telemetry_packet::TelemetryPacket};
+        use crate::{serialize, packet::Packet};
 
         // Dynamic payload to avoid schema constraints and let us vary sizes later.
         let msg = "hello world";
-        let pkt = TelemetryPacket::from_str_slice(
+        let pkt = Packet::from_str_slice(
             DataType::TelemetryError,
             msg,
             &[DataEndpoint::SdCard, DataEndpoint::Radio],
@@ -1105,7 +1105,7 @@ mod tests_extra {
     #[test]
     fn serializer_varint_scalars_grow_as_expected() {
         use crate::config::{DataEndpoint, DataType};
-        use crate::{serialize, telemetry_packet::TelemetryPacket};
+        use crate::{serialize, packet::Packet};
 
         fn non_rle_ascii(len: usize) -> Vec<u8> {
             let mut out = Vec::with_capacity(len);
@@ -1117,14 +1117,14 @@ mod tests_extra {
         }
 
         // Helper to build a TelemetryError payload and sender of given lengths.
-        fn pkt_with(len: usize, sender_len: usize, ts: u64) -> TelemetryPacket {
+        fn pkt_with(len: usize, sender_len: usize, ts: u64) -> Packet {
             let sender_bytes = non_rle_ascii(sender_len);
             let s: String = sender_bytes
                 .iter()
                 .map(|b| char::from(*b))
                 .collect();
             let payload = non_rle_ascii(len); // dynamic payload (String type)
-            TelemetryPacket::new(
+            Packet::new(
                 DataType::TelemetryError,
                 &[DataEndpoint::SdCard],
                 &s,
@@ -1168,7 +1168,7 @@ mod tests_extra {
         use crate::{
             config::{DataEndpoint, DataType},
             serialize,
-            telemetry_packet::TelemetryPacket,
+            packet::Packet,
             MAX_VALUE_DATA_ENDPOINT,
         };
 
@@ -1187,7 +1187,7 @@ mod tests_extra {
 
         // Make payload dynamic so schema doesn't get in the way
         let payload = vec![0x55u8; 257]; // force 2-byte varint for data_size
-        let pkt = TelemetryPacket::new(
+        let pkt = Packet::new(
             DataType::TelemetryError,
             &endpoints,
             "sender",
@@ -1211,13 +1211,13 @@ mod tests_extra {
     #[test]
     fn peek_envelope_matches_full_parse_on_large_values() {
         use crate::config::{DataEndpoint, DataType};
-        use crate::{serialize, telemetry_packet::TelemetryPacket};
+        use crate::{serialize, packet::Packet};
 
         let sender = "S".repeat(10_000); // big sender (varint grows)
         let payload = vec![b'h'; 4096];
         let ts = (1u64 << 40) + 123; // large ts (varint grows)
 
-        let pkt = TelemetryPacket::new(
+        let pkt = Packet::new(
             DataType::TelemetryError, // String-typed
             &[DataEndpoint::SdCard, DataEndpoint::Radio],
             &sender,
@@ -1248,7 +1248,7 @@ mod tests_extra {
         use crate::{
             config::{DataEndpoint, DataType},
             serialize,
-            telemetry_packet::TelemetryPacket,
+            packet::Packet,
             MAX_VALUE_DATA_ENDPOINT,
         };
 
@@ -1263,7 +1263,7 @@ mod tests_extra {
         }
 
         // Build a simple, valid packet with at least 1 endpoint.
-        let pkt = TelemetryPacket::from_f32_slice(
+        let pkt = Packet::from_f32_slice(
             DataType::GpsData,
             &[1.0, 2.0, 3.0],
             &[DataEndpoint::SdCard],
@@ -1305,9 +1305,9 @@ mod tests_extra {
     #[test]
     fn header_size_is_prefix_and_less_than_total() {
         use crate::config::{DataEndpoint, DataType};
-        use crate::{serialize, telemetry_packet::TelemetryPacket};
+        use crate::{serialize, packet::Packet};
 
-        let pkt = TelemetryPacket::from_f32_slice(
+        let pkt = Packet::from_f32_slice(
             DataType::GpsData,
             &[1.0, 2.0, 3.0],
             &[DataEndpoint::SdCard, DataEndpoint::Radio],
@@ -1336,7 +1336,7 @@ mod tests_extra {
         let s = b"hello\0\0";
         buf[..s.len()].copy_from_slice(s);
 
-        let pkt = TelemetryPacket::new(
+        let pkt = Packet::new(
             ty,
             &[DataEndpoint::SdCard],
             "tester",
@@ -1367,7 +1367,7 @@ mod tests_extra {
         let rx_count_c = rx_count.clone();
         let handler = EndpointHandler::new_packet_handler(
             DataEndpoint::SdCard,
-            move |_pkt: &TelemetryPacket| {
+            move |_pkt: &Packet| {
                 rx_count_c.fetch_add(1, Ordering::SeqCst);
                 Ok(())
             },
@@ -1381,14 +1381,14 @@ mod tests_extra {
         r.add_side_serialized("tx", tx);
 
         // Enqueue one TX and one RX
-        let pkt_tx = TelemetryPacket::from_f32_slice(
+        let pkt_tx = Packet::from_f32_slice(
             DataType::GpsData,
             &[1.0_f32, 2.0, 3.0],
             &[DataEndpoint::SdCard, DataEndpoint::Radio],
             0,
         )
             .unwrap();
-        let pkt_rx = TelemetryPacket::from_f32_slice(
+        let pkt_rx = Packet::from_f32_slice(
             DataType::GpsData,
             &[4.0_f32, 5.0, 6.0],
             &[DataEndpoint::SdCard], // only local to avoid extra TX during receive
@@ -1431,7 +1431,7 @@ mod tests_extra {
         // A handler that always fails but bumps a counter on each attempt.
         let failing = EndpointHandler::new_packet_handler(
             DataEndpoint::SdCard,
-            move |_pkt: &TelemetryPacket| {
+            move |_pkt: &Packet| {
                 counter_c.fetch_add(1, Ordering::SeqCst);
                 Err(TelemetryError::BadArg)
             },
@@ -1445,7 +1445,7 @@ mod tests_extra {
         );
 
         // Build a valid packet addressed to the failing endpoint.
-        let pkt = TelemetryPacket::from_f32_slice(
+        let pkt = Packet::from_f32_slice(
             DataType::GpsData,
             &[1.0_f32, 2.0, 3.0],
             &[DataEndpoint::SdCard],
@@ -1469,7 +1469,7 @@ mod tests_extra {
 
     // --------------------------- from_u8_slice sanity ---------------------------
 
-    /// Ensure `TelemetryPacket::from_u8_slice` builds a valid GPS packet with
+    /// Ensure `Packet::from_u8_slice` builds a valid GPS packet with
     /// expected length and timestamp.
     #[test]
     fn from_f32_slice_builds_valid_packet() {
@@ -1477,7 +1477,7 @@ mod tests_extra {
         assert_eq!(need, 3); // schema sanity
 
         let bytes = vec![5.3f32; need];
-        let pkt = TelemetryPacket::from_f32_slice(
+        let pkt = Packet::from_f32_slice(
             DataType::GpsData,
             &bytes,
             &[DataEndpoint::SdCard],
@@ -1496,7 +1496,7 @@ mod tests_extra {
         assert_eq!(need, 0); // schema sanity
 
         let pkt =
-            TelemetryPacket::from_no_data(DataType::Heartbeat, &[DataEndpoint::SdCard], 12345)
+            Packet::from_no_data(DataType::Heartbeat, &[DataEndpoint::SdCard], 12345)
                 .unwrap();
 
         assert_eq!(pkt.payload().len(), 0);
@@ -1512,7 +1512,7 @@ mod tests_extra {
     fn deserialize_header_only_then_full_parse_matches() {
         // Build a normal packet then compare header-only vs full.
         let endpoints = &[DataEndpoint::SdCard, DataEndpoint::Radio];
-        let pkt = TelemetryPacket::from_f32_slice(
+        let pkt = Packet::from_f32_slice(
             DataType::GpsData,
             &[5.25_f32, 3.5, 1.0],
             endpoints,
@@ -1551,7 +1551,7 @@ mod tests_extra {
 
         let capturing = EndpointHandler::new_packet_handler(
             DataEndpoint::SdCard,
-            move |pkt: &TelemetryPacket| {
+            move |pkt: &Packet| {
                 if pkt.data_type() == DataType::TelemetryError {
                     *last_payload_c.lock().unwrap() = pkt.as_string();
                 }
@@ -1567,7 +1567,7 @@ mod tests_extra {
         r.add_side_serialized("tx", failing_tx);
 
         // Include both a local and a non-local endpoint to force remote TX.
-        let pkt = TelemetryPacket::from_f32_slice(
+        let pkt = Packet::from_f32_slice(
             DataType::GpsData,
             &[1.0_f32, 2.0, 3.0],
             &[DataEndpoint::SdCard, DataEndpoint::Radio],
@@ -1603,7 +1603,7 @@ mod tests_more {
     use crate::tests::UnixClock;
     use crate::{
         config::{DataEndpoint, DataType}, get_data_type, get_needed_message_size, message_meta,
-        router::{Clock, EndpointHandler, Router, RouterConfig}, serialize, telemetry_packet::TelemetryPacket,
+        router::{Clock, EndpointHandler, Router, RouterConfig}, serialize, packet::Packet,
         MessageDataType,
         MessageElement, TelemetryError, TelemetryErrorCode,
         TelemetryResult,
@@ -1621,7 +1621,7 @@ mod tests_more {
     }
 
     // ---------------------------------------------------------------------------
-    // TelemetryPacket validation edge cases
+    // Packet validation edge cases
     // ---------------------------------------------------------------------------
 
     /// Compute a concrete length for test packets, respecting schema element
@@ -1660,11 +1660,11 @@ mod tests_more {
         let need = concrete_len_for_test(ty);
 
         let err =
-            TelemetryPacket::new(ty, &[], "x", 0, Arc::<[u8]>::from(vec![0u8; need])).unwrap_err();
+            Packet::new(ty, &[], "x", 0, Arc::<[u8]>::from(vec![0u8; need])).unwrap_err();
         assert!(matches!(err, TelemetryError::EmptyEndpoints));
 
         // +1 ensures mismatch for both static and dynamic (not a multiple of element width)
-        let err = TelemetryPacket::new(
+        let err = Packet::new(
             ty,
             &[DataEndpoint::SdCard],
             "x",
@@ -1708,7 +1708,7 @@ mod tests_more {
     fn packet_wire_size_matches_serialized_len() {
         let endpoints = &[DataEndpoint::SdCard, DataEndpoint::Radio];
         let pkt =
-            TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], endpoints, 9)
+            Packet::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], endpoints, 9)
                 .unwrap();
         let need = serialize::packet_wire_size(&pkt);
         let out = serialize::serialize_packet(&pkt);
@@ -1723,7 +1723,7 @@ mod tests_more {
     /// payload and just pass the raw bytes.
     #[test]
     fn serialized_only_handlers_do_not_deserialize() {
-        let pkt = TelemetryPacket::from_f32_slice(
+        let pkt = Packet::from_f32_slice(
             DataType::GpsData,
             &[1.0, 2.0, 3.0],
             &[DataEndpoint::SdCard],
@@ -1757,7 +1757,7 @@ mod tests_more {
     fn packet_handlers_trigger_single_deserialize_and_fan_out() {
         let endpoints = &[DataEndpoint::SdCard, DataEndpoint::Radio];
         let pkt =
-            TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], endpoints, 5)
+            Packet::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], endpoints, 5)
                 .unwrap();
         let wire = serialize::serialize_packet(&pkt);
 
@@ -1804,7 +1804,7 @@ mod tests_more {
         let h = hits.clone();
         let handler = EndpointHandler::new_packet_handler(
             DataEndpoint::SdCard,
-            move |pkt: &TelemetryPacket| {
+            move |pkt: &Packet| {
                 pkt.validate().unwrap();
                 h.fetch_add(1, Ordering::SeqCst);
                 Ok(())
@@ -1817,7 +1817,7 @@ mod tests_more {
             zero_clock(),
         );
         r.add_side_serialized("tx", tx);
-        let pkt = TelemetryPacket::from_f32_slice(
+        let pkt = Packet::from_f32_slice(
             DataType::GpsData,
             &[1.0, 2.0, 3.0],
             &[DataEndpoint::SdCard],
@@ -1846,7 +1846,7 @@ mod tests_more {
             RouterConfig::new(vec![handler]),
             zero_clock(),
         );
-        let pkt = TelemetryPacket::from_f32_slice(
+        let pkt = Packet::from_f32_slice(
             DataType::GpsData,
             &[0.5, 0.5, 0.5],
             &[DataEndpoint::SdCard],
@@ -1883,7 +1883,7 @@ mod tests_more {
             zero_clock(),
         );
         r.add_side_serialized("tx", failing_tx);
-        let pkt = TelemetryPacket::from_f32_slice(
+        let pkt = Packet::from_f32_slice(
             DataType::GpsData,
             &[1.0, 2.0, 3.0],
             &[DataEndpoint::SdCard, DataEndpoint::Radio],
@@ -1992,15 +1992,15 @@ mod tests_more {
     #[test]
     fn serialize_packet_is_order_invariant_for_endpoints() {
         use crate::config::{DataEndpoint, DataType};
-        use crate::{serialize, telemetry_packet::TelemetryPacket};
+        use crate::{serialize, packet::Packet};
 
         let eps_a = &[DataEndpoint::Radio, DataEndpoint::SdCard];
         let eps_b = &[DataEndpoint::SdCard, DataEndpoint::Radio];
 
         let pkt_a =
-            TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], eps_a, 0).unwrap();
+            Packet::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], eps_a, 0).unwrap();
         let pkt_b =
-            TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], eps_b, 0).unwrap();
+            Packet::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], eps_b, 0).unwrap();
 
         let wa = serialize::serialize_packet(&pkt_a);
         let wb = serialize::serialize_packet(&pkt_b);
@@ -2014,7 +2014,7 @@ mod tests_more {
     fn process_all_queues_timeout_zero_handles_large_queues() {
         use crate::config::{DataEndpoint, DataType};
         use crate::router::{Router, RouterConfig};
-        use crate::telemetry_packet::TelemetryPacket;
+        use crate::packet::Packet;
         use std::sync::Arc;
         use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -2047,7 +2047,7 @@ mod tests_more {
                 .log_queue(DataType::GpsData, &[base_tx, 2.0, 3.0])
                 .unwrap();
 
-            let pkt = TelemetryPacket::from_f32_slice(
+            let pkt = Packet::from_f32_slice(
                 DataType::GpsData,
                 &[9.0 + i as f32 * 0.01, 8.0, 7.0],
                 &[DataEndpoint::SdCard],
@@ -2081,7 +2081,7 @@ mod concurrency_tests {
         config::{DataEndpoint, DataType},
         router::{Clock, EndpointHandler, Router, RouterConfig},
         serialize,
-        telemetry_packet::TelemetryPacket,
+        packet::Packet,
         TelemetryResult,
     };
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -2122,7 +2122,7 @@ mod concurrency_tests {
         let hits_c = hits.clone();
         let handler = EndpointHandler::new_packet_handler(
             DataEndpoint::SdCard,
-            move |_pkt: &TelemetryPacket| {
+            move |_pkt: &Packet| {
                 hits_c.fetch_add(1, Ordering::SeqCst);
                 Ok(())
             },
@@ -2143,7 +2143,7 @@ mod concurrency_tests {
                     // Unique timestamp/payload per (thread, iteration) to avoid dedup.
                     let idx = (tid * ITERS_PER_THREAD + i) as u64;
                     let base = 1.0_f32 + idx as f32 * 0.001;
-                    let pkt = TelemetryPacket::from_f32_slice(
+                    let pkt = Packet::from_f32_slice(
                         DataType::GpsData,
                         &[base, 2.0, 3.0],
                         &[DataEndpoint::SdCard],
@@ -2181,7 +2181,7 @@ mod concurrency_tests {
         let hits_c = hits.clone();
         let handler = EndpointHandler::new_packet_handler(
             DataEndpoint::SdCard,
-            move |_pkt: &TelemetryPacket| {
+            move |_pkt: &Packet| {
                 hits_c.fetch_add(1, Ordering::SeqCst);
                 Ok(())
             },
@@ -2210,7 +2210,7 @@ mod concurrency_tests {
                 for i in 0..ITERS_PER_THREAD {
                     let idx = (tid * ITERS_PER_THREAD + i) as u64;
                     let base = 1.0_f32 + idx as f32 * 0.001;
-                    let pkt = TelemetryPacket::from_f32_slice(
+                    let pkt = Packet::from_f32_slice(
                         DataType::GpsData,
                         &[base, 2.0, 3.0],
                         &[DataEndpoint::SdCard],
@@ -2249,7 +2249,7 @@ mod concurrency_tests {
         let hits_c = hits.clone();
         let local = EndpointHandler::new_packet_handler(
             DataEndpoint::SdCard,
-            move |_pkt: &TelemetryPacket| {
+            move |_pkt: &Packet| {
                 hits_c.fetch_add(1, Ordering::SeqCst);
                 Ok(())
             },
@@ -2294,7 +2294,7 @@ mod concurrency_tests {
                     let idx = (tid * ITERS_PER_THREAD + i) as u64;
                     let side = if (idx & 1) == 0 { 0 } else { 1 };
                     let base = 10.0_f32 + idx as f32 * 0.01;
-                    let pkt = TelemetryPacket::from_f32_slice(
+                    let pkt = Packet::from_f32_slice(
                         DataType::GpsData,
                         &[base, 2.0, 3.0],
                         &[DataEndpoint::SdCard, DataEndpoint::Radio],
@@ -2346,7 +2346,7 @@ mod concurrency_tests {
         let h1 = EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt| {
             h1_hits_c.fetch_add(1, Ordering::SeqCst);
             if !triggered_c.swap(true, Ordering::SeqCst) {
-                let chained = TelemetryPacket::from_f32_slice(
+                let chained = Packet::from_f32_slice(
                     DataType::GpsData,
                     &[9.0_f32, 8.0, 7.0],
                     &[DataEndpoint::Radio],
@@ -2374,7 +2374,7 @@ mod concurrency_tests {
             .set(router.clone())
             .expect("router OnceLock should only be set once");
 
-        let first = TelemetryPacket::from_f32_slice(
+        let first = Packet::from_f32_slice(
             DataType::GpsData,
             &[1.0_f32, 2.0, 3.0],
             &[DataEndpoint::SdCard],
@@ -2424,7 +2424,7 @@ mod concurrency_tests {
         let hits_c = hits.clone();
         let handler = EndpointHandler::new_packet_handler(
             DataEndpoint::SdCard,
-            move |_pkt: &TelemetryPacket| {
+            move |_pkt: &Packet| {
                 hits_c.fetch_add(1, Ordering::SeqCst);
                 Ok(())
             },
@@ -2444,7 +2444,7 @@ mod concurrency_tests {
                 for i in 0..ITERS_PER_THREAD {
                     let idx = (tid * ITERS_PER_THREAD + i) as u64;
                     let base = 1.0_f32 + idx as f32 * 0.001;
-                    let pkt = TelemetryPacket::from_f32_slice(
+                    let pkt = Packet::from_f32_slice(
                         DataType::GpsData,
                         &[base, 2.0, 3.0],
                         &[DataEndpoint::SdCard],
@@ -2497,7 +2497,7 @@ mod concurrency_tests {
         let rxc = rx_count.clone();
         let handler = EndpointHandler::new_packet_handler(
             DataEndpoint::SdCard,
-            move |_pkt: &TelemetryPacket| {
+            move |_pkt: &Packet| {
                 rxc.fetch_add(1, Ordering::SeqCst);
                 Ok(())
             },
@@ -2569,7 +2569,7 @@ mod concurrency_tests {
         let rxc = rx_count.clone();
         let handler = EndpointHandler::new_packet_handler(
             DataEndpoint::SdCard,
-            move |_pkt: &TelemetryPacket| {
+            move |_pkt: &Packet| {
                 rxc.fetch_add(1, Ordering::SeqCst);
                 Ok(())
             },
@@ -2599,7 +2599,7 @@ mod concurrency_tests {
         let t_rx = thread::spawn(move || {
             for i in 0..RX_ITERS {
                 let base = 4.0_f32 + i as f32 * 0.01;
-                let pkt = TelemetryPacket::from_f32_slice(
+                let pkt = Packet::from_f32_slice(
                     DataType::GpsData,
                     &[base, 5.0, 6.0],
                     &[DataEndpoint::SdCard],
@@ -2639,11 +2639,11 @@ mod concurrency_tests {
 mod data_conversion_types {
 
     // ---------------------------------------------------------------------------
-    // TelemetryPacket typed data accessors
+    // Packet typed data accessors
     // ---------------------------------------------------------------------------
 
     use crate::config::{DataEndpoint, DataType};
-    use crate::telemetry_packet::TelemetryPacket;
+    use crate::packet::Packet;
     use crate::{get_data_type, MessageDataType, TelemetryError, MAX_VALUE_DATA_TYPE};
 
     /// data_as_f32 should round-trip values written via from_f32_slice.
@@ -2652,7 +2652,7 @@ mod data_conversion_types {
         let eps = &[DataEndpoint::SdCard, DataEndpoint::Radio];
         let src = [1.5_f32, -2.25, 3.0];
 
-        let pkt = TelemetryPacket::from_f32_slice(DataType::GpsData, &src, eps, 42).unwrap();
+        let pkt = Packet::from_f32_slice(DataType::GpsData, &src, eps, 42).unwrap();
         let vals = pkt.data_as_f32().unwrap();
 
         assert_eq!(vals, src);
@@ -2665,7 +2665,7 @@ mod data_conversion_types {
         let eps = &[DataEndpoint::SdCard];
         let src = [1.0_f32, 2.0, 3.0];
 
-        let pkt = TelemetryPacket::from_f32_slice(DataType::GpsData, &src, eps, 0).unwrap();
+        let pkt = Packet::from_f32_slice(DataType::GpsData, &src, eps, 0).unwrap();
 
         let res = pkt.data_as_u16();
         match res {
@@ -2698,7 +2698,7 @@ mod data_conversion_types {
         let eps = &[DataEndpoint::SdCard];
         let vals = [true];
 
-        let pkt = TelemetryPacket::from_bool_slice(bool_ty, &vals, eps, 0).unwrap();
+        let pkt = Packet::from_bool_slice(bool_ty, &vals, eps, 0).unwrap();
         let decoded = pkt.data_as_bool().unwrap();
         assert_eq!(decoded, vals);
     }
@@ -2716,7 +2716,7 @@ mod relay_tests {
 
     use crate::relay::Relay;
     use crate::tests::timeout_tests::StepClock;
-    use crate::{serialize, telemetry_packet::TelemetryPacket, TelemetryError, TelemetryResult};
+    use crate::{serialize, packet::Packet, TelemetryError, TelemetryResult};
     use core::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
@@ -2726,7 +2726,7 @@ mod relay_tests {
     }
 
     fn wire_for_value(v: u64) -> Arc<[u8]> {
-        let pkt = TelemetryPacket::from_f32_slice(
+        let pkt = Packet::from_f32_slice(
             DataType::GpsData,
             &[v as f32, 0.0, 0.0],
             &[DataEndpoint::SdCard],
@@ -2987,7 +2987,7 @@ mod dedupe_tests {
     use crate::relay::Relay;
     use crate::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
     use crate::tests::timeout_tests::StepClock;
-    use crate::{serialize, telemetry_packet::TelemetryPacket, TelemetryResult};
+    use crate::{serialize, packet::Packet, TelemetryResult};
 
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
@@ -2998,7 +2998,7 @@ mod dedupe_tests {
     }
 
     fn wire_for_value(v: u64) -> Arc<[u8]> {
-        let pkt = TelemetryPacket::from_f32_slice(
+        let pkt = Packet::from_f32_slice(
             DataType::GpsData,
             &[v as f32, 0.0, 0.0],
             &[DataEndpoint::SdCard],
@@ -3021,7 +3021,7 @@ mod dedupe_tests {
 
         let handler = EndpointHandler::new_packet_handler(
             DataEndpoint::SdCard,
-            move |_pkt: &TelemetryPacket| {
+            move |_pkt: &Packet| {
                 hits_c.fetch_add(1, Ordering::SeqCst);
                 Ok(())
             },
@@ -3035,7 +3035,7 @@ mod dedupe_tests {
         );
 
         // Build a single wire frame we will reuse.
-        let pkt = TelemetryPacket::from_f32_slice(
+        let pkt = Packet::from_f32_slice(
             DataType::GpsData,
             &[1.0_f32, 2.0, 3.0],
             &[DataEndpoint::SdCard],
@@ -3065,7 +3065,7 @@ mod dedupe_tests {
 
         let handler = EndpointHandler::new_packet_handler(
             DataEndpoint::SdCard,
-            move |_pkt: &TelemetryPacket| {
+            move |_pkt: &Packet| {
                 hits_c.fetch_add(1, Ordering::SeqCst);
                 Ok(())
             },
@@ -3075,7 +3075,7 @@ mod dedupe_tests {
         let clock = StepClock::new_box(0, 1_000);
         let r = Router::new(RouterMode::Sink, RouterConfig::new(vec![handler]), clock);
 
-        let pkt = TelemetryPacket::from_f32_slice(
+        let pkt = Packet::from_f32_slice(
             DataType::GpsData,
             &[1.0_f32, 2.0, 3.0],
             &[DataEndpoint::SdCard],
@@ -3105,7 +3105,7 @@ mod dedupe_tests {
 
         let handler = EndpointHandler::new_packet_handler(
             DataEndpoint::SdCard,
-            move |_pkt: &TelemetryPacket| {
+            move |_pkt: &Packet| {
                 hits_c.fetch_add(1, Ordering::SeqCst);
                 Ok(())
             },
@@ -3118,7 +3118,7 @@ mod dedupe_tests {
         );
 
         // Frame A
-        let pkt_a = TelemetryPacket::from_f32_slice(
+        let pkt_a = Packet::from_f32_slice(
             DataType::GpsData,
             &[1.0_f32, 2.0, 3.0],
             &[DataEndpoint::SdCard],
@@ -3128,7 +3128,7 @@ mod dedupe_tests {
         let wire_a = serialize::serialize_packet(&pkt_a);
 
         // Frame B (different payload)
-        let pkt_b = TelemetryPacket::from_f32_slice(
+        let pkt_b = Packet::from_f32_slice(
             DataType::GpsData,
             &[4.0_f32, 5.0, 6.0],
             &[DataEndpoint::SdCard],
@@ -3286,7 +3286,7 @@ mod relay_reliable_tests {
     use crate::relay::{Relay, RelaySideOptions};
     use crate::router::Clock;
     use crate::tests::timeout_tests::StepClock;
-    use crate::{serialize, telemetry_packet::TelemetryPacket, TelemetryResult};
+    use crate::{serialize, packet::Packet, TelemetryResult};
 
     use std::sync::{Arc, Mutex};
 
@@ -3327,14 +3327,14 @@ mod relay_reliable_tests {
             },
         );
 
-        let pkt1 = TelemetryPacket::from_f32_slice(
+        let pkt1 = Packet::from_f32_slice(
             DataType::GpsData,
             &[1.0_f32, 2.0, 3.0],
             &[DataEndpoint::SdCard],
             0,
         )
             .unwrap();
-        let pkt2 = TelemetryPacket::from_f32_slice(
+        let pkt2 = Packet::from_f32_slice(
             DataType::GpsData,
             &[4.0_f32, 5.0, 6.0],
             &[DataEndpoint::SdCard],
@@ -3444,14 +3444,14 @@ mod relay_reliable_tests {
         );
         *relay2_dst_id.lock().unwrap() = Some(relay2_dst);
 
-        let pkt1 = TelemetryPacket::from_f32_slice(
+        let pkt1 = Packet::from_f32_slice(
             DataType::GpsData,
             &[1.0_f32, 2.0, 3.0],
             &[DataEndpoint::SdCard, DataEndpoint::Radio],
             0,
         )
             .unwrap();
-        let pkt2 = TelemetryPacket::from_f32_slice(
+        let pkt2 = Packet::from_f32_slice(
             DataType::GpsData,
             &[4.0_f32, 5.0, 6.0],
             &[DataEndpoint::SdCard, DataEndpoint::Radio],
@@ -3515,14 +3515,14 @@ mod relay_reliable_tests {
             },
         );
 
-        let pkt1 = TelemetryPacket::from_f32_slice(
+        let pkt1 = Packet::from_f32_slice(
             DataType::GpsData,
             &[1.0_f32, 2.0, 3.0],
             &[DataEndpoint::SdCard],
             0,
         )
             .unwrap();
-        let pkt2 = TelemetryPacket::from_f32_slice(
+        let pkt2 = Packet::from_f32_slice(
             DataType::GpsData,
             &[4.0_f32, 5.0, 6.0],
             &[DataEndpoint::SdCard],
@@ -3570,7 +3570,7 @@ mod reliable_tests {
         Clock, EndpointHandler, Router, RouterConfig, RouterMode, RouterSideOptions,
     };
     use crate::tests::timeout_tests::StepClock;
-    use crate::{serialize, telemetry_packet::TelemetryPacket, TelemetryResult};
+    use crate::{serialize, packet::Packet, TelemetryResult};
 
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
@@ -3585,7 +3585,7 @@ mod reliable_tests {
         let rx_hits_c = rx_hits.clone();
         let handler = EndpointHandler::new_packet_handler(
             DataEndpoint::SdCard,
-            move |_pkt: &TelemetryPacket| {
+            move |_pkt: &Packet| {
                 rx_hits_c.fetch_add(1, Ordering::SeqCst);
                 Ok(())
             },
@@ -3645,7 +3645,7 @@ mod reliable_tests {
         );
         *sender_side_id.lock().unwrap() = Some(sender_side);
 
-        let pkt = TelemetryPacket::from_f32_slice(
+        let pkt = Packet::from_f32_slice(
             DataType::GpsData,
             &[1.0_f32, 2.0, 3.0],
             &[DataEndpoint::SdCard],
@@ -3693,14 +3693,14 @@ mod reliable_tests {
             },
         );
 
-        let pkt1 = TelemetryPacket::from_f32_slice(
+        let pkt1 = Packet::from_f32_slice(
             DataType::GpsData,
             &[1.0_f32, 2.0, 3.0],
             &[DataEndpoint::SdCard],
             0,
         )
             .unwrap();
-        let pkt2 = TelemetryPacket::from_f32_slice(
+        let pkt2 = Packet::from_f32_slice(
             DataType::GpsData,
             &[4.0_f32, 5.0, 6.0],
             &[DataEndpoint::SdCard],
@@ -3744,7 +3744,7 @@ mod reliable_tests {
         let rx_hits_c = rx_hits.clone();
         let handler = EndpointHandler::new_packet_handler(
             DataEndpoint::SdCard,
-            move |_pkt: &TelemetryPacket| {
+            move |_pkt: &Packet| {
                 rx_hits_c.fetch_add(1, Ordering::SeqCst);
                 Ok(())
             },
@@ -3777,7 +3777,7 @@ mod reliable_tests {
         );
         sender.add_side_serialized("TO_RECEIVER", tx);
 
-        let pkt = TelemetryPacket::from_f32_slice(
+        let pkt = Packet::from_f32_slice(
             DataType::GpsData,
             &[4.0_f32, 5.0, 6.0],
             &[DataEndpoint::SdCard],
@@ -3800,7 +3800,7 @@ mod router_tests {
 
     use crate::config::{DataEndpoint, DataType};
     use crate::router::{EndpointHandler, Router, RouterMode};
-    use crate::telemetry_packet::TelemetryPacket;
+    use crate::packet::Packet;
     use crate::tests::timeout_tests::StepClock;
     use crate::{serialize, TelemetryResult};
     use std::sync::{Arc, Mutex};
@@ -3837,7 +3837,7 @@ mod router_tests {
         // Include one local + one remote endpoint.
         let endpoints = &[DataEndpoint::SdCard, DataEndpoint::Radio];
         let pkt =
-            TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], endpoints, 0)
+            Packet::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], endpoints, 0)
                 .unwrap();
 
         router.rx(&pkt).unwrap();
@@ -3873,7 +3873,7 @@ mod router_tests {
 
         let endpoints = &[DataEndpoint::SdCard, DataEndpoint::Radio];
         let pkt =
-            TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], endpoints, 0)
+            Packet::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], endpoints, 0)
                 .unwrap();
 
         router.rx(&pkt).unwrap();
@@ -3903,7 +3903,7 @@ mod router_tests {
 
         let endpoints = &[DataEndpoint::SdCard];
         let pkt =
-            TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], endpoints, 0)
+            Packet::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], endpoints, 0)
                 .unwrap();
         let bytes = serialize::serialize_packet(&pkt);
 
@@ -3934,7 +3934,7 @@ mod router_tests {
 
         let endpoints = &[DataEndpoint::SdCard];
         let pkt =
-            TelemetryPacket::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], endpoints, 0)
+            Packet::from_f32_slice(DataType::GpsData, &[1.0, 2.0, 3.0], endpoints, 0)
                 .unwrap();
         let bytes = serialize::serialize_packet(&pkt);
 

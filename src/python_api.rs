@@ -3,7 +3,7 @@
 //! Exposes a small, opinionated API to Python via `pyo3`:
 //!
 //! - `Packet`
-//!   - Immutable view of a `TelemetryPacket`
+//!   - Immutable view of a `Packet`
 //!   - Header fields + payload access
 //!   - Serialization to bytes
 //!
@@ -35,7 +35,7 @@ use std::sync::{Arc as SArc, Mutex, OnceLock};
 use crate::{
     config::{DataEndpoint, DataType}, get_message_name, get_needed_message_size, message_meta, relay::{Relay, RelaySideOptions},
     router::{Clock, EndpointHandler, LeBytes, Router, RouterConfig, RouterMode, RouterSideOptions},
-    serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet}, telemetry_packet::TelemetryPacket, try_enum_from_u32,
+    serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet}, packet::Packet, try_enum_from_u32,
     MessageElement,
     TelemetryError,
     TelemetryResult,
@@ -129,7 +129,7 @@ fn vectorize_data<T: LeBytes + Copy>(
 //  Packet (PyPacket)
 // ============================================================================
 
-/// Python-visible wrapper around `TelemetryPacket`.
+/// Python-visible wrapper around `Packet`.
 ///
 /// Constructed indirectly via:
 /// - `deserialize_packet_py`
@@ -137,7 +137,7 @@ fn vectorize_data<T: LeBytes + Copy>(
 /// - callbacks (router handlers)
 #[pyclass(name = "Packet")]
 pub struct PyPacket {
-    pub(crate) inner: TelemetryPacket,
+    pub(crate) inner: Packet,
 }
 
 impl_py_vec_accessors! {
@@ -577,7 +577,7 @@ impl PyRouter {
             reliable_enabled,
         };
 
-        let id = rtr.add_side_packet_with_options(name_static, move |pkt: &TelemetryPacket| {
+        let id = rtr.add_side_packet_with_options(name_static, move |pkt: &Packet| {
             Python::attach(|py| {
                 let py_pkt = PyPacket { inner: pkt.clone() };
                 let any = Py::new(py, py_pkt)
@@ -1119,7 +1119,7 @@ impl PyRelay {
 
         let id = self
             .inner
-            .add_side_packet_with_options(name_static, move |pkt: &TelemetryPacket| {
+            .add_side_packet_with_options(name_static, move |pkt: &Packet| {
                 Python::attach(|py| {
                     let py_pkt = PyPacket { inner: pkt.clone() };
                     let any = Py::new(py, py_pkt)
@@ -1267,7 +1267,7 @@ pub fn make_packet(
     let payload_arc = AArc::<[u8]>::from(buf);
 
     let pkt =
-        TelemetryPacket::new(ty, &eps, sender, timestamp_ms, payload_arc).map_err(py_err_from)?;
+        Packet::new(ty, &eps, sender, timestamp_ms, payload_arc).map_err(py_err_from)?;
 
     Ok(Py::new(py, PyPacket { inner: pkt })?.into_any())
 }

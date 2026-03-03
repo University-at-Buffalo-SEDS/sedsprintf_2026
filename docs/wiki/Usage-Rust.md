@@ -104,7 +104,7 @@ If you already have raw bytes, use `router.tx_serialized` or `router.tx_serializ
 - Synchronous: `router.rx_serialized(bytes)`
 - Queued: `router.rx_serialized_queue(bytes)` then `router.process_rx_queue()`
 
-If you already built a `TelemetryPacket`, use `router.rx(&packet)` or `router.rx_queue(packet)`.
+If you already built a `Packet`, use `router.rx(&packet)` or `router.rx_queue(packet)`.
 
 ## Side handling
 
