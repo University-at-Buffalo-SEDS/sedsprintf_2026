@@ -34,7 +34,7 @@
       "rust": "FlightState",
       "name": "FLIGHT_STATE",
       "doc": "Flight state updates",
-      "broadcast_mode": "Default"
+      "broadcast_mode": "Always"
     },
     {
       "rust": "HeartBeat",
