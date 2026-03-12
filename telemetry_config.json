@@ -196,7 +196,8 @@
         "data_type": "String"
       },
       "endpoints": [
-        "Abort"
+        "Abort",
+        "SdCard"
       ],
       "reliable_mode": "Unordered",
       "reliable": true
@@ -230,7 +231,6 @@
       },
       "endpoints": [
         "GroundStation",
-        "SdCard",
         "ValveBoard"
       ],
       "reliable_mode": "Ordered",
@@ -282,7 +282,9 @@
         "count": 1
       },
       "endpoints": [
-        "FlightState"
+        "FlightState",
+        "SdCard",
+        "GroundStation"
       ],
       "reliable_mode": "Ordered",
       "reliable": true
@@ -298,7 +300,8 @@
         "count": 0
       },
       "endpoints": [
-        "HeartBeat"
+        "HeartBeat",
+        "GroundStation"
       ],
       "reliable_mode": "None",
       "reliable": false
@@ -329,7 +332,6 @@
         "data_type": "String"
       },
       "endpoints": [
-        "SdCard",
         "GroundStation"
       ],
       "reliable_mode": "None",
@@ -348,7 +350,8 @@
         "count": 1
       },
       "endpoints": [
-        "ActuatorBoard"
+        "ActuatorBoard",
+        "GroundStation"
       ]
     },
     {
@@ -364,8 +367,7 @@
         "count": 2
       },
       "endpoints": [
-        "GroundStation",
-        "SdCard"
+        "GroundStation"
       ]
     }
   ]
