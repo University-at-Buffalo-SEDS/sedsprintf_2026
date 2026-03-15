@@ -36,6 +36,7 @@ use std::path::{Path, PathBuf};
 const SCHEMA_PATH_ENV: &str = "SEDSPRINTF_RS_SCHEMA_PATH";
 const IPC_SCHEMA_PATH_ENV: &str = "SEDSPRINTF_RS_IPC_SCHEMA_PATH";
 const TEST_SCHEMA_FILE: &str = "telemetry_config.test.json";
+const TEST_IPC_SCHEMA_FILE: &str = "telemetry_config.ipc.test.json";
 
 // ========================= JSON schema =========================
 
@@ -247,16 +248,28 @@ fn resolve_schema_path(crate_dir: &Path, config_rs_path: &Path) -> PathBuf {
 }
 
 fn resolve_optional_overlay_path(crate_dir: &Path) -> Option<PathBuf> {
-    let val = env::var(IPC_SCHEMA_PATH_ENV).ok()?;
-    if val.trim().is_empty() {
-        panic!("{IPC_SCHEMA_PATH_ENV} is set but empty");
+    if let Ok(val) = env::var(IPC_SCHEMA_PATH_ENV) {
+        if val.trim().is_empty() {
+            panic!("{IPC_SCHEMA_PATH_ENV} is set but empty");
+        }
+        let path = PathBuf::from(val);
+        return Some(if path.is_absolute() {
+            path
+        } else {
+            crate_dir.join(path)
+        });
     }
-    let path = PathBuf::from(val);
-    Some(if path.is_absolute() {
-        path
-    } else {
-        crate_dir.join(path)
-    })
+
+    if env::var_os("CARGO_CFG_TEST").is_some() {
+        let test_ipc_path = crate_dir.join(TEST_IPC_SCHEMA_FILE);
+        if test_ipc_path.exists() {
+            println!("cargo:rustc-env={IPC_SCHEMA_PATH_ENV}={}", test_ipc_path.display());
+            println!("cargo:rerun-if-changed={}", test_ipc_path.display());
+            return Some(test_ipc_path);
+        }
+    }
+
+    None
 }
 
 // ========================= load / validate =========================
