@@ -2,9 +2,9 @@
 #[cfg(test)]
 mod single_threaded_test {
     use sedsprintf_rs::config::{DataEndpoint, DataType};
+    use sedsprintf_rs::packet::Packet;
     use sedsprintf_rs::relay::Relay;
     use sedsprintf_rs::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
-    use sedsprintf_rs::telemetry_packet::TelemetryPacket;
     use sedsprintf_rs::TelemetryResult;
 
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -25,7 +25,7 @@ mod single_threaded_test {
 
     /// Build a handler that counts packets received on the Radio endpoint.
     fn make_radio_handler(counter: Arc<AtomicUsize>) -> EndpointHandler {
-        EndpointHandler::new_packet_handler(DataEndpoint::Radio, move |_pkt: &TelemetryPacket| {
+        EndpointHandler::new_packet_handler(DataEndpoint::Radio, move |_pkt: &Packet| {
             counter.fetch_add(1, Ordering::SeqCst);
             Ok(())
         })
@@ -33,7 +33,7 @@ mod single_threaded_test {
 
     /// Build a handler that counts packets received on the SdCard endpoint.
     fn make_sd_handler(counter: Arc<AtomicUsize>) -> EndpointHandler {
-        EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt: &TelemetryPacket| {
+        EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt: &Packet| {
             counter.fetch_add(1, Ordering::SeqCst);
             Ok(())
         })
@@ -47,8 +47,8 @@ mod single_threaded_test {
     }
 
     /// Build a packet with endpoints [SD_CARD, Radio], mirroring the C system.
-    fn make_packet(ty: DataType, vals: &[f32], ts: u64) -> TelemetryPacket {
-        TelemetryPacket::from_f32_slice(ty, vals, &[DataEndpoint::SdCard, DataEndpoint::Radio], ts)
+    fn make_packet(ty: DataType, vals: &[f32], ts: u64) -> Packet {
+        Packet::from_f32_slice(ty, vals, &[DataEndpoint::SdCard, DataEndpoint::Radio], ts)
             .unwrap()
     }
 
@@ -271,7 +271,7 @@ mod single_threaded_test {
                 node.router.tx(pkt1).unwrap();
 
                 // message as string (TelemetryError)
-                let pkt2 = TelemetryPacket::from_str_slice(
+                let pkt2 = Packet::from_str_slice(
                     DataType::TelemetryError,
                     msg,
                     &[DataEndpoint::SdCard, DataEndpoint::Radio],

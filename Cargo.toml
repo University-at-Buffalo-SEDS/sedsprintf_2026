@@ -15,12 +15,13 @@ readme = "README.md"
 crate-type = ["rlib", "staticlib"]
 
 [features]
-default = ["std", "compression", "timesync"]
+default = ["std", "compression", "timesync", "discovery"]
 std = []
-embedded = ["compression", "timesync"]
-python = ["std", "pyo3/extension-module", "compression", "timesync"]
+embedded = ["compression", "timesync", "discovery"]
+python = ["std", "pyo3/extension-module", "compression", "timesync", "discovery"]
 compression = ["zstd-safe"]
 timesync = []
+discovery = []
 
 [package.metadata.maturin]
 bindings = "pyo3"
@@ -69,6 +70,8 @@ crc32fast = { version = "1.5.0", default-features = false }
 # Optional dependencies enabled by features
 pyo3 = { version = "0.28.2", optional = true, features = ["auto-initialize", "extension-module", "multiple-pymethods"] }
 zstd-safe = { version = "7.2.4", optional = true, default-features = false }
+
+# Build dependencies for code generation in build.rs
 [build-dependencies]
 regex = "1.12.3"
 serde = { version = "1.0.228", features = ["derive"] }

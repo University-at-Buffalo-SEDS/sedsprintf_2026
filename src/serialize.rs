@@ -1,7 +1,7 @@
 //! Serialization and deserialization of telemetry packets.
 //!
 //! This module defines the compact v2 wire format used to send and receive
-//! [`TelemetryPacket`]s, along with:
+//! [`Packet`]s, along with:
 //! - [`serialize_packet`] / [`deserialize_packet`] for full packets.
 //! - [`peek_envelope`] for header-only inspection without touching the payload.
 //! - Size helpers like [`header_size_bytes`] and [`packet_wire_size`].
@@ -10,16 +10,16 @@
 //! the header fields used by `peek_envelope`.
 
 use crate::{
-    get_message_name, is_reliable_type, telemetry_packet::TelemetryPacket, try_enum_from_u32,
+    get_message_name, is_reliable_type, packet::Packet, try_enum_from_u32,
     DataEndpoint, TelemetryError, TelemetryResult,
     {config::DataType, MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE},
 };
 
-use crate::telemetry_packet::hash_bytes_u64;
+use crate::packet::hash_bytes_u64;
 use alloc::{borrow::ToOwned, string::String, sync::Arc, vec::Vec};
 use crc32fast::Hasher as Crc32Hasher;
 
-/// Lightweight header-only view of a serialized [`TelemetryPacket`].
+/// Lightweight header-only view of a serialized [`Packet`].
 ///
 /// Produced by [`peek_envelope`] without allocating or copying the payload.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -313,7 +313,7 @@ fn expand_endpoint_bitmap(
 // Serialization
 // ===========================================================================
 
-/// Serialize a [`TelemetryPacket`] into the compact v2 wire format.
+/// Serialize a [`Packet`] into the compact v2 wire format.
 ///
 /// The returned `Arc<[u8]>` owns the encoded bytes and can be shared cheaply.
 /// # Arguments
@@ -321,7 +321,7 @@ fn expand_endpoint_bitmap(
 ///
 /// # Returns
 /// - `Arc<[u8]>`: Serialized packet in compact v2 wire format.
-pub fn serialize_packet(pkt: &TelemetryPacket) -> Arc<[u8]> {
+pub fn serialize_packet(pkt: &Packet) -> Arc<[u8]> {
     if is_reliable_type(pkt.data_type()) {
         // Default to an unsequenced reliable header to keep the wire format consistent.
         // Use `serialize_packet_reliable` for ordered/retransmitted delivery.
@@ -335,16 +335,16 @@ pub fn serialize_packet(pkt: &TelemetryPacket) -> Arc<[u8]> {
     serialize_packet_inner(pkt, None)
 }
 
-/// Serialize a [`TelemetryPacket`] with an explicit reliable header.
+/// Serialize a [`Packet`] with an explicit reliable header.
 ///
 /// This should be used for data types configured as `reliable` in the schema.
-pub fn serialize_packet_with_reliable(pkt: &TelemetryPacket, header: ReliableHeader) -> Arc<[u8]> {
+pub fn serialize_packet_with_reliable(pkt: &Packet, header: ReliableHeader) -> Arc<[u8]> {
     serialize_packet_inner(pkt, Some(header))
 }
 
 /// Serialize a reliable ACK-only control frame for the given data type.
 ///
-/// The resulting bytes are not a valid `TelemetryPacket` and should be handled
+/// The resulting bytes are not a valid `Packet` and should be handled
 /// by the router's reliable layer.
 pub fn serialize_reliable_ack(
     sender: &str,
@@ -391,7 +391,7 @@ pub fn serialize_reliable_ack(
     Arc::<[u8]>::from(out)
 }
 
-fn serialize_packet_inner(pkt: &TelemetryPacket, reliable: Option<ReliableHeader>) -> Arc<[u8]> {
+fn serialize_packet_inner(pkt: &Packet, reliable: Option<ReliableHeader>) -> Arc<[u8]> {
     let bm = build_endpoint_bitmap(pkt.endpoints());
 
     // Decide whether to compress the sender.
@@ -455,15 +455,15 @@ fn serialize_packet_inner(pkt: &TelemetryPacket, reliable: Option<ReliableHeader
 // Deserialization (full packet)
 // ===========================================================================
 
-/// Deserialize a full [`TelemetryPacket`] from the compact v2 wire format.
+/// Deserialize a full [`Packet`] from the compact v2 wire format.
 /// # Arguments
 /// - `buf`: Byte slice containing the serialized packet.
 /// # Returns
-/// - `TelemetryPacket`: Deserialized telemetry packet.
+/// - `Packet`: Deserialized telemetry packet.
 /// # Errors
 /// - `TelemetryError::Deserialize` if the buffer is malformed.
 /// - `TelemetryError::InvalidType` if the data type is invalid.
-pub fn deserialize_packet(buf: &[u8]) -> Result<TelemetryPacket, TelemetryError> {
+pub fn deserialize_packet(buf: &[u8]) -> Result<Packet, TelemetryError> {
     let data = verify_crc32(buf)?;
     if data.is_empty() {
         return Err(TelemetryError::Deserialize("short prelude"));
@@ -557,7 +557,7 @@ pub fn deserialize_packet(buf: &[u8]) -> Result<TelemetryPacket, TelemetryError>
     };
 
     let _ = reliable_hdr;
-    TelemetryPacket::new(ty, &eps, &sender_str, ts_v, payload_arc)
+    Packet::new(ty, &eps, &sender_str, ts_v, payload_arc)
 }
 
 // ===========================================================================
@@ -823,7 +823,7 @@ pub fn rewrite_reliable_header(
 /// - `pkt`: Telemetry packet to measure.
 /// # Returns
 /// - `usize`: Size of the header in bytes.
-pub fn header_size_bytes(pkt: &TelemetryPacket) -> usize {
+pub fn header_size_bytes(pkt: &Packet) -> usize {
     let prelude = 2; // FLAGS (u8) + NEP (u8)
 
     let sender_bytes = pkt.sender().as_bytes();
@@ -849,7 +849,7 @@ pub fn header_size_bytes(pkt: &TelemetryPacket) -> usize {
 /// - `pkt`: Telemetry packet to measure.
 /// # Returns
 /// - `usize`: Total size of the serialized packet in bytes.
-pub fn packet_wire_size(pkt: &TelemetryPacket) -> usize {
+pub fn packet_wire_size(pkt: &Packet) -> usize {
     let header = header_size_bytes(pkt);
 
     let sender_bytes = pkt.sender().as_bytes();
@@ -945,7 +945,7 @@ pub fn packet_id_from_wire(buf: &[u8]) -> Result<u64, TelemetryError> {
         &payload_decompressed
     };
 
-    // ---- hash exactly like TelemetryPacket::packet_id() ----
+    // ---- hash exactly like Packet::packet_id() ----
     let mut h: u64 = 0x9E37_79B9_7F4A_7C15;
 
     // Sender (string bytes)

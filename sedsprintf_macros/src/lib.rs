@@ -323,6 +323,8 @@ struct JsonEndpoint {
     /// Optional broadcast mode variant name, e.g. "Default"
     #[serde(default)]
     broadcast_mode: Option<String>,
+    #[serde(default)]
+    link_local_only: Option<bool>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -356,12 +358,14 @@ enum JsonElement {
 struct SchemaArgs {
     path: String,
     timesync: bool,
+    discovery: bool,
 }
 
 impl Parse for SchemaArgs {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
         let mut path: Option<String> = None;
         let mut timesync = false;
+        let mut discovery = false;
 
         while !input.is_empty() {
             let k: Ident = input.parse()?;
@@ -373,10 +377,13 @@ impl Parse for SchemaArgs {
             } else if k == "timesync" {
                 let ts_lit: LitBool = input.parse()?;
                 timesync = ts_lit.value();
+            } else if k == "discovery" {
+                let disc_lit: LitBool = input.parse()?;
+                discovery = disc_lit.value();
             } else {
                 return Err(syn::Error::new_spanned(
                     k,
-                    "expected `path` or `timesync`",
+                    "expected `path`, `timesync`, or `discovery`",
                 ));
             }
 
@@ -386,7 +393,11 @@ impl Parse for SchemaArgs {
         }
 
         let path = path.ok_or_else(|| syn::Error::new(Span::call_site(), "missing `path`"))?;
-        Ok(Self { path, timesync })
+        Ok(Self {
+            path,
+            timesync,
+            discovery,
+        })
     }
 }
 
@@ -413,6 +424,10 @@ fn is_timesync_endpoint(ep: &JsonEndpoint) -> bool {
     ep.rust == "TimeSync" || ep.name == "TIME_SYNC"
 }
 
+fn is_discovery_endpoint(ep: &JsonEndpoint) -> bool {
+    ep.rust == "Discovery" || ep.name == "DISCOVERY"
+}
+
 fn is_timesync_type(ty: &JsonType) -> bool {
     matches!(
         (ty.rust.as_str(), ty.name.as_str()),
@@ -422,6 +437,13 @@ fn is_timesync_type(ty: &JsonType) -> bool {
             | (_, "TIME_SYNC_ANNOUNCE")
             | (_, "TIME_SYNC_REQUEST")
             | (_, "TIME_SYNC_RESPONSE")
+    )
+}
+
+fn is_discovery_type(ty: &JsonType) -> bool {
+    matches!(
+        (ty.rust.as_str(), ty.name.as_str()),
+        ("DiscoveryAnnounce", _) | (_, "DISCOVERY_ANNOUNCE")
     )
 }
 
@@ -446,6 +468,22 @@ fn resolve_schema_path(path_rel: &str) -> Result<std::path::PathBuf, String> {
     Ok(root.join(path_rel))
 }
 
+fn resolve_optional_ipc_schema_path() -> Result<Option<std::path::PathBuf>, String> {
+    let root = caller_manifest_dir()?;
+    let Ok(override_path) = std::env::var("SEDSPRINTF_RS_IPC_SCHEMA_PATH") else {
+        return Ok(None);
+    };
+    if override_path.trim().is_empty() {
+        return Err("SEDSPRINTF_RS_IPC_SCHEMA_PATH is set but empty".to_string());
+    }
+    let path = std::path::PathBuf::from(override_path);
+    Ok(Some(if path.is_absolute() {
+        path
+    } else {
+        root.join(path)
+    }))
+}
+
 fn load_schema(path_rel: &str) -> Result<TelemetryConfig, String> {
     let root = caller_manifest_dir()?;
     let path = resolve_schema_path(path_rel)?;
@@ -462,6 +500,96 @@ fn load_schema(path_rel: &str) -> Result<TelemetryConfig, String> {
 
     serde_json::from_slice::<TelemetryConfig>(&bytes)
         .map_err(|e| format!("failed to parse {} as JSON: {e}", path.display()))
+}
+
+fn normalize_base_schema(cfg: &mut TelemetryConfig) {
+    for ep in &mut cfg.endpoints {
+        ep.link_local_only = Some(false);
+    }
+}
+
+fn load_merged_schema(path_rel: &str) -> Result<TelemetryConfig, String> {
+    let mut cfg = load_schema(path_rel)?;
+    normalize_base_schema(&mut cfg);
+    let Some(overlay_path) = resolve_optional_ipc_schema_path()? else {
+        return Ok(cfg);
+    };
+
+    let bytes = std::fs::read(&overlay_path).map_err(|e| {
+        format!(
+            "failed to read IPC overlay schema at {}: {e}\n\
+             note: set SEDSPRINTF_RS_IPC_SCHEMA_PATH to a JSON file containing only board-local link-local endpoints/types",
+            overlay_path.display()
+        )
+    })?;
+
+    let overlay = serde_json::from_slice::<TelemetryConfig>(&bytes)
+        .map_err(|e| format!("failed to parse {} as JSON: {e}", overlay_path.display()))?;
+    merge_ipc_overlay(&mut cfg, overlay, &overlay_path)?;
+    Ok(cfg)
+}
+
+fn merge_ipc_overlay(
+    base: &mut TelemetryConfig,
+    overlay: TelemetryConfig,
+    overlay_path: &std::path::Path,
+) -> Result<(), String> {
+    let mut overlay = overlay;
+    let mut endpoint_rust = std::collections::HashSet::<&str>::new();
+    let mut endpoint_name = std::collections::HashSet::<&str>::new();
+    let mut type_rust = std::collections::HashSet::<&str>::new();
+    let mut type_name = std::collections::HashSet::<&str>::new();
+
+    for ep in &base.endpoints {
+        endpoint_rust.insert(ep.rust.as_str());
+        endpoint_name.insert(ep.name.as_str());
+    }
+    for ty in &base.types {
+        type_rust.insert(ty.rust.as_str());
+        type_name.insert(ty.name.as_str());
+    }
+
+    for ep in &mut overlay.endpoints {
+        ep.link_local_only = Some(true);
+    }
+
+    for ep in &overlay.endpoints {
+        if !endpoint_rust.insert(ep.rust.as_str()) {
+            return Err(format!(
+                "{}: IPC overlay endpoint rust variant {:?} collides with the base schema",
+                overlay_path.display(),
+                ep.rust
+            ));
+        }
+        if !endpoint_name.insert(ep.name.as_str()) {
+            return Err(format!(
+                "{}: IPC overlay endpoint name {:?} collides with the base schema",
+                overlay_path.display(),
+                ep.name
+            ));
+        }
+    }
+
+    for ty in &overlay.types {
+        if !type_rust.insert(ty.rust.as_str()) {
+            return Err(format!(
+                "{}: IPC overlay type rust variant {:?} collides with the base schema",
+                overlay_path.display(),
+                ty.rust
+            ));
+        }
+        if !type_name.insert(ty.name.as_str()) {
+            return Err(format!(
+                "{}: IPC overlay type name {:?} collides with the base schema",
+                overlay_path.display(),
+                ty.name
+            ));
+        }
+    }
+
+    base.endpoints.extend(overlay.endpoints);
+    base.types.extend(overlay.types);
+    Ok(())
 }
 
 fn msg_datatype_token(name: &str) -> proc_macro2::TokenStream {
@@ -499,13 +627,18 @@ fn reliable_mode_token(mode: &str) -> Result<proc_macro2::TokenStream, String> {
 
 #[proc_macro]
 pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
-    let SchemaArgs { path, timesync } = parse_macro_input!(input as SchemaArgs);
+    let SchemaArgs {
+        path,
+        timesync,
+        discovery,
+    } = parse_macro_input!(input as SchemaArgs);
 
-    let cfg = match load_schema(&path) {
+    let cfg = match load_merged_schema(&path) {
         Ok(v) => v,
         Err(e) => return syn::Error::new(Span::call_site(), e).to_compile_error().into(),
     };
     let timesync_enabled = timesync;
+    let discovery_enabled = discovery;
 
     for ty in &cfg.types {
         if ty.rust == "TelemetryError" || ty.name == "TELEMETRY_ERROR" {
@@ -520,6 +653,14 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
             return syn::Error::new(
                 Span::call_site(),
                 "telemetry_config.json: TimeSync types are built-in and must not be defined in the schema",
+            )
+                .to_compile_error()
+                .into();
+        }
+        if is_discovery_type(ty) {
+            return syn::Error::new(
+                Span::call_site(),
+                "telemetry_config.json: Discovery types are built-in and must not be defined in the schema",
             )
                 .to_compile_error()
                 .into();
@@ -542,6 +683,14 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
                 .to_compile_error()
                 .into();
         }
+        if is_discovery_endpoint(ep) {
+            return syn::Error::new(
+                Span::call_site(),
+                "telemetry_config.json: Discovery endpoint is built-in and must not be defined in the schema",
+            )
+                .to_compile_error()
+                .into();
+        }
     }
 
     // ----------------------------
@@ -551,6 +700,7 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
     let mut ep_docs = Vec::<String>::new();
     let mut ep_names = Vec::<String>::new();
     let mut ep_bm = Vec::<String>::new();
+    let mut ep_link_local = Vec::<bool>::new();
 
     for ep in &cfg.endpoints {
         if let Err(e) = ensure_caps_name("endpoint", &ep.name) {
@@ -566,6 +716,7 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
         ep_docs.push(ep.doc.clone().unwrap_or_default());
         ep_names.push(ep.name.clone());
         ep_bm.push(ep.broadcast_mode.clone().unwrap_or_else(|| "Default".to_string()));
+        ep_link_local.push(ep.link_local_only.unwrap_or(false));
     }
 
     if timesync_enabled {
@@ -573,6 +724,14 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
         ep_docs.push("Time sync routing endpoint (always forwarded).".to_string());
         ep_names.push("TIME_SYNC".to_string());
         ep_bm.push("Always".to_string());
+        ep_link_local.push(false);
+    }
+    if discovery_enabled {
+        ep_idents.push(syn::Ident::new("Discovery", Span::call_site()));
+        ep_docs.push("Discovery control endpoint for internal route advertisements.".to_string());
+        ep_names.push("DISCOVERY".to_string());
+        ep_bm.push("Always".to_string());
+        ep_link_local.push(false);
     }
 
     ep_idents.push(syn::Ident::new("TelemetryError", Span::call_site()));
@@ -582,8 +741,11 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
     );
     ep_names.push("TELEMETRY_ERROR".to_string());
     ep_bm.push("Always".to_string());
+    ep_link_local.push(false);
 
-    let max_ep_value = cfg.endpoints.len() as u32 + if timesync_enabled { 1 } else { 0 };
+    let max_ep_value = cfg.endpoints.len() as u32
+        + if timesync_enabled { 1 } else { 0 }
+        + if discovery_enabled { 1 } else { 0 };
 
     let ep_variants = ep_idents.iter().zip(ep_docs.iter()).map(|(id, doc)| {
         if doc.is_empty() {
@@ -601,12 +763,15 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
         .iter()
         .zip(ep_names.iter())
         .zip(ep_bm.iter())
-        .map(|((id, name), bm)| {
+        .zip(ep_link_local.iter())
+        .map(|(((id, name), bm), link_local_only)| {
             let bm_ts = broadcast_mode_token(bm);
+            let link_local_only = *link_local_only;
             quote! {
                 DataEndpoint::#id => EndpointMeta {
                     name: #name,
                     broadcast_mode: #bm_ts,
+                    link_local_only: #link_local_only,
                 },
             }
         });
@@ -619,6 +784,29 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
     for ty in &cfg.types {
         if let Err(e) = ensure_caps_name("type", &ty.name) {
             return syn::Error::new(Span::call_site(), e).to_compile_error().into();
+        }
+
+        let mut saw_link_local = false;
+        let mut saw_non_link_local = false;
+        for eprust in &ty.endpoints {
+            if let Some(ep) = cfg.endpoints.iter().find(|ep| ep.rust == *eprust) {
+                if ep.link_local_only.unwrap_or(false) {
+                    saw_link_local = true;
+                } else {
+                    saw_non_link_local = true;
+                }
+            }
+        }
+        if saw_link_local && saw_non_link_local {
+            return syn::Error::new(
+                Span::call_site(),
+                format!(
+                    "telemetry_config.json: type {} ({}) mixes link-local-only and normal endpoints; split it into separate types",
+                    ty.rust, ty.name
+                ),
+            )
+                .to_compile_error()
+                .into();
         }
 
         let id = match ensure_valid_ident(&ty.rust) {
@@ -643,8 +831,16 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
             "Time sync response (seq, t1_ms, t2_ms, t3_ms).".to_string(),
         ));
     }
+    if discovery_enabled {
+        ty_entries.push((
+            syn::Ident::new("DiscoveryAnnounce", Span::call_site()),
+            "Endpoint discovery advertisement (dynamic list of endpoint IDs).".to_string(),
+        ));
+    }
 
-    let max_ty_value = cfg.types.len() as u32 + if timesync_enabled { 3 } else { 0 };
+    let max_ty_value = cfg.types.len() as u32
+        + if timesync_enabled { 3 } else { 0 }
+        + if discovery_enabled { 1 } else { 0 };
 
     let ty_variants = ty_entries
         .iter()
@@ -752,6 +948,19 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
         quote! {}
     };
 
+    let discovery_ty_meta = if discovery_enabled {
+        quote! {
+            DataType::DiscoveryAnnounce => MessageMeta {
+                name: "DISCOVERY_ANNOUNCE",
+                element: MessageElement::Dynamic(MessageDataType::UInt32, MessageClass::Data),
+                endpoints: &[DataEndpoint::Discovery],
+                reliable: crate::ReliableMode::None,
+            },
+        }
+    } else {
+        quote! {}
+    };
+
     let expanded = quote! {
         // Auto-generated by `define_telemetry_schema!`.
         // Source: telemetry schema JSON.
@@ -789,10 +998,117 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
             match data_type {
                 #builtin_ty_meta
                 #timesync_ty_meta
+                #discovery_ty_meta
                 #(#ty_meta_arms)*
             }
         }
     };
 
     expanded.into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    fn endpoint(rust: &str, name: &str, link_local_only: bool) -> JsonEndpoint {
+        JsonEndpoint {
+            rust: rust.to_string(),
+            name: name.to_string(),
+            doc: None,
+            broadcast_mode: Some("Default".to_string()),
+            link_local_only: Some(link_local_only),
+        }
+    }
+
+    fn datatype(rust: &str, name: &str, endpoints: &[&str]) -> JsonType {
+        JsonType {
+            rust: rust.to_string(),
+            name: name.to_string(),
+            doc: None,
+            reliable: Some(false),
+            reliable_mode: Some("None".to_string()),
+            element: JsonElement::Dynamic {
+                data_type: "String".to_string(),
+            },
+            class: "Data".to_string(),
+            endpoints: endpoints.iter().map(|ep| ep.to_string()).collect(),
+        }
+    }
+
+    fn base_schema() -> TelemetryConfig {
+        TelemetryConfig {
+            endpoints: vec![
+                endpoint("Radio", "RADIO", false),
+                endpoint("SdCard", "SD_CARD", false),
+            ],
+            types: vec![datatype("MessageData", "MESSAGE_DATA", &["Radio", "SdCard"])],
+        }
+    }
+
+    #[test]
+    fn merge_ipc_overlay_appends_valid_entries() {
+        let mut base = base_schema();
+        let overlay = TelemetryConfig {
+            endpoints: vec![endpoint("SoftwareBus", "SOFTWARE_BUS", true)],
+            types: vec![datatype("IpcMessage", "IPC_MESSAGE", &["SoftwareBus"])],
+        };
+
+        merge_ipc_overlay(&mut base, overlay, Path::new("ipc.json")).unwrap();
+
+        assert_eq!(base.endpoints.len(), 3);
+        assert_eq!(base.types.len(), 2);
+        assert_eq!(base.endpoints[2].rust, "SoftwareBus");
+        assert_eq!(base.types[1].name, "IPC_MESSAGE");
+    }
+
+    #[test]
+    fn merge_ipc_overlay_coerces_overlay_endpoints_to_link_local() {
+        let mut base = base_schema();
+        let overlay = TelemetryConfig {
+            endpoints: vec![endpoint("SoftwareBus", "SOFTWARE_BUS", false)],
+            types: vec![datatype("IpcMessage", "IPC_MESSAGE", &["SoftwareBus"])],
+        };
+
+        merge_ipc_overlay(&mut base, overlay, Path::new("ipc.json")).unwrap();
+        assert_eq!(base.endpoints[2].link_local_only, Some(true));
+    }
+
+    #[test]
+    fn normalize_base_schema_forces_non_link_local_endpoints() {
+        let mut base = TelemetryConfig {
+            endpoints: vec![endpoint("Radio", "RADIO", true)],
+            types: vec![datatype("MessageData", "MESSAGE_DATA", &["Radio"])],
+        };
+
+        normalize_base_schema(&mut base);
+        assert_eq!(base.endpoints[0].link_local_only, Some(false));
+    }
+
+    #[test]
+    fn merge_ipc_overlay_rejects_endpoint_collisions() {
+        let mut base = base_schema();
+        let overlay = TelemetryConfig {
+            endpoints: vec![endpoint("Radio", "SOFTWARE_BUS", true)],
+            types: vec![datatype("IpcMessage", "IPC_MESSAGE", &["Radio"])],
+        };
+
+        let err = merge_ipc_overlay(&mut base, overlay, Path::new("ipc.json")).unwrap_err();
+        assert!(err.contains("endpoint rust variant"));
+        assert!(err.contains("collides"));
+    }
+
+    #[test]
+    fn merge_ipc_overlay_rejects_type_name_collisions() {
+        let mut base = base_schema();
+        let overlay = TelemetryConfig {
+            endpoints: vec![endpoint("SoftwareBus", "SOFTWARE_BUS", true)],
+            types: vec![datatype("IpcMessage", "MESSAGE_DATA", &["SoftwareBus"])],
+        };
+
+        let err = merge_ipc_overlay(&mut base, overlay, Path::new("ipc.json")).unwrap_err();
+        assert!(err.contains("type name"));
+        assert!(err.contains("collides"));
+    }
 }

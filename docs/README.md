@@ -28,5 +28,5 @@ Start here:
 - docs/wiki/technical/Wire-Format.md
 - docs/wiki/technical/Router-Details.md
 - docs/wiki/technical/Queues-and-Memory.md
-- docs/wiki/technical/TelemetryPacket-Details.md
+- docs/wiki/technical/Packet-Details.md
 - docs/wiki/technical/Bindings-and-FFI.md

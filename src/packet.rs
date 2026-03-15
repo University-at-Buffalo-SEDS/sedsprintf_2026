@@ -1,6 +1,6 @@
 //! Telemetry packet core type and formatting helpers.
 //!
-//! [`TelemetryPacket`] is the main payload-bearing type. It:
+//! [`Packet`] is the main payload-bearing type. It:
 //! - holds sender, endpoints, timestamp and raw payload bytes,
 //! - validates payload sizes and encodings against the schema from `message_meta`,
 //! - supports pretty printing (header + decoded values) for debugging/logging,
@@ -33,7 +33,7 @@ const EPOCH_MS_THRESHOLD: u64 = 1_000_000_000_000; // clearly not an uptime coun
 const DEFAULT_STRING_CAPACITY: usize = 96;
 
 // ============================================================================
-// TelemetryPacket
+// Packet
 // ============================================================================
 
 /// Payload-bearing packet (safe, validated, shareable).
@@ -41,13 +41,13 @@ const DEFAULT_STRING_CAPACITY: usize = 96;
 /// This is the primary data structure passed around inside the crate and
 /// across FFI boundaries (via views / wrappers).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TelemetryPacket {
+pub struct Packet {
     /// Logical message type (schema selector).
     ty: DataType,
 
     /// Size of the payload in bytes.
     ///
-    /// This is cached and must match `payload.len()`. [`TelemetryPacket::validate`]
+    /// This is cached and must match `payload.len()`. [`Packet::validate`]
     /// checks the invariant.
     data_size: usize,
 
@@ -175,10 +175,10 @@ impl_ledecode_auto!(u8);
 impl_ledecode_auto!(i8);
 
 // ============================================================================
-// TelemetryPacket impl
+// Packet impl
 // ============================================================================
 
-impl TelemetryPacket {
+impl Packet {
     /// Create a packet from a raw payload, validating against `message_meta(ty)`.
     ///
     /// Checks:
@@ -194,7 +194,7 @@ impl TelemetryPacket {
     /// - `timestamp`: timestamp in milliseconds.
     /// - `payload`: raw payload bytes.
     /// # Returns
-    /// - `Ok(TelemetryPacket)` if validation passes.
+    /// - `Ok(Packet)` if validation passes.
     /// - `Err(TelemetryError)` if validation fails.
     /// # Errors
     /// - [`TelemetryError::EmptyEndpoints`] if `endpoints` is empty.
@@ -470,7 +470,7 @@ impl TelemetryPacket {
     ///
     /// - String payloads are rendered as `"..."`
     /// - Numeric/bool payloads are rendered as comma-separated values
-    /// - Hex payloads are delegated to [`TelemetryPacket::to_hex_string`]
+    /// - Hex payloads are delegated to [`Packet::to_hex_string`]
     /// # Returns
     /// - Human-readable string with header and decoded data.
     pub fn as_string(&self) -> String {
@@ -561,7 +561,7 @@ impl TelemetryPacket {
         s
     }
 
-    /// Hex dump variant of [`TelemetryPacket::as_string`].
+    /// Hex dump variant of [`Packet::as_string`].
     ///
     /// Produces:
     ///
@@ -920,14 +920,14 @@ fn append_human_time(out: &mut String, total_ms: u64) {
 // Display impl
 // ============================================================================
 
-impl core::fmt::Display for TelemetryPacket {
+impl core::fmt::Display for Packet {
     #[inline]
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        f.write_str(&TelemetryPacket::as_string(self))
+        f.write_str(&Packet::as_string(self))
     }
 }
 
-impl ByteCost for TelemetryPacket {
+impl ByteCost for Packet {
     #[inline]
     fn byte_cost(&self) -> usize {
         size_of::<Self>()

@@ -1,6 +1,6 @@
 use sedsprintf_rs::config::{DataEndpoint, DataType};
 use sedsprintf_rs::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
-use sedsprintf_rs::telemetry_packet::TelemetryPacket;
+use sedsprintf_rs::telemetry_packet::Packet;
 use sedsprintf_rs::timesync::{
     build_timesync_announce, build_timesync_request, build_timesync_response,
     compute_offset_delay,
@@ -19,7 +19,7 @@ fn main() -> TelemetryResult<()> {
     // NOTE: build with --features timesync
     let clock: Box<dyn Clock + Send + Sync> = Box::new(|| now_ms());
 
-    let print_pkt = |pkt: &TelemetryPacket| {
+    let print_pkt = |pkt: &Packet| {
         println!("{pkt}");
         Ok(())
     };
@@ -40,7 +40,7 @@ fn main() -> TelemetryResult<()> {
     router.log(DataType::SystemStatus, &[true])?;
     router.log(DataType::BarometerData, &[1013.2_f32, 24.5, 0.0])?;
 
-    let msg_pkt = TelemetryPacket::from_str_slice(
+    let msg_pkt = Packet::from_str_slice(
         DataType::MessageData,
         &["hello from rust timesync example"],
         &[DataEndpoint::Radio, DataEndpoint::SdCard],
@@ -48,7 +48,7 @@ fn main() -> TelemetryResult<()> {
     )?;
     router.tx(msg_pkt)?;
 
-    let heartbeat = TelemetryPacket::from_no_data(
+    let heartbeat = Packet::from_no_data(
         DataType::Heartbeat,
         &[DataEndpoint::Radio, DataEndpoint::SdCard],
         now_ms(),

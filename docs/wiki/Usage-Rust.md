@@ -76,7 +76,23 @@ let router = Router::new(RouterMode::Sink, cfg, Box::new(now_ms));
 router.add_side_serialized_with_options(
     "RADIO",
     tx,
-    RouterSideOptions { reliable_enabled: true },
+    RouterSideOptions {
+        reliable_enabled: true,
+        link_local_enabled: false,
+    },
+);
+```
+
+For a software-bus / IPC side that should carry link-local-only endpoints:
+
+```rust
+router.add_side_serialized_with_options(
+    "IPC",
+    tx,
+    RouterSideOptions {
+        reliable_enabled: false,
+        link_local_enabled: true,
+    },
 );
 ```
 
@@ -104,7 +120,7 @@ If you already have raw bytes, use `router.tx_serialized` or `router.tx_serializ
 - Synchronous: `router.rx_serialized(bytes)`
 - Queued: `router.rx_serialized_queue(bytes)` then `router.process_rx_queue()`
 
-If you already built a `TelemetryPacket`, use `router.rx(&packet)` or `router.rx_queue(packet)`.
+If you already built a `Packet`, use `router.rx(&packet)` or `router.rx_queue(packet)`.
 
 ## Side handling
 

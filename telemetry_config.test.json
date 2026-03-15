@@ -11,6 +11,13 @@
       "name": "RADIO",
       "doc": "Radio or external link (telemetry uplink/downlink).",
       "broadcast_mode": "Default"
+    },
+    {
+      "rust": "SoftwareBus",
+      "name": "SOFTWARE_BUS",
+      "doc": "Link-local software bus endpoint for IPC between local processes.",
+      "broadcast_mode": "Default",
+      "link_local_only": true
     }
   ],
   "types": [
@@ -116,6 +123,19 @@
       "endpoints": [
         "SdCard",
         "Radio"
+      ]
+    },
+    {
+      "rust": "IpcMessage",
+      "name": "IPC_MESSAGE",
+      "doc": "Link-local IPC message payload for the software bus.",
+      "class": "Data",
+      "element": {
+        "kind": "Dynamic",
+        "data_type": "String"
+      },
+      "endpoints": [
+        "SoftwareBus"
       ]
     }
   ]
