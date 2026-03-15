@@ -536,6 +536,7 @@ impl PyRouter {
 
         let opts = RouterSideOptions {
             reliable_enabled,
+            link_local_enabled: false,
         };
 
         let id = rtr.add_side_serialized_with_options(name_static, move |bytes| {
@@ -575,6 +576,7 @@ impl PyRouter {
 
         let opts = RouterSideOptions {
             reliable_enabled,
+            link_local_enabled: false,
         };
 
         let id = rtr.add_side_packet_with_options(name_static, move |pkt: &Packet| {
@@ -1081,6 +1083,7 @@ impl PyRelay {
 
         let opts = RelaySideOptions {
             reliable_enabled,
+            link_local_enabled: false,
         };
 
         let id = self.inner.add_side_serialized_with_options(name_static, move |bytes| {
@@ -1115,6 +1118,7 @@ impl PyRelay {
 
         let opts = RelaySideOptions {
             reliable_enabled,
+            link_local_enabled: false,
         };
 
         let id = self

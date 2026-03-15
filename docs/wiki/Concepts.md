@@ -78,6 +78,7 @@ Discovery is an optional built-in control plane, similar in spirit to time sync:
 - They learn reachable endpoints per side and keep that information as soft state with expiry.
 - Discovery traffic is adaptive: it is sent more often when topology changes and less often when the network is stable.
 - Apps can export the current discovered topology for inspection.
+- Link-local-only endpoints stay on software-bus / IPC links and are not advertised onto normal network links.
 
 Discovery is an optimization, not a correctness requirement. Unknown or expired routes fall back to normal forwarding so
 packets are still delivered while the network converges.

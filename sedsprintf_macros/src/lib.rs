@@ -323,6 +323,8 @@ struct JsonEndpoint {
     /// Optional broadcast mode variant name, e.g. "Default"
     #[serde(default)]
     broadcast_mode: Option<String>,
+    #[serde(default)]
+    link_local_only: Option<bool>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -592,6 +594,7 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
     let mut ep_docs = Vec::<String>::new();
     let mut ep_names = Vec::<String>::new();
     let mut ep_bm = Vec::<String>::new();
+    let mut ep_link_local = Vec::<bool>::new();
 
     for ep in &cfg.endpoints {
         if let Err(e) = ensure_caps_name("endpoint", &ep.name) {
@@ -607,6 +610,7 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
         ep_docs.push(ep.doc.clone().unwrap_or_default());
         ep_names.push(ep.name.clone());
         ep_bm.push(ep.broadcast_mode.clone().unwrap_or_else(|| "Default".to_string()));
+        ep_link_local.push(ep.link_local_only.unwrap_or(false));
     }
 
     if timesync_enabled {
@@ -614,12 +618,14 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
         ep_docs.push("Time sync routing endpoint (always forwarded).".to_string());
         ep_names.push("TIME_SYNC".to_string());
         ep_bm.push("Always".to_string());
+        ep_link_local.push(false);
     }
     if discovery_enabled {
         ep_idents.push(syn::Ident::new("Discovery", Span::call_site()));
         ep_docs.push("Discovery control endpoint for internal route advertisements.".to_string());
         ep_names.push("DISCOVERY".to_string());
         ep_bm.push("Always".to_string());
+        ep_link_local.push(false);
     }
 
     ep_idents.push(syn::Ident::new("TelemetryError", Span::call_site()));
@@ -629,6 +635,7 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
     );
     ep_names.push("TELEMETRY_ERROR".to_string());
     ep_bm.push("Always".to_string());
+    ep_link_local.push(false);
 
     let max_ep_value = cfg.endpoints.len() as u32
         + if timesync_enabled { 1 } else { 0 }
@@ -650,12 +657,15 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
         .iter()
         .zip(ep_names.iter())
         .zip(ep_bm.iter())
-        .map(|((id, name), bm)| {
+        .zip(ep_link_local.iter())
+        .map(|(((id, name), bm), link_local_only)| {
             let bm_ts = broadcast_mode_token(bm);
+            let link_local_only = *link_local_only;
             quote! {
                 DataEndpoint::#id => EndpointMeta {
                     name: #name,
                     broadcast_mode: #bm_ts,
+                    link_local_only: #link_local_only,
                 },
             }
         });
@@ -668,6 +678,29 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
     for ty in &cfg.types {
         if let Err(e) = ensure_caps_name("type", &ty.name) {
             return syn::Error::new(Span::call_site(), e).to_compile_error().into();
+        }
+
+        let mut saw_link_local = false;
+        let mut saw_non_link_local = false;
+        for eprust in &ty.endpoints {
+            if let Some(ep) = cfg.endpoints.iter().find(|ep| ep.rust == *eprust) {
+                if ep.link_local_only.unwrap_or(false) {
+                    saw_link_local = true;
+                } else {
+                    saw_non_link_local = true;
+                }
+            }
+        }
+        if saw_link_local && saw_non_link_local {
+            return syn::Error::new(
+                Span::call_site(),
+                format!(
+                    "telemetry_config.json: type {} ({}) mixes link-local-only and normal endpoints; split it into separate types",
+                    ty.rust, ty.name
+                ),
+            )
+            .to_compile_error()
+            .into();
         }
 
         let id = match ensure_valid_ident(&ty.rust) {

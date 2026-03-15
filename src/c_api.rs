@@ -538,6 +538,7 @@ pub extern "C" fn seds_router_add_side_serialized(
 
     let opts = RouterSideOptions {
         reliable_enabled,
+        link_local_enabled: false,
     };
 
     let side_id = router.add_side_serialized_with_options(side_name, tx_fn, opts);
@@ -619,6 +620,7 @@ pub extern "C" fn seds_router_add_side_packet(
 
     let opts = RouterSideOptions {
         reliable_enabled,
+        link_local_enabled: false,
     };
 
     let side_id = router.add_side_packet_with_options(side_name, tx_closure, opts);
@@ -719,6 +721,7 @@ pub extern "C" fn seds_relay_add_side_serialized(
 
     let opts = RelaySideOptions {
         reliable_enabled,
+        link_local_enabled: false,
     };
     let side_id: RelaySideId = relay.add_side_serialized_with_options(side_name, tx_fn, opts);
     side_id as i32
@@ -799,6 +802,7 @@ pub extern "C" fn seds_relay_add_side_packet(
 
     let opts = RelaySideOptions {
         reliable_enabled,
+        link_local_enabled: false,
     };
     let side_id: RelaySideId = relay.add_side_packet_with_options(side_name, tx_closure, opts);
     side_id as i32

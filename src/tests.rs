@@ -3303,6 +3303,7 @@ mod relay_reliable_tests {
             |_b| Ok(()),
             RelaySideOptions {
                 reliable_enabled: true,
+                link_local_enabled: false,
             },
         );
 
@@ -3324,6 +3325,7 @@ mod relay_reliable_tests {
             },
             RelaySideOptions {
                 reliable_enabled: true,
+                link_local_enabled: false,
             },
         );
 
@@ -3373,6 +3375,7 @@ mod relay_reliable_tests {
             |_b| Ok(()),
             RelaySideOptions {
                 reliable_enabled: true,
+                link_local_enabled: false,
             },
         );
 
@@ -3399,6 +3402,7 @@ mod relay_reliable_tests {
             },
             RelaySideOptions {
                 reliable_enabled: true,
+                link_local_enabled: false,
             },
         );
 
@@ -3411,6 +3415,7 @@ mod relay_reliable_tests {
             },
             RelaySideOptions {
                 reliable_enabled: true,
+                link_local_enabled: false,
             },
         );
 
@@ -3440,6 +3445,7 @@ mod relay_reliable_tests {
             },
             RelaySideOptions {
                 reliable_enabled: true,
+                link_local_enabled: false,
             },
         );
         *relay2_dst_id.lock().unwrap() = Some(relay2_dst);
@@ -3490,6 +3496,7 @@ mod relay_reliable_tests {
             |_b| Ok(()),
             RelaySideOptions {
                 reliable_enabled: true,
+                link_local_enabled: false,
             },
         );
 
@@ -3512,6 +3519,7 @@ mod relay_reliable_tests {
             },
             RelaySideOptions {
                 reliable_enabled: true,
+                link_local_enabled: false,
             },
         );
 
@@ -3618,6 +3626,7 @@ mod reliable_tests {
             },
             RouterSideOptions {
                 reliable_enabled: true,
+                link_local_enabled: false,
             },
         );
         *receiver_side_id.lock().unwrap() = Some(receiver_side);
@@ -3641,6 +3650,7 @@ mod reliable_tests {
             tx,
             RouterSideOptions {
                 reliable_enabled: true,
+                link_local_enabled: false,
             },
         );
         *sender_side_id.lock().unwrap() = Some(sender_side);
@@ -3690,6 +3700,7 @@ mod reliable_tests {
             |_b| Ok(()),
             RouterSideOptions {
                 reliable_enabled: true,
+                link_local_enabled: false,
             },
         );
 
@@ -4117,6 +4128,89 @@ mod router_tests {
             assert_eq!(snap.advertised_endpoints, vec![DataEndpoint::SdCard, DataEndpoint::Radio]);
             assert_eq!(snap.routes.len(), 1);
             assert_eq!(snap.routes[0].side_name, "A");
+        }
+
+        #[test]
+        fn link_local_only_packets_stay_on_software_bus_sides() {
+            let seen_net: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_ll: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_net_c = seen_net.clone();
+            let seen_ll_c = seen_ll.clone();
+
+            let router = Router::new(RouterMode::Sink, RouterConfig::default(), zero_clock());
+            router.add_side_packet("NET", move |pkt: &Packet| -> TelemetryResult<()> {
+                seen_net_c.lock().unwrap().push(pkt.clone());
+                Ok(())
+            });
+            router.add_side_packet_with_options(
+                "LL",
+                move |pkt: &Packet| -> TelemetryResult<()> {
+                    seen_ll_c.lock().unwrap().push(pkt.clone());
+                    Ok(())
+                },
+                crate::router::RouterSideOptions {
+                    reliable_enabled: false,
+                    link_local_enabled: true,
+                },
+            );
+
+            let pkt = Packet::new(
+                DataType::IpcMessage,
+                &[DataEndpoint::SoftwareBus],
+                "IPC_NODE",
+                7,
+                Arc::<[u8]>::from(b"hello-ipc".as_slice()),
+            )
+            .unwrap();
+            router.tx(pkt).unwrap();
+
+            assert!(seen_net.lock().unwrap().is_empty());
+            assert_eq!(seen_ll.lock().unwrap().len(), 1);
+        }
+
+        #[test]
+        fn discovery_hides_link_local_endpoints_from_network_sides() {
+            let seen_net: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_ll: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_net_c = seen_net.clone();
+            let seen_ll_c = seen_ll.clone();
+
+            let router = Router::new(
+                RouterMode::Sink,
+                RouterConfig::new(vec![
+                    EndpointHandler::new_packet_handler(DataEndpoint::SoftwareBus, |_pkt| Ok(())),
+                    EndpointHandler::new_packet_handler(DataEndpoint::Radio, |_pkt| Ok(())),
+                ]),
+                zero_clock(),
+            );
+            router.add_side_packet("NET", move |pkt: &Packet| -> TelemetryResult<()> {
+                seen_net_c.lock().unwrap().push(pkt.clone());
+                Ok(())
+            });
+            router.add_side_packet_with_options(
+                "LL",
+                move |pkt: &Packet| -> TelemetryResult<()> {
+                    seen_ll_c.lock().unwrap().push(pkt.clone());
+                    Ok(())
+                },
+                crate::router::RouterSideOptions {
+                    reliable_enabled: false,
+                    link_local_enabled: true,
+                },
+            );
+
+            router.announce_discovery().unwrap();
+            router.process_tx_queue().unwrap();
+
+            let net = seen_net.lock().unwrap().clone();
+            let ll = seen_ll.lock().unwrap().clone();
+            assert_eq!(net.len(), 1);
+            assert_eq!(ll.len(), 1);
+            let net_eps = crate::discovery::decode_discovery_announce(&net[0]).unwrap();
+            let ll_eps = crate::discovery::decode_discovery_announce(&ll[0]).unwrap();
+            assert!(!net_eps.contains(&DataEndpoint::SoftwareBus));
+            assert!(net_eps.contains(&DataEndpoint::Radio));
+            assert!(ll_eps.contains(&DataEndpoint::SoftwareBus));
         }
     }
 

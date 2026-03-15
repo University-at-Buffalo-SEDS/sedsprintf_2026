@@ -230,6 +230,7 @@ impl Debug for RouterTxHandlerFn {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct RouterSideOptions {
     pub reliable_enabled: bool,
+    pub link_local_enabled: bool,
 }
 
 /// One side of the router – a name + TX handler.
@@ -755,6 +756,10 @@ impl Router {
         }
     }
 
+    fn endpoints_are_link_local_only(eps: &[DataEndpoint]) -> bool {
+        !eps.is_empty() && eps.iter().all(|ep| ep.is_link_local_only())
+    }
+
     fn remote_side_plan(
         &self,
         data: &RouterItem,
@@ -768,7 +773,23 @@ impl Router {
             }
 
             let st = self.state.lock();
+            let restrict_link_local = Self::endpoints_are_link_local_only(&eps);
             if st.discovery_routes.is_empty() {
+                if restrict_link_local {
+                    let targets = st
+                        .sides
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(side, side_info)| {
+                            if exclude == Some(side) || !side_info.opts.link_local_enabled {
+                                None
+                            } else {
+                                Some(side)
+                            }
+                        })
+                        .collect();
+                    return Ok(RemoteSidePlan::Target(targets));
+                }
                 return Ok(RemoteSidePlan::Flood);
             }
             let now_ms = self.clock.now_ms();
@@ -781,6 +802,15 @@ impl Router {
                 {
                     continue;
                 }
+                if restrict_link_local
+                    && st
+                        .sides
+                        .get(side)
+                        .map(|s| !s.opts.link_local_enabled)
+                        .unwrap_or(true)
+                {
+                    continue;
+                }
                 if eps.iter().copied().any(|ep| route.reachable.contains(&ep)) {
                     had_known = true;
                     targets.push(side);
@@ -788,6 +818,20 @@ impl Router {
             }
 
             if had_known {
+                Ok(RemoteSidePlan::Target(targets))
+            } else if restrict_link_local {
+                let targets = st
+                    .sides
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(side, side_info)| {
+                        if exclude == Some(side) || !side_info.opts.link_local_enabled {
+                            None
+                        } else {
+                            Some(side)
+                        }
+                    })
+                    .collect();
                 Ok(RemoteSidePlan::Target(targets))
             } else {
                 Ok(RemoteSidePlan::Flood)
@@ -825,15 +869,23 @@ impl Router {
     }
 
     #[cfg(feature = "discovery")]
-    fn advertised_discovery_endpoints_locked(&self, st: &RouterInner, now_ms: u64) -> Vec<DataEndpoint> {
+    fn advertised_discovery_endpoints_for_link_locked(
+        &self,
+        st: &RouterInner,
+        now_ms: u64,
+        link_local_enabled: bool,
+    ) -> Vec<DataEndpoint> {
         let mut eps = self.local_discovery_endpoints();
+        if !link_local_enabled {
+            eps.retain(|ep| !ep.is_link_local_only());
+        }
         for route in st.discovery_routes.values() {
             if now_ms.saturating_sub(route.last_seen_ms) > DISCOVERY_ROUTE_TTL_MS {
                 continue;
             }
             eps.extend(route.reachable.iter().copied());
         }
-        eps.retain(|ep| !discovery::is_discovery_endpoint(*ep));
+        eps.retain(|ep| !discovery::is_discovery_endpoint(*ep) && (link_local_enabled || !ep.is_link_local_only()));
         eps.sort_unstable();
         eps.dedup();
         eps
@@ -842,7 +894,7 @@ impl Router {
     #[cfg(feature = "discovery")]
     fn queue_discovery_announce(&self) -> TelemetryResult<()> {
         let now_ms = self.clock.now_ms();
-        let pkt = {
+        let per_side = {
             let mut st = self.state.lock();
             if Self::prune_discovery_routes_locked(&mut st, now_ms) {
                 Self::note_discovery_topology_change_locked(&mut st, now_ms);
@@ -850,14 +902,35 @@ impl Router {
             if st.sides.is_empty() {
                 return Ok(());
             }
-            let endpoints = self.advertised_discovery_endpoints_locked(&st, now_ms);
-            if endpoints.is_empty() {
-                return Ok(());
-            }
             st.discovery_cadence.on_announce_sent(now_ms);
-            discovery::build_discovery_announce(self.sender, now_ms, endpoints.as_slice())?
+            st.sides
+                .iter()
+                .enumerate()
+                .filter_map(|(side_id, side)| {
+                    let endpoints = self.advertised_discovery_endpoints_for_link_locked(
+                        &st,
+                        now_ms,
+                        side.opts.link_local_enabled,
+                    );
+                    if endpoints.is_empty() {
+                        None
+                    } else {
+                        Some((side_id, endpoints))
+                    }
+                })
+                .collect::<Vec<_>>()
         };
-        self.tx_queue_item_with_flags(RouterTxItem::Broadcast(RouterItem::Packet(pkt)), true)
+        for (side_id, endpoints) in per_side {
+            let pkt = discovery::build_discovery_announce(self.sender, now_ms, endpoints.as_slice())?;
+            self.tx_queue_item_with_flags(
+                RouterTxItem::ToSide {
+                    dst: side_id,
+                    data: RouterItem::Packet(pkt),
+                },
+                true,
+            )?;
+        }
+        Ok(())
     }
 
     #[cfg(feature = "discovery")]
@@ -869,7 +942,12 @@ impl Router {
             if removed {
                 Self::note_discovery_topology_change_locked(&mut st, now_ms);
             }
-            if st.sides.is_empty() || self.advertised_discovery_endpoints_locked(&st, now_ms).is_empty() {
+            let has_any = st.sides.iter().any(|side| {
+                !self
+                    .advertised_discovery_endpoints_for_link_locked(&st, now_ms, side.opts.link_local_enabled)
+                    .is_empty()
+            });
+            if st.sides.is_empty() || !has_any {
                 return Ok(false);
             }
             st.discovery_cadence.due(now_ms)
@@ -1374,7 +1452,8 @@ impl Router {
                 })
             })
             .collect();
-        let advertised_endpoints = self.advertised_discovery_endpoints_locked(&st, now_ms);
+        let advertised_endpoints =
+            self.advertised_discovery_endpoints_for_link_locked(&st, now_ms, true);
         TopologySnapshot {
             advertised_endpoints,
             routes,

@@ -55,6 +55,9 @@ struct JsonEndpoint {
     /// Optional broadcast mode variant name, e.g. "Default"
     #[serde(default)]
     _broadcast_mode: Option<String>,
+    /// Whether this endpoint is restricted to link-local/software-bus sides.
+    #[serde(default)]
+    _link_local_only: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -315,6 +318,24 @@ fn validate_schema(cfg: &TelemetryConfig, timesync_enabled: bool, discovery_enab
             }
         }
 
+        let mut saw_link_local = false;
+        let mut saw_non_link_local = false;
+        for eprust in &ty.endpoints {
+            if let Some(ep) = cfg.endpoints.iter().find(|ep| ep.rust == *eprust) {
+                if ep._link_local_only.unwrap_or(false) {
+                    saw_link_local = true;
+                } else {
+                    saw_non_link_local = true;
+                }
+            }
+        }
+        if saw_link_local && saw_non_link_local {
+            panic!(
+                "telemetry_config.json: type {} ({}) mixes link-local-only and normal endpoints; split it into separate types",
+                ty.rust, ty.name
+            );
+        }
+
         // Sanity check element datatype + class
         match &ty.element {
             JsonElement::Static { data_type } | JsonElement::Dynamic { data_type } => {
@@ -373,6 +394,7 @@ fn append_timesync_builtins(cfg: &mut TelemetryConfig) {
         name: "TIME_SYNC".to_string(),
         doc: Some("Time sync routing endpoint (always forwarded).".to_string()),
         _broadcast_mode: Some("Always".to_string()),
+        _link_local_only: Some(false),
     });
 
     cfg.types.push(JsonType {
@@ -418,6 +440,7 @@ fn append_discovery_builtins(cfg: &mut TelemetryConfig) {
         name: "DISCOVERY".to_string(),
         doc: Some("Discovery control endpoint for internal route advertisements.".to_string()),
         _broadcast_mode: Some("Always".to_string()),
+        _link_local_only: Some(false),
     });
 
     cfg.types.push(JsonType {

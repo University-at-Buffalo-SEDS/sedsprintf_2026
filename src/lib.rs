@@ -324,6 +324,8 @@ pub struct EndpointMeta {
     name: &'static str,
     /// Broadcast mode for the endpoint
     broadcast_mode: EndpointsBroadcastMode,
+    /// Restrict remote forwarding to link-local/software-bus sides only.
+    link_local_only: bool,
 }
 
 impl EndpointMeta {
@@ -342,6 +344,12 @@ impl EndpointMeta {
     pub fn get_broadcast_mode(&self) -> EndpointsBroadcastMode {
         self.broadcast_mode
     }
+
+    /// Return whether this endpoint is restricted to link-local/software-bus sides.
+    #[inline]
+    pub fn is_link_local_only(&self) -> bool {
+        self.link_local_only
+    }
 }
 
 impl DataEndpoint {
@@ -359,6 +367,12 @@ impl DataEndpoint {
     /// - `EndpointsBroadcastMode` enum value.
     pub fn get_broadcast_mode(&self) -> EndpointsBroadcastMode {
         get_endpoint_meta(*self).broadcast_mode
+    }
+
+    /// Return whether this endpoint is restricted to link-local/software-bus sides.
+    #[inline]
+    pub fn is_link_local_only(&self) -> bool {
+        get_endpoint_meta(*self).link_local_only
     }
 }
 

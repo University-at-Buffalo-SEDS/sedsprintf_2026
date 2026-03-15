@@ -76,7 +76,23 @@ let router = Router::new(RouterMode::Sink, cfg, Box::new(now_ms));
 router.add_side_serialized_with_options(
     "RADIO",
     tx,
-    RouterSideOptions { reliable_enabled: true },
+    RouterSideOptions {
+        reliable_enabled: true,
+        link_local_enabled: false,
+    },
+);
+```
+
+For a software-bus / IPC side that should carry link-local-only endpoints:
+
+```rust
+router.add_side_serialized_with_options(
+    "IPC",
+    tx,
+    RouterSideOptions {
+        reliable_enabled: false,
+        link_local_enabled: true,
+    },
 );
 ```
 

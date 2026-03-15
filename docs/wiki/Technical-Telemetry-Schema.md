@@ -56,12 +56,22 @@ Top-level keys:
 - `name`: wire/display name (typically ALL_CAPS).
 - `doc`: optional description.
 - `broadcast_mode`: `Default`, `Always`, or `Never`.
+- `link_local_only`: optional boolean. When `true`, the endpoint may only be forwarded over sides marked as
+  link-local/software-bus sides.
 
 `broadcast_mode` influences forwarding in `RouterMode::Relay`:
 
 - `Always`: forward even if a local handler exists.
 - `Never`: never forward.
 - `Default`: forward only if the endpoint is not handled locally.
+
+`link_local_only` further constrains forwarding:
+
+- `false` or omitted: the endpoint can use any side.
+- `true`: the endpoint is restricted to link-local/software-bus sides and is excluded from discovery advertisements sent
+  on non-link-local sides.
+
+To keep packet semantics unambiguous, a type must not mix link-local-only endpoints with normal endpoints.
 
 ### Type fields
 
@@ -128,7 +138,14 @@ Helpers:
 ```
 {
   "endpoints": [
-    { "rust": "Radio", "name": "RADIO", "doc": "Downlink radio", "broadcast_mode": "Default" }
+    { "rust": "Radio", "name": "RADIO", "doc": "Downlink radio", "broadcast_mode": "Default" },
+    {
+      "rust": "SoftwareBus",
+      "name": "SOFTWARE_BUS",
+      "doc": "Link-local software bus endpoint",
+      "broadcast_mode": "Default",
+      "link_local_only": true
+    }
   ],
   "types": [
     {

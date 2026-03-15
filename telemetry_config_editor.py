@@ -147,7 +147,8 @@ def rust_ident_to_schema_name(rust: str) -> str:
 
 
 def _endpoint_row_text(ep: Dict[str, Any]) -> str:
-    return f"{ep.get('rust', '')}  [{ep.get('name', '')}]"
+    ll = " [LL]" if bool(ep.get("link_local_only", False)) else ""
+    return f"{ep.get('rust', '')}  [{ep.get('name', '')}]{ll}"
 
 
 def _type_row_text(ty: Dict[str, Any]) -> str:
@@ -341,6 +342,7 @@ class TelemetryConfigEditor(tk.Tk):
     def _setup_live_edit_traces(self):
         self.ep_rust_var.trace_add("write", lambda *_: self._schedule_live_endpoint_apply())  # type: ignore
         self.ep_bm_var.trace_add("write", lambda *_: self._schedule_live_endpoint_apply())  # type: ignore
+        self.ep_link_local_var.trace_add("write", lambda *_: self._schedule_live_endpoint_apply())  # type: ignore
         self.ep_doc_text.bind("<<Modified>>", self._on_ep_doc_modified)
 
         self.ty_rust_var.trace_add("write", lambda *_: self._schedule_live_type_apply())  # type: ignore
@@ -430,6 +432,7 @@ class TelemetryConfigEditor(tk.Tk):
         old_rust = str(ep.get("rust", ""))
         new_rust = self.ep_rust_var.get().strip()
         new_bm = (self.ep_bm_var.get() or "Default").strip()
+        new_link_local = bool(self.ep_link_local_var.get())
         new_doc = self.ep_doc_text.get("1.0", tk.END).strip()
 
         if new_rust and _is_reserved_telemetry_error(new_rust):
@@ -450,6 +453,7 @@ class TelemetryConfigEditor(tk.Tk):
             ep["name"] = rust_ident_to_schema_name(new_rust)
         ep["doc"] = new_doc
         ep["broadcast_mode"] = new_bm
+        ep["link_local_only"] = new_link_local
 
         rename_map = None
         if old_rust and new_rust and old_rust != new_rust:
@@ -646,11 +650,18 @@ class TelemetryConfigEditor(tk.Tk):
             right, textvariable=self.ep_bm_var, values=BROADCAST_MODE_OPTIONS, state="readonly"
         ).grid(row=2, column=1, sticky="w", padx=(10, 0), pady=(10, 0))
 
+        self.ep_link_local_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            right,
+            text="Link-local only (software bus / IPC)",
+            variable=self.ep_link_local_var,
+        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(10, 0))
+
         ttk.Label(
             right,
             text="Edits apply in-memory automatically. Use Ctrl/Cmd+S to write JSON.",
             foreground="gray",
-        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(14, 0))
+        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(14, 0))
 
     # ---------------- Types tab ----------------
 
@@ -981,6 +992,11 @@ class TelemetryConfigEditor(tk.Tk):
                 raise RuntimeError(
                     f"endpoints[{i}].broadcast_mode must be one of {BROADCAST_MODE_OPTIONS}, got {bm!r}"
                 )
+            ll = ep.get("link_local_only", False)
+            if not isinstance(ll, bool):
+                raise RuntimeError(
+                    f"endpoints[{i}].link_local_only must be boolean, got {ll!r}"
+                )
 
         endpoint_rust_set = {ep.get("rust", "") for ep in obj["endpoints"]}
         endpoint_rust_set.add("TelemetryError")
@@ -1040,6 +1056,13 @@ class TelemetryConfigEditor(tk.Tk):
                         f"types[{i}] ({rust}) references unknown endpoint {epr!r}. "
                         f"Known endpoints: {sorted(endpoint_rust_set)}"
                     )
+            used_eps = [ep for ep in obj["endpoints"] if ep.get("rust", "") in eps]
+            has_link_local = any(bool(ep.get("link_local_only", False)) for ep in used_eps)
+            has_non_link_local = any(not bool(ep.get("link_local_only", False)) for ep in used_eps)
+            if has_link_local and has_non_link_local:
+                raise RuntimeError(
+                    f"types[{i}] ({rust}) mixes link-local-only and normal endpoints; split it into separate types"
+                )
 
     def refresh_lists(self):
         self.endpoint_list.delete(0, tk.END)
@@ -1062,7 +1085,13 @@ class TelemetryConfigEditor(tk.Tk):
         self._flush_endpoint_only()
         rust = "NewEndpoint"
         self.config_obj.setdefault("endpoints", []).append(
-            {"rust": rust, "name": rust_ident_to_schema_name(rust), "doc": "", "broadcast_mode": "Default"}
+            {
+                "rust": rust,
+                "name": rust_ident_to_schema_name(rust),
+                "doc": "",
+                "broadcast_mode": "Default",
+                "link_local_only": False,
+            }
         )
         self.refresh_lists()
         self.endpoint_list.selection_clear(0, tk.END)
@@ -1106,6 +1135,7 @@ class TelemetryConfigEditor(tk.Tk):
             self.ep_doc_text.insert("1.0", ep.get("doc", "") or "")
             self.ep_doc_text.edit_modified(False)
             self.ep_bm_var.set(ep.get("broadcast_mode", "Default") or "Default")
+            self.ep_link_local_var.set(bool(ep.get("link_local_only", False)))
         finally:
             self._suspend_live = False
 
