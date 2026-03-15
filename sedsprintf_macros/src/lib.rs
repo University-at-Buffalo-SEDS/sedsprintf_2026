@@ -356,12 +356,14 @@ enum JsonElement {
 struct SchemaArgs {
     path: String,
     timesync: bool,
+    discovery: bool,
 }
 
 impl Parse for SchemaArgs {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
         let mut path: Option<String> = None;
         let mut timesync = false;
+        let mut discovery = false;
 
         while !input.is_empty() {
             let k: Ident = input.parse()?;
@@ -373,10 +375,13 @@ impl Parse for SchemaArgs {
             } else if k == "timesync" {
                 let ts_lit: LitBool = input.parse()?;
                 timesync = ts_lit.value();
+            } else if k == "discovery" {
+                let disc_lit: LitBool = input.parse()?;
+                discovery = disc_lit.value();
             } else {
                 return Err(syn::Error::new_spanned(
                     k,
-                    "expected `path` or `timesync`",
+                    "expected `path`, `timesync`, or `discovery`",
                 ));
             }
 
@@ -386,7 +391,11 @@ impl Parse for SchemaArgs {
         }
 
         let path = path.ok_or_else(|| syn::Error::new(Span::call_site(), "missing `path`"))?;
-        Ok(Self { path, timesync })
+        Ok(Self {
+            path,
+            timesync,
+            discovery,
+        })
     }
 }
 
@@ -413,6 +422,10 @@ fn is_timesync_endpoint(ep: &JsonEndpoint) -> bool {
     ep.rust == "TimeSync" || ep.name == "TIME_SYNC"
 }
 
+fn is_discovery_endpoint(ep: &JsonEndpoint) -> bool {
+    ep.rust == "Discovery" || ep.name == "DISCOVERY"
+}
+
 fn is_timesync_type(ty: &JsonType) -> bool {
     matches!(
         (ty.rust.as_str(), ty.name.as_str()),
@@ -422,6 +435,13 @@ fn is_timesync_type(ty: &JsonType) -> bool {
             | (_, "TIME_SYNC_ANNOUNCE")
             | (_, "TIME_SYNC_REQUEST")
             | (_, "TIME_SYNC_RESPONSE")
+    )
+}
+
+fn is_discovery_type(ty: &JsonType) -> bool {
+    matches!(
+        (ty.rust.as_str(), ty.name.as_str()),
+        ("DiscoveryAnnounce", _) | (_, "DISCOVERY_ANNOUNCE")
     )
 }
 
@@ -499,13 +519,18 @@ fn reliable_mode_token(mode: &str) -> Result<proc_macro2::TokenStream, String> {
 
 #[proc_macro]
 pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
-    let SchemaArgs { path, timesync } = parse_macro_input!(input as SchemaArgs);
+    let SchemaArgs {
+        path,
+        timesync,
+        discovery,
+    } = parse_macro_input!(input as SchemaArgs);
 
     let cfg = match load_schema(&path) {
         Ok(v) => v,
         Err(e) => return syn::Error::new(Span::call_site(), e).to_compile_error().into(),
     };
     let timesync_enabled = timesync;
+    let discovery_enabled = discovery;
 
     for ty in &cfg.types {
         if ty.rust == "TelemetryError" || ty.name == "TELEMETRY_ERROR" {
@@ -524,6 +549,14 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
                 .to_compile_error()
                 .into();
         }
+        if is_discovery_type(ty) {
+            return syn::Error::new(
+                Span::call_site(),
+                "telemetry_config.json: Discovery types are built-in and must not be defined in the schema",
+            )
+                .to_compile_error()
+                .into();
+        }
     }
     for ep in &cfg.endpoints {
         if ep.rust == "TelemetryError" || ep.name == "TELEMETRY_ERROR" {
@@ -538,6 +571,14 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
             return syn::Error::new(
                 Span::call_site(),
                 "telemetry_config.json: TimeSync endpoint is built-in and must not be defined in the schema",
+            )
+                .to_compile_error()
+                .into();
+        }
+        if is_discovery_endpoint(ep) {
+            return syn::Error::new(
+                Span::call_site(),
+                "telemetry_config.json: Discovery endpoint is built-in and must not be defined in the schema",
             )
                 .to_compile_error()
                 .into();
@@ -574,6 +615,12 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
         ep_names.push("TIME_SYNC".to_string());
         ep_bm.push("Always".to_string());
     }
+    if discovery_enabled {
+        ep_idents.push(syn::Ident::new("Discovery", Span::call_site()));
+        ep_docs.push("Discovery control endpoint for internal route advertisements.".to_string());
+        ep_names.push("DISCOVERY".to_string());
+        ep_bm.push("Always".to_string());
+    }
 
     ep_idents.push(syn::Ident::new("TelemetryError", Span::call_site()));
     ep_docs.push(
@@ -583,7 +630,9 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
     ep_names.push("TELEMETRY_ERROR".to_string());
     ep_bm.push("Always".to_string());
 
-    let max_ep_value = cfg.endpoints.len() as u32 + if timesync_enabled { 1 } else { 0 };
+    let max_ep_value = cfg.endpoints.len() as u32
+        + if timesync_enabled { 1 } else { 0 }
+        + if discovery_enabled { 1 } else { 0 };
 
     let ep_variants = ep_idents.iter().zip(ep_docs.iter()).map(|(id, doc)| {
         if doc.is_empty() {
@@ -643,8 +692,16 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
             "Time sync response (seq, t1_ms, t2_ms, t3_ms).".to_string(),
         ));
     }
+    if discovery_enabled {
+        ty_entries.push((
+            syn::Ident::new("DiscoveryAnnounce", Span::call_site()),
+            "Endpoint discovery advertisement (dynamic list of endpoint IDs).".to_string(),
+        ));
+    }
 
-    let max_ty_value = cfg.types.len() as u32 + if timesync_enabled { 3 } else { 0 };
+    let max_ty_value = cfg.types.len() as u32
+        + if timesync_enabled { 3 } else { 0 }
+        + if discovery_enabled { 1 } else { 0 };
 
     let ty_variants = ty_entries
         .iter()
@@ -752,6 +809,19 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
         quote! {}
     };
 
+    let discovery_ty_meta = if discovery_enabled {
+        quote! {
+            DataType::DiscoveryAnnounce => MessageMeta {
+                name: "DISCOVERY_ANNOUNCE",
+                element: MessageElement::Dynamic(MessageDataType::UInt32, MessageClass::Data),
+                endpoints: &[DataEndpoint::Discovery],
+                reliable: crate::ReliableMode::None,
+            },
+        }
+    } else {
+        quote! {}
+    };
+
     let expanded = quote! {
         // Auto-generated by `define_telemetry_schema!`.
         // Source: telemetry schema JSON.
@@ -789,6 +859,7 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
             match data_type {
                 #builtin_ty_meta
                 #timesync_ty_meta
+                #discovery_ty_meta
                 #(#ty_meta_arms)*
             }
         }

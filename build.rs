@@ -133,9 +133,13 @@ fn main() {
     // Load + validate JSON schema
     let mut cfg = load_schema_absolute(&schema_path);
     let timesync_enabled = is_timesync_enabled();
-    validate_schema(&cfg, timesync_enabled);
+    let discovery_enabled = is_discovery_enabled();
+    validate_schema(&cfg, timesync_enabled, discovery_enabled);
     if timesync_enabled {
         append_timesync_builtins(&mut cfg);
+    }
+    if discovery_enabled {
+        append_discovery_builtins(&mut cfg);
     }
 
     // Parse TelemetryErrorCode from lib.rs into SedsResult members
@@ -240,7 +244,7 @@ fn load_schema_absolute(path: &Path) -> TelemetryConfig {
     })
 }
 
-fn validate_schema(cfg: &TelemetryConfig, timesync_enabled: bool) {
+fn validate_schema(cfg: &TelemetryConfig, timesync_enabled: bool, discovery_enabled: bool) {
     for ty in &cfg.types {
         if ty.rust == "TelemetryError" || ty.name == "TELEMETRY_ERROR" {
             panic!(
@@ -250,6 +254,11 @@ fn validate_schema(cfg: &TelemetryConfig, timesync_enabled: bool) {
         if is_timesync_type(ty) {
             panic!(
                 "telemetry_config.json: TimeSync types are built-in and must not be defined in the schema"
+            );
+        }
+        if is_discovery_type(ty) {
+            panic!(
+                "telemetry_config.json: Discovery types are built-in and must not be defined in the schema"
             );
         }
     }
@@ -264,6 +273,11 @@ fn validate_schema(cfg: &TelemetryConfig, timesync_enabled: bool) {
                 "telemetry_config.json: TimeSync endpoint is built-in and must not be defined in the schema"
             );
         }
+        if is_discovery_endpoint(ep) {
+            panic!(
+                "telemetry_config.json: Discovery endpoint is built-in and must not be defined in the schema"
+            );
+        }
     }
 
     // Ensure schema names are ALL CAPS (or underscore/digit).
@@ -275,6 +289,9 @@ fn validate_schema(cfg: &TelemetryConfig, timesync_enabled: bool) {
     let mut endpoint_set: HashSet<&str> = cfg.endpoints.iter().map(|e| e.rust.as_str()).collect();
     if timesync_enabled {
         endpoint_set.insert("TimeSync");
+    }
+    if discovery_enabled {
+        endpoint_set.insert("Discovery");
     }
     endpoint_set.insert("TelemetryError");
 
@@ -319,8 +336,16 @@ fn is_timesync_enabled() -> bool {
     env::var_os("CARGO_FEATURE_TIMESYNC").is_some()
 }
 
+fn is_discovery_enabled() -> bool {
+    env::var_os("CARGO_FEATURE_DISCOVERY").is_some()
+}
+
 fn is_timesync_endpoint(ep: &JsonEndpoint) -> bool {
     ep.rust == "TimeSync" || ep.name == "TIME_SYNC"
+}
+
+fn is_discovery_endpoint(ep: &JsonEndpoint) -> bool {
+    ep.rust == "Discovery" || ep.name == "DISCOVERY"
 }
 
 fn is_timesync_type(ty: &JsonType) -> bool {
@@ -332,6 +357,13 @@ fn is_timesync_type(ty: &JsonType) -> bool {
             | (_, "TIME_SYNC_ANNOUNCE")
             | (_, "TIME_SYNC_REQUEST")
             | (_, "TIME_SYNC_RESPONSE")
+    )
+}
+
+fn is_discovery_type(ty: &JsonType) -> bool {
+    matches!(
+        (ty.rust.as_str(), ty.name.as_str()),
+        ("DiscoveryAnnounce", _) | (_, "DISCOVERY_ANNOUNCE")
     )
 }
 
@@ -377,6 +409,27 @@ fn append_timesync_builtins(cfg: &mut TelemetryConfig) {
         },
         class: "Data".to_string(),
         endpoints: vec!["TimeSync".to_string()],
+    });
+}
+
+fn append_discovery_builtins(cfg: &mut TelemetryConfig) {
+    cfg.endpoints.push(JsonEndpoint {
+        rust: "Discovery".to_string(),
+        name: "DISCOVERY".to_string(),
+        doc: Some("Discovery control endpoint for internal route advertisements.".to_string()),
+        _broadcast_mode: Some("Always".to_string()),
+    });
+
+    cfg.types.push(JsonType {
+        rust: "DiscoveryAnnounce".to_string(),
+        name: "DISCOVERY_ANNOUNCE".to_string(),
+        doc: Some("Endpoint discovery advertisement (dynamic list of endpoint IDs).".to_string()),
+        _reliable: Some(false),
+        element: JsonElement::Dynamic {
+            data_type: "UInt32".to_string(),
+        },
+        class: "Data".to_string(),
+        endpoints: vec!["Discovery".to_string()],
     });
 }
 

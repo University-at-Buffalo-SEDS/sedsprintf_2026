@@ -27,7 +27,8 @@ The router uses **named sides** (UART/CAN/RADIO/etc.) instead of LinkId.
   threading side IDs through their handlers.
 - Side-aware RX functions can still tag an ingress side when you must override it:
   `rx_serialized_from_side` / `rx_from_side`.
-- In `RouterMode::Relay`, packets are forwarded **once** to all other sides (the ingress side is excluded).
+- In `RouterMode::Relay`, packets are forwarded once. Without discovery, this means all other sides except ingress.
+  With discovery enabled and a known route, forwarding is limited to matching candidate sides.
 
 Side TX handlers are either:
 
@@ -46,6 +47,22 @@ Reliable delivery (`reliable: true` / `reliable_mode` in the schema) is only app
 
 If a side is already reliable (e.g., TCP), disable reliability on that side to avoid redundant checks.
 
+## Discovery
+
+With the `discovery` feature enabled, the router has a built-in internal control path:
+
+- `DISCOVERY` endpoint and `DISCOVERY_ANNOUNCE` type are built in.
+- Discovery packets are handled internally, not through user endpoint handlers.
+- The router keeps soft-state reachability data per side: reachable endpoints + last-seen timestamp.
+- Unknown or expired routes fall back to ordinary flood behavior.
+
+Discovery advertisements are adaptive:
+
+- Side add / learned-route change / route expiry resets the announce cadence to a fast interval.
+- Repeated stable announces back off toward a slower interval.
+- Apps drive this by calling `poll_discovery()` periodically, or can force an announce with `announce_discovery()`.
+- Apps can inspect the current learned topology with `export_topology()`.
+
 ## Receive pipeline (rx*)
 
 1) Bytes or packets are accepted immediately or queued.
@@ -55,7 +72,8 @@ If a side is already reliable (e.g., TCP), disable reliability on that side to a
     - If wire parsing fails, raw bytes are hashed as fallback.
 4) Recent‑ID cache drops duplicates.
 5) Local handlers are invoked with retries.
-6) In `RouterMode::Relay`, packets that require remote forwarding are forwarded once.
+6) Built-in discovery packets are learned internally when enabled.
+7) In `RouterMode::Relay`, packets that require remote forwarding are forwarded once.
 
 ## Forwarding rules
 
@@ -66,11 +84,20 @@ A packet is eligible for forwarding if any endpoint is remote‑eligible:
 
 This decision is made per packet, not per endpoint, to avoid multiple forwards for one packet.
 
+With discovery enabled, forwarding also consults the learned side map:
+
+- If candidate sides are known for one or more packet endpoints, the router forwards only to those sides.
+- If no side is known yet, the router falls back to flooding.
+- Reliable packets are sent to all known candidate sides for their endpoints.
+
 ## Transmit pipeline (log*, tx*)
 
 - `log*` builds a packet from typed data, validates it, and serializes it.
 - `tx*` accepts a packet or serialized bytes and forwards them.
 - Queue variants defer the work until `process_tx_queue()` or `process_all_queues()`.
+- `announce_discovery()` queues a discovery advertisement immediately.
+- `poll_discovery()` queues one only when the adaptive cadence says it is due.
+- `export_topology()` snapshots the current learned route map and announce cadence.
 
 ## Queue variants and processing
 
@@ -96,6 +123,13 @@ Local handlers are invoked via `with_retries`:
 - If a `Packet` or envelope is available, the router emits a `TelemetryError` packet to local handlers.
 
 This makes local handlers idempotent: a resent packet can be processed again after a failure.
+
+## Reliability boundary
+
+Reliable delivery in the router is per side. With discovery enabled, a reliable packet is transmitted reliably to every
+currently known candidate side for its endpoints. That improves reachability across the known topology, but it is not an
+end-to-end proof that every remote application endpoint consumed the packet. If you need that guarantee, add an
+application-level acknowledgement on top of the transport-level reliable mode.
 
 ## Router modes
 

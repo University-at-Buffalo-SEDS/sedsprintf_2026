@@ -2,6 +2,8 @@ use crate::config::{
     MAX_QUEUE_SIZE, MAX_RECENT_RX_IDS, QUEUE_GROW_STEP, RELIABLE_MAX_PENDING, RELIABLE_MAX_RETRIES,
     RELIABLE_RETRANSMIT_MS, STARTING_QUEUE_SIZE, STARTING_RECENT_RX_IDS,
 };
+#[cfg(feature = "discovery")]
+use crate::discovery::{self, DiscoveryCadenceState, TopologySideRoute, TopologySnapshot, DISCOVERY_ROUTE_TTL_MS};
 use crate::queue::{BoundedDeque, ByteCost};
 use crate::serialize;
 use crate::packet::{hash_bytes_u64, Packet};
@@ -104,6 +106,13 @@ struct ReliableRxState {
     last_ack: u32,
 }
 
+#[cfg(feature = "discovery")]
+#[derive(Debug, Clone, Default)]
+struct DiscoverySideState {
+    reachable: Vec<crate::DataEndpoint>,
+    last_seen_ms: u64,
+}
+
 /// Internal state, protected by RouterMutex so all public methods can take &self.
 struct RelayInner {
     sides: Vec<RelaySide>,
@@ -112,6 +121,10 @@ struct RelayInner {
     recent_rx: BoundedDeque<u64>,
     reliable_tx: BTreeMap<(RelaySideId, u32), ReliableTxState>,
     reliable_rx: BTreeMap<(RelaySideId, u32), ReliableRxState>,
+    #[cfg(feature = "discovery")]
+    discovery_routes: BTreeMap<RelaySideId, DiscoverySideState>,
+    #[cfg(feature = "discovery")]
+    discovery_cadence: DiscoveryCadenceState,
 }
 
 /// Relay that fans out packets from one side to all others.
@@ -121,6 +134,11 @@ struct RelayInner {
 pub struct Relay {
     state: RouterMutex<RelayInner>,
     clock: Box<dyn Clock + Send + Sync>,
+}
+
+enum RemoteSidePlan {
+    Flood,
+    Target(Vec<RelaySideId>),
 }
 
 impl Relay {
@@ -138,6 +156,10 @@ impl Relay {
                 ),
                 reliable_tx: BTreeMap::new(),
                 reliable_rx: BTreeMap::new(),
+                #[cfg(feature = "discovery")]
+                discovery_routes: BTreeMap::new(),
+                #[cfg(feature = "discovery")]
+                discovery_cadence: DiscoveryCadenceState::default(),
             }),
             clock,
         }
@@ -350,6 +372,207 @@ impl Relay {
         Ok(())
     }
 
+    fn item_route_info(
+        &self,
+        data: &RelayItem,
+    ) -> TelemetryResult<(Vec<crate::DataEndpoint>, crate::DataType)> {
+        match data {
+            RelayItem::Packet(pkt) => {
+                let mut eps = pkt.endpoints().to_vec();
+                eps.sort_unstable();
+                eps.dedup();
+                Ok((eps, pkt.data_type()))
+            }
+            RelayItem::Serialized(bytes) => {
+                let env = serialize::peek_envelope(bytes.as_ref())?;
+                let mut eps: Vec<crate::DataEndpoint> = env.endpoints.iter().copied().collect();
+                eps.sort_unstable();
+                eps.dedup();
+                Ok((eps, env.ty))
+            }
+        }
+    }
+
+    fn remote_side_plan(
+        &self,
+        data: &RelayItem,
+        exclude: RelaySideId,
+    ) -> TelemetryResult<RemoteSidePlan> {
+        #[cfg(feature = "discovery")]
+        {
+            let (eps, ty) = self.item_route_info(data)?;
+            if discovery::is_discovery_type(ty) {
+                return Ok(RemoteSidePlan::Flood);
+            }
+
+            let st = self.state.lock();
+            if st.discovery_routes.is_empty() {
+                return Ok(RemoteSidePlan::Flood);
+            }
+            let now_ms = self.clock.now_ms();
+            let mut had_known = false;
+            let mut targets = Vec::new();
+
+            for (&side, route) in st.discovery_routes.iter() {
+                if side == exclude
+                    || now_ms.saturating_sub(route.last_seen_ms) > DISCOVERY_ROUTE_TTL_MS
+                {
+                    continue;
+                }
+                if eps.iter().copied().any(|ep| route.reachable.contains(&ep)) {
+                    had_known = true;
+                    targets.push(side);
+                }
+            }
+
+            if had_known {
+                Ok(RemoteSidePlan::Target(targets))
+            } else {
+                Ok(RemoteSidePlan::Flood)
+            }
+        }
+        #[cfg(not(feature = "discovery"))]
+        {
+            let _ = data;
+            let _ = exclude;
+            Ok(RemoteSidePlan::Flood)
+        }
+    }
+
+    #[cfg(feature = "discovery")]
+    fn note_discovery_topology_change_locked(st: &mut RelayInner, now_ms: u64) {
+        st.discovery_cadence.on_topology_change(now_ms);
+    }
+
+    #[cfg(feature = "discovery")]
+    fn prune_discovery_routes_locked(st: &mut RelayInner, now_ms: u64) -> bool {
+        let before = st.discovery_routes.len();
+        st.discovery_routes.retain(|_, route| {
+            now_ms.saturating_sub(route.last_seen_ms) <= DISCOVERY_ROUTE_TTL_MS
+        });
+        before != st.discovery_routes.len()
+    }
+
+    #[cfg(feature = "discovery")]
+    fn advertised_discovery_endpoints_locked(&self, st: &RelayInner, now_ms: u64) -> Vec<crate::DataEndpoint> {
+        let mut eps = Vec::new();
+        for route in st.discovery_routes.values() {
+            if now_ms.saturating_sub(route.last_seen_ms) > DISCOVERY_ROUTE_TTL_MS {
+                continue;
+            }
+            eps.extend(route.reachable.iter().copied());
+        }
+        eps.retain(|ep| !discovery::is_discovery_endpoint(*ep));
+        eps.sort_unstable();
+        eps.dedup();
+        eps
+    }
+
+    #[cfg(feature = "discovery")]
+    fn queue_discovery_announce(&self) -> TelemetryResult<()> {
+        let now_ms = self.clock.now_ms();
+        let pkt = {
+            let mut st = self.state.lock();
+            if Self::prune_discovery_routes_locked(&mut st, now_ms) {
+                Self::note_discovery_topology_change_locked(&mut st, now_ms);
+            }
+            if st.sides.is_empty() {
+                return Ok(());
+            }
+            let endpoints = self.advertised_discovery_endpoints_locked(&st, now_ms);
+            if endpoints.is_empty() {
+                return Ok(());
+            }
+            st.discovery_cadence.on_announce_sent(now_ms);
+            discovery::build_discovery_announce("RELAY", now_ms, endpoints.as_slice())?
+        };
+        let mut st = self.state.lock();
+        let num_sides = st.sides.len();
+        for dst in 0..num_sides {
+            st.tx_queue.push_back(RelayTxItem {
+                dst,
+                data: RelayItem::Packet(Arc::new(pkt.clone())),
+            })?;
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "discovery")]
+    fn poll_discovery_announce(&self) -> TelemetryResult<bool> {
+        let now_ms = self.clock.now_ms();
+        let due = {
+            let mut st = self.state.lock();
+            let removed = Self::prune_discovery_routes_locked(&mut st, now_ms);
+            if removed {
+                Self::note_discovery_topology_change_locked(&mut st, now_ms);
+            }
+            if st.sides.is_empty() || self.advertised_discovery_endpoints_locked(&st, now_ms).is_empty() {
+                return Ok(false);
+            }
+            st.discovery_cadence.due(now_ms)
+        };
+        if !due {
+            return Ok(false);
+        }
+        self.queue_discovery_announce()?;
+        Ok(true)
+    }
+
+    #[cfg(feature = "discovery")]
+    fn learn_discovery_item(&self, src: RelaySideId, data: &RelayItem) -> TelemetryResult<()> {
+        let pkt = match data {
+            RelayItem::Packet(pkt) => {
+                if !discovery::is_discovery_type(pkt.data_type()) {
+                    return Ok(());
+                }
+                pkt.as_ref().clone()
+            }
+            RelayItem::Serialized(bytes) => {
+                let env = serialize::peek_envelope(bytes.as_ref())?;
+                if !discovery::is_discovery_type(env.ty) {
+                    return Ok(());
+                }
+                serialize::deserialize_packet(bytes.as_ref())?
+            }
+        };
+
+        let now_ms = self.clock.now_ms();
+        let mut st = self.state.lock();
+        let reachable = discovery::decode_discovery_announce(&pkt)?;
+        let changed = st
+            .discovery_routes
+            .get(&src)
+            .map(|cur| cur.reachable != reachable)
+            .unwrap_or(true);
+        st.discovery_routes.insert(
+            src,
+            DiscoverySideState {
+                reachable,
+                last_seen_ms: now_ms,
+            },
+        );
+        if changed {
+            Self::note_discovery_topology_change_locked(&mut st, now_ms);
+        }
+        let _ = Self::prune_discovery_routes_locked(&mut st, now_ms);
+        Ok(())
+    }
+
+    #[cfg(not(feature = "discovery"))]
+    fn learn_discovery_item(&self, _src: RelaySideId, _data: &RelayItem) -> TelemetryResult<()> {
+        Ok(())
+    }
+
+    #[cfg(not(feature = "discovery"))]
+    fn queue_discovery_announce(&self) -> TelemetryResult<()> {
+        Ok(())
+    }
+
+    #[cfg(not(feature = "discovery"))]
+    fn poll_discovery_announce(&self) -> TelemetryResult<bool> {
+        Ok(false)
+    }
+
     fn process_reliable_timeouts(&self) -> TelemetryResult<()> {
         {
             let st = self.state.lock();
@@ -495,6 +718,8 @@ impl Relay {
             tx_handler: RelayTxHandlerFn::Serialized(Arc::new(tx)),
             opts,
         });
+        #[cfg(feature = "discovery")]
+        Self::note_discovery_topology_change_locked(&mut st, self.clock.now_ms());
         id
     }
 
@@ -523,7 +748,49 @@ impl Relay {
             tx_handler: RelayTxHandlerFn::Packet(Arc::new(tx)),
             opts,
         });
+        #[cfg(feature = "discovery")]
+        Self::note_discovery_topology_change_locked(&mut st, self.clock.now_ms());
         id
+    }
+
+    #[cfg(feature = "discovery")]
+    pub fn announce_discovery(&self) -> TelemetryResult<()> {
+        self.queue_discovery_announce()
+    }
+
+    #[cfg(feature = "discovery")]
+    pub fn poll_discovery(&self) -> TelemetryResult<bool> {
+        self.poll_discovery_announce()
+    }
+
+    #[cfg(feature = "discovery")]
+    pub fn export_topology(&self) -> TopologySnapshot {
+        let now_ms = self.clock.now_ms();
+        let mut st = self.state.lock();
+        if Self::prune_discovery_routes_locked(&mut st, now_ms) {
+            Self::note_discovery_topology_change_locked(&mut st, now_ms);
+        }
+        let routes = st
+            .discovery_routes
+            .iter()
+            .filter_map(|(&side_id, route)| {
+                let side = st.sides.get(side_id)?;
+                Some(TopologySideRoute {
+                    side_id,
+                    side_name: side.name,
+                    reachable_endpoints: route.reachable.clone(),
+                    last_seen_ms: route.last_seen_ms,
+                    age_ms: now_ms.saturating_sub(route.last_seen_ms),
+                })
+            })
+            .collect();
+        let advertised_endpoints = self.advertised_discovery_endpoints_locked(&st, now_ms);
+        TopologySnapshot {
+            advertised_endpoints,
+            routes,
+            current_announce_interval_ms: st.discovery_cadence.current_interval_ms,
+            next_announce_ms: st.discovery_cadence.next_announce_ms,
+        }
     }
 
     /// Enqueue serialized bytes that originated from `src` into the relay RX queue.
@@ -708,18 +975,31 @@ impl Relay {
         }
 
         let RelayRxItem { src, data } = item;
+        self.learn_discovery_item(src, &data)?;
 
+        let plan = self.remote_side_plan(&data, src)?;
         let mut st = self.state.lock();
-        let num_sides = st.sides.len();
-
-        for dst in 0..num_sides {
-            if dst == src {
-                continue;
+        match plan {
+            RemoteSidePlan::Flood => {
+                let num_sides = st.sides.len();
+                for dst in 0..num_sides {
+                    if dst == src {
+                        continue;
+                    }
+                    st.tx_queue.push_back(RelayTxItem {
+                        dst,
+                        data: data.clone(),
+                    })?;
+                }
             }
-            st.tx_queue.push_back(RelayTxItem {
-                dst,
-                data: data.clone(),
-            })?;
+            RemoteSidePlan::Target(sides) => {
+                for dst in sides {
+                    st.tx_queue.push_back(RelayTxItem {
+                        dst,
+                        data: data.clone(),
+                    })?;
+                }
+            }
         }
         Ok(())
     }

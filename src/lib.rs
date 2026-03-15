@@ -168,6 +168,8 @@ pub mod router;
 pub mod serialize;
 mod small_payload;
 pub mod packet;
+#[cfg(feature = "discovery")]
+pub mod discovery;
 #[cfg(feature = "timesync")]
 pub mod timesync;
 // ============================================================================

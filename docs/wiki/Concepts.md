@@ -66,6 +66,22 @@ If you only want local logging, the router can run in sink mode (no forwarding).
 The relay is a simple fan‑out switch. It does not know about the schema. It just forwards packets between sides while
 avoiding duplicates. It is useful when you want to bridge links without decoding payloads.
 
+With the optional `discovery` feature, routers and relays can also exchange built-in discovery packets and learn which
+endpoints are reachable through which sides. When they know a route, they can forward only toward matching sides instead
+of flooding every side. When they do not know a route yet, they fall back to the normal flood behavior.
+
+## Discovery
+
+Discovery is an optional built-in control plane, similar in spirit to time sync:
+
+- Routers and relays exchange internal `DISCOVERY_ANNOUNCE` packets.
+- They learn reachable endpoints per side and keep that information as soft state with expiry.
+- Discovery traffic is adaptive: it is sent more often when topology changes and less often when the network is stable.
+- Apps can export the current discovered topology for inspection.
+
+Discovery is an optimization, not a correctness requirement. Unknown or expired routes fall back to normal forwarding so
+packets are still delivered while the network converges.
+
 ## Time sync
 
 Time sync is an optional feature that adds built‑in packets and helpers for clock alignment between devices. A time
@@ -80,19 +96,9 @@ ACKs, retransmits, and optional ordering to deliver messages more like TCP.
 
 This is useful on lossy links, but you can disable it for transports that are already reliable.
 
-## Time sync
-
-Time sync is an optional feature that adds built-in packets and helpers for clock alignment between devices. A time
-source announces itself, and consumers exchange request/response timestamps to estimate offset and delay.
-
-If you need the details, see [Time-Sync](Time-Sync).
-
-## Reliability
-
-Reliability is opt-in and only applies to types marked reliable in the schema. When enabled on a link, the router uses
-ACKs, retransmits, and optional ordering to deliver messages more like TCP.
-
-This is useful on lossy links, but you can disable it for transports that are already reliable.
+With discovery enabled, reliable packets are sent to all currently known candidate sides for the target endpoints. This
+improves delivery across known paths, but it is still link-level reliability. It does not prove that every remote
+application endpoint processed the packet unless you add an application-level acknowledgement.
 
 ## Dedupe
 

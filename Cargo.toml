@@ -15,12 +15,13 @@ readme = "README.md"
 crate-type = ["rlib", "staticlib"]
 
 [features]
-default = ["std", "compression", "timesync"]
+default = ["std", "compression", "timesync", "discovery"]
 std = []
-embedded = ["compression", "timesync"]
-python = ["std", "pyo3/extension-module", "compression", "timesync"]
+embedded = ["compression", "timesync", "discovery"]
+python = ["std", "pyo3/extension-module", "compression", "timesync", "discovery"]
 compression = ["zstd-safe"]
 timesync = []
+discovery = []
 
 [package.metadata.maturin]
 bindings = "pyo3"

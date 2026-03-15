@@ -3943,6 +3943,183 @@ mod router_tests {
         assert_eq!(*got, *bytes);
     }
 
+    #[cfg(feature = "discovery")]
+    mod discovery_tests {
+        use crate::discovery::{build_discovery_announce, DISCOVERY_FAST_INTERVAL_MS};
+        use crate::relay::Relay;
+        use crate::router::{Clock, EndpointHandler, RouterConfig};
+        use crate::tests::timeout_tests::StepClock;
+        use crate::{DataEndpoint, DataType, TelemetryResult};
+        use crate::{packet::Packet, router::{Router, RouterMode}};
+        use std::sync::{Arc, Mutex};
+
+        fn zero_clock() -> Box<dyn Clock + Send + Sync> {
+            StepClock::new_box(0, 0)
+        }
+
+        #[test]
+        fn router_uses_discovery_routes_for_outbound_packets() {
+            let seen_a: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_b: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_a_c = seen_a.clone();
+            let seen_b_c = seen_b.clone();
+
+            let router = Router::new(RouterMode::Sink, RouterConfig::default(), zero_clock());
+            let side_a = router.add_side_packet("A", move |pkt: &Packet| -> TelemetryResult<()> {
+                seen_a_c.lock().unwrap().push(pkt.clone());
+                Ok(())
+            });
+            router.add_side_packet("B", move |pkt: &Packet| -> TelemetryResult<()> {
+                seen_b_c.lock().unwrap().push(pkt.clone());
+                Ok(())
+            });
+
+            let discovery_pkt =
+                build_discovery_announce("REMOTE_A", 0, &[DataEndpoint::Radio]).unwrap();
+            router.rx_from_side(&discovery_pkt, side_a).unwrap();
+
+            let msg = Packet::from_f32_slice(
+                DataType::GpsData,
+                &[1.0, 2.0, 3.0],
+                &[DataEndpoint::Radio],
+                1,
+            )
+            .unwrap();
+            router.tx(msg).unwrap();
+
+            let got_a = seen_a.lock().unwrap().clone();
+            let got_b = seen_b.lock().unwrap().clone();
+            assert_eq!(got_a.len(), 1);
+            assert!(got_b.is_empty());
+            assert_eq!(got_a[0].data_type(), DataType::GpsData);
+        }
+
+        #[test]
+        fn relay_uses_discovery_routes_for_selective_fanout() {
+            let seen_a: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_b: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_a_c = seen_a.clone();
+            let seen_b_c = seen_b.clone();
+
+            let relay = Relay::new(zero_clock());
+            let side_a = relay.add_side_packet("A", move |pkt: &Packet| -> TelemetryResult<()> {
+                seen_a_c.lock().unwrap().push(pkt.clone());
+                Ok(())
+            });
+            relay.add_side_packet("B", move |pkt: &Packet| -> TelemetryResult<()> {
+                seen_b_c.lock().unwrap().push(pkt.clone());
+                Ok(())
+            });
+            let side_c = relay.add_side_packet("C", |_pkt: &Packet| -> TelemetryResult<()> { Ok(()) });
+
+            let discovery_pkt =
+                build_discovery_announce("NODE_A", 0, &[DataEndpoint::Radio]).unwrap();
+            relay.rx_from_side(side_a, discovery_pkt).unwrap();
+            relay.process_all_queues().unwrap();
+            seen_a.lock().unwrap().clear();
+            seen_b.lock().unwrap().clear();
+
+            let msg = Packet::from_f32_slice(
+                DataType::GpsData,
+                &[9.0, 8.0, 7.0],
+                &[DataEndpoint::Radio],
+                2,
+            )
+            .unwrap();
+            relay.rx_from_side(side_c, msg).unwrap();
+            relay.process_all_queues().unwrap();
+
+            let got_a = seen_a.lock().unwrap().clone();
+            let got_b = seen_b.lock().unwrap().clone();
+            assert_eq!(got_a.len(), 1);
+            assert!(got_b.is_empty());
+            assert_eq!(got_a[0].data_type(), DataType::GpsData);
+        }
+
+        #[test]
+        fn router_exports_topology_and_adaptive_discovery_schedule() {
+            let router = Router::new(
+                RouterMode::Sink,
+                RouterConfig::new(vec![EndpointHandler::new_packet_handler(
+                    DataEndpoint::Radio,
+                    |_pkt| Ok(()),
+                )]),
+                StepClock::new_box(0, 0),
+            );
+            let side_a = router.add_side_packet("A", |_pkt: &Packet| -> TelemetryResult<()> { Ok(()) });
+
+            let discovery_pkt =
+                build_discovery_announce("REMOTE_A", 0, &[DataEndpoint::SdCard]).unwrap();
+            router.rx_from_side(&discovery_pkt, side_a).unwrap();
+
+            let snap_before = router.export_topology();
+            assert_eq!(snap_before.advertised_endpoints, vec![DataEndpoint::SdCard, DataEndpoint::Radio]);
+            assert_eq!(snap_before.routes.len(), 1);
+            assert_eq!(snap_before.routes[0].side_name, "A");
+            assert_eq!(snap_before.current_announce_interval_ms, DISCOVERY_FAST_INTERVAL_MS);
+
+            assert!(router.poll_discovery().unwrap());
+
+            let snap_after = router.export_topology();
+            assert_eq!(snap_after.next_announce_ms, DISCOVERY_FAST_INTERVAL_MS);
+            assert!(snap_after.current_announce_interval_ms >= DISCOVERY_FAST_INTERVAL_MS);
+        }
+
+        #[test]
+        fn reliable_packets_are_sent_to_all_discovered_candidate_sides() {
+            let seen_a: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_b: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_a_c = seen_a.clone();
+            let seen_b_c = seen_b.clone();
+
+            let router = Router::new(RouterMode::Sink, RouterConfig::default(), zero_clock());
+            let side_a = router.add_side_packet("A", move |pkt: &Packet| -> TelemetryResult<()> {
+                seen_a_c.lock().unwrap().push(pkt.clone());
+                Ok(())
+            });
+            let side_b = router.add_side_packet("B", move |pkt: &Packet| -> TelemetryResult<()> {
+                seen_b_c.lock().unwrap().push(pkt.clone());
+                Ok(())
+            });
+
+            let discovery_pkt =
+                build_discovery_announce("REMOTE_A", 0, &[DataEndpoint::Radio]).unwrap();
+            router.rx_from_side(&discovery_pkt, side_a).unwrap();
+            let discovery_pkt =
+                build_discovery_announce("REMOTE_B", 0, &[DataEndpoint::Radio]).unwrap();
+            router.rx_from_side(&discovery_pkt, side_b).unwrap();
+
+            let msg = Packet::from_f32_slice(
+                DataType::GpsData,
+                &[5.0, 6.0, 7.0],
+                &[DataEndpoint::Radio],
+                3,
+            )
+            .unwrap();
+            router.tx(msg).unwrap();
+
+            assert_eq!(seen_a.lock().unwrap().len(), 1);
+            assert_eq!(seen_b.lock().unwrap().len(), 1);
+        }
+
+        #[test]
+        fn relay_exports_aggregated_topology() {
+            let relay = Relay::new(zero_clock());
+            let side_a = relay.add_side_packet("A", |_pkt: &Packet| -> TelemetryResult<()> { Ok(()) });
+            relay.add_side_packet("B", |_pkt: &Packet| -> TelemetryResult<()> { Ok(()) });
+
+            let discovery_pkt =
+                build_discovery_announce("NODE_A", 0, &[DataEndpoint::Radio, DataEndpoint::SdCard]).unwrap();
+            relay.rx_from_side(side_a, discovery_pkt).unwrap();
+            relay.process_all_queues().unwrap();
+
+            let snap = relay.export_topology();
+            assert_eq!(snap.advertised_endpoints, vec![DataEndpoint::SdCard, DataEndpoint::Radio]);
+            assert_eq!(snap.routes.len(), 1);
+            assert_eq!(snap.routes[0].side_name, "A");
+        }
+    }
+
     #[cfg(feature = "timesync")]
     mod timesync_tests {
         use crate::timesync::{

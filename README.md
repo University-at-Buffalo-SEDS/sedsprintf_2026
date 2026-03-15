@@ -54,6 +54,11 @@ codebases.
 
 Sedsprintf_rs also supports python bindings via pyo3. to use you need maturin installed to build the python package.
 
+With the optional `discovery` feature, routers and relays can exchange built-in discovery packets, learn which
+endpoints are reachable through which sides, adapt the announce rate as the topology changes, and export a live topology
+snapshot for inspection. When a route is known, forwarding becomes more selective; when it is not known, the system
+falls back to ordinary flooding.
+
 The size of the header in a serialized packet is around 20 bytes (the size will change based on the total number of
 endpoints in your system and the length of the sender string), plus a 4-byte CRC32 trailer. As a rough example, a packet
 containing three floats is on the order of mid-30s bytes total. This small size makes it ideal for use in low bandwidth
@@ -100,6 +105,7 @@ Options:
   embedded                Build for the embedded target (enables embedded feature).
   python                  Build with Python bindings (enables python feature).
   timesync                Build with time sync helpers (enables timesync feature).
+  discovery               Build with adaptive topology discovery helpers (enables discovery feature).
   maturin-build           Run maturin build with the .pyi .gitignore hack.
   maturin-develop         Run maturin develop with the .pyi .gitignore hack.
   maturin-install         Build wheel and install it with uv pip install.
