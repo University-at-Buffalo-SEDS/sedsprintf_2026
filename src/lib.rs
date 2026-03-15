@@ -24,6 +24,15 @@
 //! - [`router`]: the core Router abstraction.
 //! - [`packet`]: `Packet` and friends.
 //! - [`serialize`]: wire serialization helpers.
+//!
+//! Version 3.3.0 highlights:
+//! - Optional built-in discovery control traffic for routers and relays, with learned reachability,
+//!   adaptive discovery cadence, and topology export.
+//! - Selective forwarding informed by discovered routes, with flood fallback when topology is incomplete.
+//! - Link-local/software-bus endpoint support for IPC, including per-side discovery filtering and routing isolation.
+//! - Board-local IPC schema overlays via `SEDSPRINTF_RS_IPC_SCHEMA_PATH` so shared schemas can remain constant across
+//!   boards while local IPC endpoints/types vary.
+//! - Split-file telemetry schema editing in the GUI editor for shared base schemas and per-board IPC overlays.
 
 extern crate alloc;
 extern crate core;

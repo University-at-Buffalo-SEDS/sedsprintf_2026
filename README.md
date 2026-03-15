@@ -66,6 +66,22 @@ environments.
 
 ---
 
+## Version 3.3.0 highlights
+
+- Added built-in discovery/routing control traffic for routers and relays, including learned endpoint reachability,
+  selective forwarding, adaptive discovery cadence, and topology export.
+- Added link-local/software-bus endpoint support for IPC, including routing restrictions so link-local traffic stays on
+  link-local sides and is hidden from normal network discovery advertisements.
+- Added board-local IPC schema overlays via `SEDSPRINTF_RS_IPC_SCHEMA_PATH`, so shared telemetry schemas can stay fixed
+  while per-board IPC endpoints/types are merged at build time.
+- Updated the telemetry config editor to manage split base/IPC schema files independently, including external IPC
+  overlay paths for CMake or `.cargo/config.toml` driven builds.
+- Added regression coverage for discovery routing, link-local routing boundaries, IPC overlay schema merging, and the
+  split-file editor path flow.
+- Full changelog: [v3.2.3...v3.3.0](https://github.com/Rylan-Meilutis/sedsprintf_rs/compare/v3.2.3...v3.3.0)
+
+---
+
 ## Version 3.2.3 highlights
 
 - Compression backend is now `zstd-safe` (single backend), with bounded output buffers in the compression path and

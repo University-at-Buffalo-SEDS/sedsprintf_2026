@@ -4230,7 +4230,7 @@ mod router_tests {
                 8,
                 Arc::<[u8]>::from(b"stay-local".as_slice()),
             )
-            .unwrap();
+                .unwrap();
             router.tx(pkt).unwrap();
 
             assert!(seen_net.lock().unwrap().is_empty());
@@ -4279,7 +4279,7 @@ mod router_tests {
                 9,
                 Arc::<[u8]>::from(b"relay-local".as_slice()),
             )
-            .unwrap();
+                .unwrap();
             relay.rx_from_side(side_src, pkt).unwrap();
             relay.process_all_queues().unwrap();
 
