@@ -1,5 +1,34 @@
 # Changelogs
 
+## Version 3.3.0 highlights
+
+- Discovery/routing control plane:
+    - Added built-in discovery advertisements for routers and relays under the `discovery` feature.
+    - Routers and relays now learn endpoint reachability, export topology snapshots, and use adaptive announce
+      intervals that speed up after topology changes and back off when stable.
+    - Selective forwarding now uses discovered reachability first and falls back to ordinary flooding when routes are
+      unknown.
+- Reliability and forwarding integration:
+    - Reliable packets are now fanned out to all discovered candidate sides instead of relying only on blind flooding.
+    - Added additional routing tests to ensure discovery does not cause link-local traffic to leak onto normal network
+      sides.
+- Link-local/software-bus IPC support:
+    - Added link-local-only endpoint support for software-bus / IPC traffic.
+    - Discovery advertisements are filtered per-side so IPC endpoints are not exposed on non-link-local links.
+    - Routers and relays now enforce link-local routing boundaries even when discovery data is overly broad.
+- Split schema support for per-board IPC:
+    - Added `SEDSPRINTF_RS_IPC_SCHEMA_PATH` for board-local IPC overlays that merge with the shared base schema.
+    - IPC overlay endpoints are treated as link-local automatically; base-schema endpoints are treated as non-link-local
+      automatically.
+    - Added proc-macro/build-script tests for overlay merging, collision rejection, and link-local normalization.
+- Telemetry config editor updates:
+    - The GUI editor can now open, edit, and save the base schema and IPC overlay as separate files.
+    - IPC overlay paths can live outside the repository and be supplied by environment-driven build systems such as
+      CMake or `.cargo/config.toml`.
+    - Link-local scope is now derived from which file is being edited rather than being a user-editable checkbox.
+- Full
+  changelog: [v3.2.3...v3.3.0](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/-/compare/v3.2.3...v3.3.0)
+
 ## Version 3.2.3 highlights
 
 - Compression backend consolidation:
