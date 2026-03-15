@@ -236,11 +236,11 @@ def _lb_add_unique(lb: tk.Listbox, items: List[str]) -> None:
 
 class TelemetryConfigEditor(tk.Tk):
     def __init__(
-        self,
-        crate_root: Path,
-        config_rs: Path,
-        base_json_path: Optional[Path],
-        ipc_json_path: Optional[Path],
+            self,
+            crate_root: Path,
+            config_rs: Path,
+            base_json_path: Optional[Path],
+            ipc_json_path: Optional[Path],
     ):
         super().__init__()
         self.title("Telemetry Config Editor (sedsprintf_rs)")
