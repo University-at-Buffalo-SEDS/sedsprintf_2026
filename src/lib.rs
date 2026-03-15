@@ -22,7 +22,7 @@
 //! Most user-facing APIs live in:
 //! - [`config`]: schema + data type/endpoint configuration.
 //! - [`router`]: the core Router abstraction.
-//! - [`telemetry_packet`]: `TelemetryPacket` and friends.
+//! - [`packet`]: `Packet` and friends.
 //! - [`serialize`]: wire serialization helpers.
 
 extern crate alloc;
@@ -167,7 +167,9 @@ pub mod relay;
 pub mod router;
 pub mod serialize;
 mod small_payload;
-pub mod telemetry_packet;
+pub mod packet;
+#[cfg(feature = "discovery")]
+pub mod discovery;
 #[cfg(feature = "timesync")]
 pub mod timesync;
 // ============================================================================
@@ -322,11 +324,13 @@ pub struct EndpointMeta {
     name: &'static str,
     /// Broadcast mode for the endpoint
     broadcast_mode: EndpointsBroadcastMode,
+    /// Restrict remote forwarding to link-local/software-bus sides only.
+    link_local_only: bool,
 }
 
 impl EndpointMeta {
     /// Return a stable string representation used in logs and in
-    /// `TelemetryPacket::to_string()` output.
+    /// `Packet::to_string()` output.
     ///
     /// This should remain stable over time for compatibility with tests and
     /// external tooling.
@@ -340,11 +344,17 @@ impl EndpointMeta {
     pub fn get_broadcast_mode(&self) -> EndpointsBroadcastMode {
         self.broadcast_mode
     }
+
+    /// Return whether this endpoint is restricted to link-local/software-bus sides.
+    #[inline]
+    pub fn is_link_local_only(&self) -> bool {
+        self.link_local_only
+    }
 }
 
 impl DataEndpoint {
     /// Return a stable string representation used in logs and in
-    /// `TelemetryPacket::to_string()` output.
+    /// `Packet::to_string()` output.
     ///
     /// This should remain stable over time for compatibility with tests and
     /// external tooling.
@@ -357,6 +367,12 @@ impl DataEndpoint {
     /// - `EndpointsBroadcastMode` enum value.
     pub fn get_broadcast_mode(&self) -> EndpointsBroadcastMode {
         get_endpoint_meta(*self).broadcast_mode
+    }
+
+    /// Return whether this endpoint is restricted to link-local/software-bus sides.
+    #[inline]
+    pub fn is_link_local_only(&self) -> bool {
+        get_endpoint_meta(*self).link_local_only
     }
 }
 

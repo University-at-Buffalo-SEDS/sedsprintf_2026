@@ -200,7 +200,7 @@ macro_rules! do_vec_log_typed {
     }};
 }
 
-/// Helper macros for implementing `TelemetryPacket` constructors and
+/// Helper macros for implementing `Packet` constructors and
 /// accessors for primitive slices.
 #[macro_export]
 macro_rules! impl_from_prim_slices {
@@ -218,7 +218,7 @@ macro_rules! impl_from_prim_slices {
         )+
     };
 }
-/// Helper macros for implementing `TelemetryPacket` data accessors for
+/// Helper macros for implementing `Packet` data accessors for
 /// primitive slices.
 #[macro_export]
 macro_rules! impl_data_as_prim {

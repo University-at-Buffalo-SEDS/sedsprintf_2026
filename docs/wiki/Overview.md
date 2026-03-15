@@ -16,6 +16,7 @@ Key outcomes:
 - A central Router API that handles validation, dedupe, and dispatch.
 - Optional TCP‑like reliability (ACKs, retransmits, ordered/unordered delivery) for types marked reliable in the schema.
 - CRC32 integrity checks on all serialized frames (corrupt frames are dropped; reliable modes request retransmit).
+- Optional adaptive discovery that learns which endpoints are reachable on which sides and exports a live topology view.
 
 As of v3.0.0, the router manages side tracking internally. Most users call the plain RX APIs without threading a side ID
 through their handlers; side-aware RX functions are only needed when you explicitly override ingress.
@@ -28,6 +29,8 @@ through their handlers; side-aware RX functions are only needed when you explici
 - **Router**: The switchboard. It receives packets, calls local handlers, and optionally forwards packets to other
   nodes.
 - **Relay**: A simpler fan‑out component that forwards packets between sides without knowing the schema.
+- **Discovery**: An optional internal control plane that advertises reachable endpoints, adapts its announce rate to
+  topology changes, and helps routers/relays forward more selectively.
 
 ## A simple mental model
 
@@ -38,6 +41,9 @@ Think of the router as a message bus with two kinds of consumers:
 
 A packet can go to both: local handlers run, and then the router may forward the packet to remote links depending on
 configuration and endpoint rules.
+
+If discovery is enabled, forwarding can become side-aware: known routes are used first, and unknown routes fall back to
+the usual flood behavior.
 
 ## What happens when you send telemetry
 
@@ -54,12 +60,15 @@ configuration and endpoint rules.
 4) It calls any local handlers for the targeted endpoints.
 5) If configured to relay, it forwards the packet to other links.
 
+With discovery enabled, step 5 becomes "forward to known matching sides when possible, otherwise flood."
+
 ## Typical deployment shapes
 
 - **Single device**: router with only local handlers (no forwarding).
 - **Device + ground station**: device forwards to a link; ground station receives and dispatches.
 - **Multi‑hop**: routers in relay mode forward packets across several transport links.
 - **Star topology**: relay fans out from one ingress to many egress links.
+- **Adaptive mesh-like forwarding**: discovery lets routers and relays learn which sides lead toward which endpoints.
 
 ## A tiny example flow
 
@@ -76,5 +85,6 @@ log(GPS_DATA)  ->  serialize -> bytes -> send -> bytes -> rx_serialized()
 
 - If you want the concepts explained without code: [Concepts](Concepts)
 - If you want integration steps: [Build-and-Configure](Build-and-Configure)
+- If you want routing internals: [Technical-Router-Details](Technical-Router-Details)
 - If you need time sync details: [Time-Sync](Time-Sync)
 - If you want implementation details: [Technical-Architecture](Technical-Architecture)

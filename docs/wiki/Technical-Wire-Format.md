@@ -54,7 +54,7 @@ reliable header between the sender bytes and payload:
 - `SEQ`: sequence number used for reliable delivery.
 - `ACK`: acknowledgement of received reliable sequence(s).
 
-`ACK_ONLY` frames are used internally by the router’s reliable layer and are not valid `TelemetryPacket`s.
+`ACK_ONLY` frames are used internally by the router’s reliable layer and are not valid `Packet`s.
 
 For ordered mode, `ACK` is cumulative (last in-order sequence). For unordered mode, `ACK` acknowledges the specific
 received `SEQ`.
@@ -93,7 +93,7 @@ route packets quickly without decoding full payloads.
 
 ## Packet ID from wire
 
-`packet_id_from_wire` computes the same hash as `TelemetryPacket::packet_id`, using:
+`packet_id_from_wire` computes the same hash as `Packet::packet_id`, using:
 
 - Decompressed sender bytes
 - Message name from `DataType`

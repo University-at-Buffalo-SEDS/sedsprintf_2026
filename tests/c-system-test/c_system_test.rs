@@ -10,8 +10,16 @@ mod c_system_test {
             .output()
             .unwrap_or_else(|e| panic!("Failed to run {name}: {e}"));
 
-        eprintln!("{} stdout:\n{}", name, String::from_utf8_lossy(&output.stdout));
-        eprintln!("{} stderr:\n{}", name, String::from_utf8_lossy(&output.stderr));
+        eprintln!(
+            "{} stdout:\n{}",
+            name,
+            String::from_utf8_lossy(&output.stdout)
+        );
+        eprintln!(
+            "{} stderr:\n{}",
+            name,
+            String::from_utf8_lossy(&output.stderr)
+        );
 
         assert!(
             output.status.success(),
@@ -59,20 +67,19 @@ mod c_system_test {
         if cfg!(target_os = "macos") {
             cmake_config.env("MACOSX_DEPLOYMENT_TARGET", macos_deployment_target);
         }
-        let status = cmake_config
-            .status()
-            .expect("Failed to config cmake build");
+        let status = cmake_config.status().expect("Failed to config cmake build");
         assert!(status.success(), "CMake config failed");
 
         // Build the C project
         let mut cmake_build = Command::new("cmake");
-        cmake_build.arg("--build").arg(&build_dir).current_dir(&root);
+        cmake_build
+            .arg("--build")
+            .arg(&build_dir)
+            .current_dir(&root);
         if cfg!(target_os = "macos") {
             cmake_build.env("MACOSX_DEPLOYMENT_TARGET", macos_deployment_target);
         }
-        let status = cmake_build
-            .status()
-            .expect("Failed to invoke cmake build");
+        let status = cmake_build.status().expect("Failed to invoke cmake build");
         assert!(status.success(), "CMake build failed");
 
         run_exe(&root, "c_system_test");

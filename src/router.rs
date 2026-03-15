@@ -11,18 +11,22 @@
 use crate::config::{
     MAX_QUEUE_SIZE, MAX_RECENT_RX_IDS, QUEUE_GROW_STEP, STARTING_QUEUE_SIZE, STARTING_RECENT_RX_IDS,
 };
+#[cfg(feature = "discovery")]
+use crate::discovery::{
+    self, DiscoveryCadenceState, TopologySideRoute, TopologySnapshot, DISCOVERY_ROUTE_TTL_MS,
+};
+use crate::packet::hash_bytes_u64;
 use crate::queue::{BoundedDeque, ByteCost};
 #[cfg(all(not(feature = "std"), target_os = "none"))]
 use crate::seds_error_msg;
-use crate::telemetry_packet::hash_bytes_u64;
 use crate::{
     config::{
         DataEndpoint, DataType, DEVICE_IDENTIFIER, MAX_HANDLER_RETRIES, RELIABLE_MAX_PENDING,
         RELIABLE_MAX_RETRIES, RELIABLE_RETRANSMIT_MS,
     }, get_needed_message_size, impl_letype_num, is_reliable_type,
     lock::RouterMutex,
-    message_meta, reliable_mode, serialize,
-    telemetry_packet::TelemetryPacket,
+    message_meta, packet::Packet, reliable_mode,
+    serialize,
     EndpointsBroadcastMode, MessageElement, TelemetryError,
     TelemetryResult,
 };
@@ -63,7 +67,7 @@ pub type RouterSideId = usize;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RouterItem {
-    Packet(TelemetryPacket),
+    Packet(Packet),
     Serialized(Arc<[u8]>),
 }
 
@@ -161,17 +165,24 @@ struct ReliableRxState {
     last_ack: u32,
 }
 
+#[cfg(feature = "discovery")]
+#[derive(Debug, Clone, Default)]
+struct DiscoverySideState {
+    reachable: Vec<DataEndpoint>,
+    last_seen_ms: u64,
+}
+
 // -------------------- endpoint + board config --------------------
 /// Packet Handler function type
-type PacketHandlerFn = dyn Fn(&TelemetryPacket) -> TelemetryResult<()> + Send + Sync + 'static;
+type PacketHandlerFn = dyn Fn(&Packet) -> TelemetryResult<()> + Send + Sync + 'static;
 
 /// Serialized Handler function type
 type SerializedHandlerFn = dyn Fn(&[u8]) -> TelemetryResult<()> + Send + Sync + 'static;
 
 // Make handlers usable across tasks
 /// Endpoint handler function enum.
-/// Holds either a `TelemetryPacket` handler or a serialized byte-slice handler.
-/// /// - Packet handler signature: `Fn(&TelemetryPacket) -> TelemetryResult<()>`
+/// Holds either a `Packet` handler or a serialized byte-slice handler.
+/// /// - Packet handler signature: `Fn(&Packet) -> TelemetryResult<()>`
 /// /// - Serialized handler signature: `Fn(&[u8]) -> TelemetryResult<()>`
 #[derive(Clone)]
 pub enum EndpointHandlerFn {
@@ -219,6 +230,7 @@ impl Debug for RouterTxHandlerFn {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct RouterSideOptions {
     pub reliable_enabled: bool,
+    pub link_local_enabled: bool,
 }
 
 /// One side of the router – a name + TX handler.
@@ -241,13 +253,13 @@ impl Debug for EndpointHandler {
 }
 
 impl EndpointHandler {
-    /// Create a new endpoint handler for `TelemetryPacket` callbacks.
+    /// Create a new endpoint handler for `Packet` callbacks.
     ///
-    /// Handler signature is `Fn(&TelemetryPacket) -> TelemetryResult<()>`.
+    /// Handler signature is `Fn(&Packet) -> TelemetryResult<()>`.
     #[inline]
     pub fn new_packet_handler<F>(endpoint: DataEndpoint, f: F) -> Self
     where
-        F: Fn(&TelemetryPacket) -> TelemetryResult<()> + Send + Sync + 'static,
+        F: Fn(&Packet) -> TelemetryResult<()> + Send + Sync + 'static,
     {
         Self {
             endpoint,
@@ -395,7 +407,7 @@ fn make_error_payload(msg: &str) -> Arc<[u8]> {
 }
 
 /// Generic raw logger function used by Router::log and Router::log_queue.
-/// Builds a TelemetryPacket from the provided data slice and passes it to the
+/// Builds a Packet from the provided data slice and passes it to the
 /// provided transmission function.
 fn log_raw<T, F>(
     sender: &'static str,
@@ -406,7 +418,7 @@ fn log_raw<T, F>(
 ) -> TelemetryResult<()>
 where
     T: LeBytes,
-    F: FnMut(TelemetryPacket) -> TelemetryResult<()>,
+    F: FnMut(Packet) -> TelemetryResult<()>,
 {
     let meta = message_meta(ty);
     let got = data.len() * T::WIDTH;
@@ -432,7 +444,7 @@ where
     }
 
     let payload = encode_slice_le(data);
-    let pkt = TelemetryPacket::new(ty, meta.endpoints, sender, timestamp, payload)?;
+    let pkt = Packet::new(ty, meta.endpoints, sender, timestamp, payload)?;
     tx_function(pkt)
 }
 
@@ -465,6 +477,10 @@ struct RouterInner {
     recent_rx: BoundedDeque<u64>,
     reliable_tx: BTreeMap<(RouterSideId, u32), ReliableTxState>,
     reliable_rx: BTreeMap<(RouterSideId, u32), ReliableRxState>,
+    #[cfg(feature = "discovery")]
+    discovery_routes: BTreeMap<RouterSideId, DiscoverySideState>,
+    #[cfg(feature = "discovery")]
+    discovery_cadence: DiscoveryCadenceState,
 }
 
 /// Non-blocking RX queue used by ISR-safe `rx_queue*` APIs.
@@ -559,6 +575,11 @@ pub struct Router {
     clock: Box<dyn Clock + Send + Sync>,
 }
 
+enum RemoteSidePlan {
+    Flood,
+    Target(Vec<RouterSideId>),
+}
+
 impl Debug for Router {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("Router")
@@ -583,17 +604,20 @@ fn has_remote_endpoint(eps: &[DataEndpoint], cfg: &RouterConfig) -> bool {
 #[inline]
 fn force_remote_for_type(ty: DataType) -> bool {
     #[cfg(feature = "timesync")]
-    {
-        matches!(
-            ty,
-            DataType::TimeSyncAnnounce | DataType::TimeSyncRequest | DataType::TimeSyncResponse
-        )
+    if matches!(
+        ty,
+        DataType::TimeSyncAnnounce | DataType::TimeSyncRequest | DataType::TimeSyncResponse
+    ) {
+        return true;
     }
-    #[cfg(not(feature = "timesync"))]
-    {
-        let _ = ty;
-        false
+
+    #[cfg(feature = "discovery")]
+    if matches!(ty, DataType::DiscoveryAnnounce) {
+        return true;
     }
+
+    let _ = ty;
+    false
 }
 
 /// Helper function to call a handler with retries and error handling.
@@ -601,7 +625,7 @@ fn with_retries<F>(
     this: &Router,
     dest: DataEndpoint,
     data: &RouterItem,
-    pkt_for_ctx: Option<&TelemetryPacket>,
+    pkt_for_ctx: Option<&Packet>,
     env_for_ctx: Option<&serialize::TelemetryEnvelope>,
     run: F,
 ) -> TelemetryResult<()>
@@ -632,21 +656,36 @@ impl Router {
         exclude: Option<RouterSideId>,
         ignore_local: bool,
     ) -> TelemetryResult<()> {
+        let plan = self.remote_side_plan(&data, exclude)?;
         let mut st = self.state.lock();
 
-        let side_count = st.sides.len(); // ends the immutable borrow immediately
-
-        for idx in 0..side_count {
-            if exclude == Some(idx) {
-                continue;
+        match plan {
+            RemoteSidePlan::Flood => {
+                let side_count = st.sides.len();
+                for idx in 0..side_count {
+                    if exclude == Some(idx) {
+                        continue;
+                    }
+                    st.transmit_queue.push_back(TxQueued {
+                        item: RouterTxItem::ToSide {
+                            dst: idx,
+                            data: data.clone(),
+                        },
+                        ignore_local,
+                    })?;
+                }
             }
-            st.transmit_queue.push_back(TxQueued {
-                item: RouterTxItem::ToSide {
-                    dst: idx,
-                    data: data.clone(),
-                },
-                ignore_local,
-            })?;
+            RemoteSidePlan::Target(sides) => {
+                for idx in sides {
+                    st.transmit_queue.push_back(TxQueued {
+                        item: RouterTxItem::ToSide {
+                            dst: idx,
+                            data: data.clone(),
+                        },
+                        ignore_local,
+                    })?;
+                }
+            }
         }
 
         Ok(())
@@ -662,25 +701,312 @@ impl Router {
             return self.enqueue_to_sides(data, src, true);
         }
 
-        let num_sides = {
-            let st = self.state.lock();
-            st.sides.len()
-        };
+        match self.remote_side_plan(&data, src)? {
+            RemoteSidePlan::Flood => {
+                let num_sides = {
+                    let st = self.state.lock();
+                    st.sides.len()
+                };
 
-        for side in 0..num_sides {
-            if src == Some(side) {
+                for side in 0..num_sides {
+                    if src == Some(side) {
+                        continue;
+                    }
+                    self.tx_item_impl(
+                        RouterTxItem::ToSide {
+                            dst: side,
+                            data: data.clone(),
+                        },
+                        true,
+                    )?;
+                }
+            }
+            RemoteSidePlan::Target(sides) => {
+                for side in sides {
+                    self.tx_item_impl(
+                        RouterTxItem::ToSide {
+                            dst: side,
+                            data: data.clone(),
+                        },
+                        true,
+                    )?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn item_route_info(&self, data: &RouterItem) -> TelemetryResult<(Vec<DataEndpoint>, DataType)> {
+        match data {
+            RouterItem::Packet(pkt) => {
+                pkt.validate()?;
+                let mut eps = pkt.endpoints().to_vec();
+                eps.sort_unstable();
+                eps.dedup();
+                Ok((eps, pkt.data_type()))
+            }
+            RouterItem::Serialized(bytes) => {
+                let env = serialize::peek_envelope(bytes.as_ref())?;
+                let mut eps: Vec<DataEndpoint> = env.endpoints.iter().copied().collect();
+                eps.sort_unstable();
+                eps.dedup();
+                Ok((eps, env.ty))
+            }
+        }
+    }
+
+    fn endpoints_are_link_local_only(eps: &[DataEndpoint]) -> bool {
+        !eps.is_empty() && eps.iter().all(|ep| ep.is_link_local_only())
+    }
+
+    fn remote_side_plan(
+        &self,
+        data: &RouterItem,
+        exclude: Option<RouterSideId>,
+    ) -> TelemetryResult<RemoteSidePlan> {
+        #[cfg(feature = "discovery")]
+        {
+            let (eps, ty) = self.item_route_info(data)?;
+            if discovery::is_discovery_type(ty) || force_remote_for_type(ty) {
+                return Ok(RemoteSidePlan::Flood);
+            }
+
+            let st = self.state.lock();
+            let restrict_link_local = Self::endpoints_are_link_local_only(&eps);
+            if st.discovery_routes.is_empty() {
+                if restrict_link_local {
+                    let targets = st
+                        .sides
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(side, side_info)| {
+                            if exclude == Some(side) || !side_info.opts.link_local_enabled {
+                                None
+                            } else {
+                                Some(side)
+                            }
+                        })
+                        .collect();
+                    return Ok(RemoteSidePlan::Target(targets));
+                }
+                return Ok(RemoteSidePlan::Flood);
+            }
+            let now_ms = self.clock.now_ms();
+            let mut had_known = false;
+            let mut targets = Vec::new();
+
+            for (&side, route) in st.discovery_routes.iter() {
+                if exclude == Some(side)
+                    || now_ms.saturating_sub(route.last_seen_ms) > DISCOVERY_ROUTE_TTL_MS
+                {
+                    continue;
+                }
+                if restrict_link_local
+                    && st
+                    .sides
+                    .get(side)
+                    .map(|s| !s.opts.link_local_enabled)
+                    .unwrap_or(true)
+                {
+                    continue;
+                }
+                if eps.iter().copied().any(|ep| route.reachable.contains(&ep)) {
+                    had_known = true;
+                    targets.push(side);
+                }
+            }
+
+            if had_known {
+                Ok(RemoteSidePlan::Target(targets))
+            } else if restrict_link_local {
+                let targets = st
+                    .sides
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(side, side_info)| {
+                        if exclude == Some(side) || !side_info.opts.link_local_enabled {
+                            None
+                        } else {
+                            Some(side)
+                        }
+                    })
+                    .collect();
+                Ok(RemoteSidePlan::Target(targets))
+            } else {
+                Ok(RemoteSidePlan::Flood)
+            }
+        }
+        #[cfg(not(feature = "discovery"))]
+        {
+            let _ = data;
+            let _ = exclude;
+            Ok(RemoteSidePlan::Flood)
+        }
+    }
+
+    #[cfg(feature = "discovery")]
+    fn local_discovery_endpoints(&self) -> Vec<DataEndpoint> {
+        let mut eps: Vec<DataEndpoint> = self.cfg.handlers.iter().map(|h| h.endpoint).collect();
+        eps.retain(|ep| !discovery::is_discovery_endpoint(*ep));
+        eps.sort_unstable();
+        eps.dedup();
+        eps
+    }
+
+    #[cfg(feature = "discovery")]
+    fn note_discovery_topology_change_locked(st: &mut RouterInner, now_ms: u64) {
+        st.discovery_cadence.on_topology_change(now_ms);
+    }
+
+    #[cfg(feature = "discovery")]
+    fn prune_discovery_routes_locked(st: &mut RouterInner, now_ms: u64) -> bool {
+        let before = st.discovery_routes.len();
+        st.discovery_routes.retain(|_, route| {
+            now_ms.saturating_sub(route.last_seen_ms) <= DISCOVERY_ROUTE_TTL_MS
+        });
+        before != st.discovery_routes.len()
+    }
+
+    #[cfg(feature = "discovery")]
+    fn advertised_discovery_endpoints_for_link_locked(
+        &self,
+        st: &RouterInner,
+        now_ms: u64,
+        link_local_enabled: bool,
+    ) -> Vec<DataEndpoint> {
+        let mut eps = self.local_discovery_endpoints();
+        if !link_local_enabled {
+            eps.retain(|ep| !ep.is_link_local_only());
+        }
+        for route in st.discovery_routes.values() {
+            if now_ms.saturating_sub(route.last_seen_ms) > DISCOVERY_ROUTE_TTL_MS {
                 continue;
             }
-            self.tx_item_impl(
+            eps.extend(route.reachable.iter().copied());
+        }
+        eps.retain(|ep| !discovery::is_discovery_endpoint(*ep) && (link_local_enabled || !ep.is_link_local_only()));
+        eps.sort_unstable();
+        eps.dedup();
+        eps
+    }
+
+    #[cfg(feature = "discovery")]
+    fn queue_discovery_announce(&self) -> TelemetryResult<()> {
+        let now_ms = self.clock.now_ms();
+        let per_side = {
+            let mut st = self.state.lock();
+            if Self::prune_discovery_routes_locked(&mut st, now_ms) {
+                Self::note_discovery_topology_change_locked(&mut st, now_ms);
+            }
+            if st.sides.is_empty() {
+                return Ok(());
+            }
+            st.discovery_cadence.on_announce_sent(now_ms);
+            st.sides
+                .iter()
+                .enumerate()
+                .filter_map(|(side_id, side)| {
+                    let endpoints = self.advertised_discovery_endpoints_for_link_locked(
+                        &st,
+                        now_ms,
+                        side.opts.link_local_enabled,
+                    );
+                    if endpoints.is_empty() {
+                        None
+                    } else {
+                        Some((side_id, endpoints))
+                    }
+                })
+                .collect::<Vec<_>>()
+        };
+        for (side_id, endpoints) in per_side {
+            let pkt = discovery::build_discovery_announce(self.sender, now_ms, endpoints.as_slice())?;
+            self.tx_queue_item_with_flags(
                 RouterTxItem::ToSide {
-                    dst: side,
-                    data: data.clone(),
+                    dst: side_id,
+                    data: RouterItem::Packet(pkt),
                 },
                 true,
             )?;
         }
-
         Ok(())
+    }
+
+    #[cfg(feature = "discovery")]
+    fn poll_discovery_announce(&self) -> TelemetryResult<bool> {
+        let now_ms = self.clock.now_ms();
+        let due = {
+            let mut st = self.state.lock();
+            let removed = Self::prune_discovery_routes_locked(&mut st, now_ms);
+            if removed {
+                Self::note_discovery_topology_change_locked(&mut st, now_ms);
+            }
+            let has_any = st.sides.iter().any(|side| {
+                !self
+                    .advertised_discovery_endpoints_for_link_locked(&st, now_ms, side.opts.link_local_enabled)
+                    .is_empty()
+            });
+            if st.sides.is_empty() || !has_any {
+                return Ok(false);
+            }
+            st.discovery_cadence.due(now_ms)
+        };
+        if !due {
+            return Ok(false);
+        }
+        self.queue_discovery_announce()?;
+        Ok(true)
+    }
+
+    #[cfg(feature = "discovery")]
+    fn learn_discovery_packet(&self, pkt: &Packet, src: Option<RouterSideId>) -> TelemetryResult<bool> {
+        if !discovery::is_discovery_type(pkt.data_type()) {
+            return Ok(false);
+        }
+        let Some(side) = src else {
+            return Ok(true);
+        };
+        if pkt.sender() == self.sender {
+            return Ok(true);
+        }
+        let mut st = self.state.lock();
+        let reachable = discovery::decode_discovery_announce(pkt)?;
+        let changed = st
+            .discovery_routes
+            .get(&side)
+            .map(|cur| cur.reachable != reachable)
+            .unwrap_or(true);
+        st.discovery_routes.insert(
+            side,
+            DiscoverySideState {
+                reachable,
+                last_seen_ms: self.clock.now_ms(),
+            },
+        );
+        if changed {
+            Self::note_discovery_topology_change_locked(&mut st, self.clock.now_ms());
+        }
+        Ok(true)
+    }
+
+    #[cfg(not(feature = "discovery"))]
+    fn queue_discovery_announce(&self) -> TelemetryResult<()> {
+        Ok(())
+    }
+
+    #[cfg(not(feature = "discovery"))]
+    fn poll_discovery_announce(&self) -> TelemetryResult<bool> {
+        Ok(false)
+    }
+
+    #[cfg(not(feature = "discovery"))]
+    fn learn_discovery_packet(
+        &self,
+        _pkt: &Packet,
+        _src: Option<RouterSideId>,
+    ) -> TelemetryResult<bool> {
+        Ok(false)
     }
 
     #[inline]
@@ -1024,6 +1350,10 @@ impl Router {
                 ),
                 reliable_tx: BTreeMap::new(),
                 reliable_rx: BTreeMap::new(),
+                #[cfg(feature = "discovery")]
+                discovery_routes: BTreeMap::new(),
+                #[cfg(feature = "discovery")]
+                discovery_cadence: DiscoveryCadenceState::default(),
             }),
             isr_rx_queue: IsrRxQueue::new(MAX_QUEUE_SIZE, STARTING_QUEUE_SIZE, QUEUE_GROW_STEP),
             clock,
@@ -1054,13 +1384,15 @@ impl Router {
             tx_handler: RouterTxHandlerFn::Serialized(Arc::new(tx)),
             opts,
         });
+        #[cfg(feature = "discovery")]
+        Self::note_discovery_topology_change_locked(&mut st, self.clock.now_ms());
         id
     }
 
     /// Add a new side with a **packet handler**.
     pub fn add_side_packet<F>(&self, name: &'static str, tx: F) -> RouterSideId
     where
-        F: Fn(&TelemetryPacket) -> TelemetryResult<()> + Send + Sync + 'static,
+        F: Fn(&Packet) -> TelemetryResult<()> + Send + Sync + 'static,
     {
         self.add_side_packet_with_options(name, tx, RouterSideOptions::default())
     }
@@ -1072,7 +1404,7 @@ impl Router {
         opts: RouterSideOptions,
     ) -> RouterSideId
     where
-        F: Fn(&TelemetryPacket) -> TelemetryResult<()> + Send + Sync + 'static,
+        F: Fn(&Packet) -> TelemetryResult<()> + Send + Sync + 'static,
     {
         let mut st = self.state.lock();
         let id = st.sides.len();
@@ -1081,7 +1413,53 @@ impl Router {
             tx_handler: RouterTxHandlerFn::Packet(Arc::new(tx)),
             opts,
         });
+        #[cfg(feature = "discovery")]
+        Self::note_discovery_topology_change_locked(&mut st, self.clock.now_ms());
         id
+    }
+
+    /// Queue a built-in discovery advertisement describing this router's local endpoints.
+    #[cfg(feature = "discovery")]
+    pub fn announce_discovery(&self) -> TelemetryResult<()> {
+        self.queue_discovery_announce()
+    }
+
+    /// Queue a discovery advertisement if the adaptive cadence says one is due.
+    #[cfg(feature = "discovery")]
+    pub fn poll_discovery(&self) -> TelemetryResult<bool> {
+        self.poll_discovery_announce()
+    }
+
+    /// Export the current discovery-driven network topology view.
+    #[cfg(feature = "discovery")]
+    pub fn export_topology(&self) -> TopologySnapshot {
+        let now_ms = self.clock.now_ms();
+        let mut st = self.state.lock();
+        if Self::prune_discovery_routes_locked(&mut st, now_ms) {
+            Self::note_discovery_topology_change_locked(&mut st, now_ms);
+        }
+        let routes = st
+            .discovery_routes
+            .iter()
+            .filter_map(|(&side_id, route)| {
+                let side = st.sides.get(side_id)?;
+                Some(TopologySideRoute {
+                    side_id,
+                    side_name: side.name,
+                    reachable_endpoints: route.reachable.clone(),
+                    last_seen_ms: route.last_seen_ms,
+                    age_ms: now_ms.saturating_sub(route.last_seen_ms),
+                })
+            })
+            .collect();
+        let advertised_endpoints =
+            self.advertised_discovery_endpoints_for_link_locked(&st, now_ms, true);
+        TopologySnapshot {
+            advertised_endpoints,
+            routes,
+            current_announce_interval_ms: st.discovery_cadence.current_interval_ms,
+            next_announce_ms: st.discovery_cadence.next_announce_ms,
+        }
     }
 
     /// Compute a de-dupe hash for a RouterItem.
@@ -1124,13 +1502,13 @@ impl Router {
         }
     }
 
-    /// Error helper when we have a full TelemetryPacket.
+    /// Error helper when we have a full Packet.
     ///
     /// Sends a TelemetryError packet to all local endpoints except the failed one (if any).
     /// If no local endpoints remain, falls back to `fallback_stdout`.
     fn handle_callback_error(
         &self,
-        pkt: &TelemetryPacket,
+        pkt: &Packet,
         dest: Option<DataEndpoint>,
         e: TelemetryError,
     ) -> TelemetryResult<()> {
@@ -1176,7 +1554,7 @@ impl Router {
 
         let payload = make_error_payload(&error_msg);
 
-        let error_pkt = TelemetryPacket::new(
+        let error_pkt = Packet::new(
             DataType::TelemetryError,
             &recipients,
             self.sender,
@@ -1367,7 +1745,7 @@ impl Router {
 
     /// Enqueue a packet for RX processing (local source).
     #[inline]
-    pub fn rx_queue(&self, pkt: TelemetryPacket) -> TelemetryResult<()> {
+    pub fn rx_queue(&self, pkt: Packet) -> TelemetryResult<()> {
         pkt.validate()?;
         let mut st = self.state.lock();
         st.received_queue.push_back(RouterRxItem {
@@ -1382,7 +1760,7 @@ impl Router {
     /// Returns `TelemetryError::Io("rx queue busy")` if another context is
     /// currently mutating the ISR RX queue.
     #[inline]
-    pub fn rx_queue_isr(&self, pkt: TelemetryPacket) -> TelemetryResult<()> {
+    pub fn rx_queue_isr(&self, pkt: Packet) -> TelemetryResult<()> {
         pkt.validate()?;
         self.isr_rx_queue.push_back(RouterRxItem {
             src: None,
@@ -1394,7 +1772,7 @@ impl Router {
     #[inline]
     pub fn rx_queue_from_side(
         &self,
-        pkt: TelemetryPacket,
+        pkt: Packet,
         side: RouterSideId,
     ) -> TelemetryResult<()> {
         pkt.validate()?;
@@ -1413,7 +1791,7 @@ impl Router {
     #[inline]
     pub fn rx_queue_from_side_isr(
         &self,
-        pkt: TelemetryPacket,
+        pkt: Packet,
         side: RouterSideId,
     ) -> TelemetryResult<()> {
         pkt.validate()?;
@@ -1497,7 +1875,7 @@ impl Router {
         dest: DataEndpoint,
         handler: &EndpointHandler,
         data: Option<&[u8]>,
-        pkt_for_ctx: Option<&TelemetryPacket>,
+        pkt_for_ctx: Option<&Packet>,
         env_for_ctx: Option<&serialize::TelemetryEnvelope>,
     ) -> TelemetryResult<()> {
         let owned_tmp: Option<RouterItem>;
@@ -1522,7 +1900,7 @@ impl Router {
 
         match (&handler.handler, data) {
             (EndpointHandlerFn::Packet(f), _) => {
-                let pkt = pkt_for_ctx.expect("Packet handler requires TelemetryPacket context");
+                let pkt = pkt_for_ctx.expect("Packet handler requires Packet context");
                 with_retries(self, dest, item_for_ctx, pkt_for_ctx, env_for_ctx, || {
                     f(pkt)
                 })
@@ -1580,7 +1958,7 @@ impl Router {
 
         let payload = make_error_payload(&error_msg);
 
-        let error_pkt = TelemetryPacket::new(
+        let error_pkt = Packet::new(
             DataType::TelemetryError,
             &recipients,
             &env.sender.clone(),
@@ -1740,6 +2118,13 @@ impl Router {
             RouterItem::Packet(pkt) => {
                 pkt.validate()?;
 
+                if self.learn_discovery_packet(pkt, item.src)? {
+                    if self.mode == RouterMode::Relay {
+                        self.relay_send(RouterItem::Packet(pkt.to_owned()), item.src, called_from_queue)?;
+                    }
+                    return Ok(());
+                }
+
                 let mut eps: Vec<DataEndpoint> = pkt.endpoints().to_vec();
                 eps.sort_unstable();
                 eps.dedup();
@@ -1806,6 +2191,17 @@ impl Router {
 
             RouterItem::Serialized(bytes) => {
                 let env = serialize::peek_envelope(bytes.as_ref())?;
+
+                #[cfg(feature = "discovery")]
+                if discovery::is_discovery_type(env.ty) {
+                    let pkt = serialize::deserialize_packet(bytes.as_ref())?;
+                    pkt.validate()?;
+                    let _ = self.learn_discovery_packet(&pkt, item.src)?;
+                    if self.mode == RouterMode::Relay {
+                        self.relay_send(RouterItem::Packet(pkt), item.src, called_from_queue)?;
+                    }
+                    return Ok(());
+                }
 
                 let any_packet_needed = env
                     .endpoints
@@ -1994,10 +2390,21 @@ impl Router {
     fn tx_item_impl(&self, item: RouterTxItem, ignore_local: bool) -> TelemetryResult<()> {
         match item {
             RouterTxItem::Broadcast(data) => {
+                #[cfg(feature = "discovery")]
+                let is_discovery = matches!(&data, RouterItem::Packet(pkt) if discovery::is_discovery_type(pkt.data_type()))
+                    || matches!(&data, RouterItem::Serialized(bytes)
+                        if serialize::peek_envelope(bytes.as_ref())
+                            .map(|env| discovery::is_discovery_type(env.ty))
+                            .unwrap_or(false));
                 if !ignore_local {
                     if self.is_duplicate_pkt(&data)? {
                         return Ok(());
                     }
+                    #[cfg(feature = "discovery")]
+                    if !is_discovery {
+                        self.dispatch_local_for_item(&data)?;
+                    }
+                    #[cfg(not(feature = "discovery"))]
                     self.dispatch_local_for_item(&data)?;
                 }
 
@@ -2023,25 +2430,47 @@ impl Router {
                 if !send_remote {
                     return Ok(());
                 }
+                match self.remote_side_plan(&data, None)? {
+                    RemoteSidePlan::Flood => {
+                        let num_sides = {
+                            let st = self.state.lock();
+                            st.sides.len()
+                        };
 
-                let num_sides = {
-                    let st = self.state.lock();
-                    st.sides.len()
-                };
-
-                for side in 0..num_sides {
-                    if let Err(e) = self.send_reliable_to_side(side, data.clone()) {
-                        match &data {
-                            RouterItem::Packet(pkt) => {
-                                let _ = self.handle_callback_error(pkt, None, e);
-                            }
-                            RouterItem::Serialized(bytes) => {
-                                if let Ok(env) = serialize::peek_envelope(bytes.as_ref()) {
-                                    let _ = self.handle_callback_error_from_env(&env, None, e);
+                        for side in 0..num_sides {
+                            if let Err(e) = self.send_reliable_to_side(side, data.clone()) {
+                                match &data {
+                                    RouterItem::Packet(pkt) => {
+                                        let _ = self.handle_callback_error(pkt, None, e);
+                                    }
+                                    RouterItem::Serialized(bytes) => {
+                                        if let Ok(env) = serialize::peek_envelope(bytes.as_ref()) {
+                                            let _ =
+                                                self.handle_callback_error_from_env(&env, None, e);
+                                        }
+                                    }
                                 }
+                                return Err(TelemetryError::HandlerError("tx handler failed"));
                             }
                         }
-                        return Err(TelemetryError::HandlerError("tx handler failed"));
+                    }
+                    RemoteSidePlan::Target(sides) => {
+                        for side in sides {
+                            if let Err(e) = self.send_reliable_to_side(side, data.clone()) {
+                                match &data {
+                                    RouterItem::Packet(pkt) => {
+                                        let _ = self.handle_callback_error(pkt, None, e);
+                                    }
+                                    RouterItem::Serialized(bytes) => {
+                                        if let Ok(env) = serialize::peek_envelope(bytes.as_ref()) {
+                                            let _ =
+                                                self.handle_callback_error_from_env(&env, None, e);
+                                        }
+                                    }
+                                }
+                                return Err(TelemetryError::HandlerError("tx handler failed"));
+                            }
+                        }
                     }
                 }
             }
@@ -2091,7 +2520,7 @@ impl Router {
 
     /// Receive a packet (local source).
     #[inline]
-    pub fn rx(&self, pkt: &TelemetryPacket) -> TelemetryResult<()> {
+    pub fn rx(&self, pkt: &Packet) -> TelemetryResult<()> {
         let item = RouterRxItem {
             src: None,
             data: RouterItem::Packet(pkt.clone()),
@@ -2101,7 +2530,7 @@ impl Router {
 
     /// Receive a packet with explicit ingress side.
     #[inline]
-    pub fn rx_from_side(&self, pkt: &TelemetryPacket, side: RouterSideId) -> TelemetryResult<()> {
+    pub fn rx_from_side(&self, pkt: &Packet, side: RouterSideId) -> TelemetryResult<()> {
         let item = RouterRxItem {
             src: Some(side),
             data: RouterItem::Packet(pkt.clone()),
@@ -2123,7 +2552,7 @@ impl Router {
 
     /// Transmit a packet immediately (broadcast to all sides).
     #[inline]
-    pub fn tx(&self, pkt: TelemetryPacket) -> TelemetryResult<()> {
+    pub fn tx(&self, pkt: Packet) -> TelemetryResult<()> {
         self.tx_item(RouterTxItem::Broadcast(RouterItem::Packet(pkt)))
     }
 
@@ -2137,7 +2566,7 @@ impl Router {
 
     /// Queue a packet for later TX (broadcast to all sides).
     #[inline]
-    pub fn tx_queue(&self, pkt: TelemetryPacket) -> TelemetryResult<()> {
+    pub fn tx_queue(&self, pkt: Packet) -> TelemetryResult<()> {
         self.tx_queue_item(RouterTxItem::Broadcast(RouterItem::Packet(pkt)))
     }
 

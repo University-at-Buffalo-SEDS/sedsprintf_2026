@@ -3,11 +3,11 @@ mod timesync_system_test {
     use sedsprintf_rs_2026::config::{DataEndpoint, DataType};
     use sedsprintf_rs_2026::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
     use sedsprintf_rs_2026::serialize;
-    use sedsprintf_rs_2026::telemetry_packet::TelemetryPacket;
     use sedsprintf_rs_2026::timesync::{
         build_timesync_announce_with_sender, build_timesync_request, build_timesync_response,
         compute_offset_delay, TimeSyncConfig, TimeSyncRole, TimeSyncTracker,
     };
+            use sedsprintf_rs_2026::packet::Packet;
 
     use std::sync::{Arc, Mutex};
     use std::thread;
@@ -92,7 +92,7 @@ mod timesync_system_test {
                         v
                     };
 
-                    let pkt = TelemetryPacket::new(
+                    let pkt = Packet::new(
                         DataType::MessageData,
                         &[DataEndpoint::SdCard],
                         "SYS_COMP",

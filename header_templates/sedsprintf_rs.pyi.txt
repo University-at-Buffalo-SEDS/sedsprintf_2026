@@ -83,7 +83,7 @@ class Packet:
     def wire_size(self) -> int: ...
     def serialize(self) -> bytes: ...
 
-    # Typed payload decoders (mirror TelemetryPacket::data_as_*)
+    # Typed payload decoders (mirror Packet::data_as_*)
     def data_as_u8(self) -> List[int]: ...
     def data_as_u16(self) -> List[int]: ...
     def data_as_u32(self) -> List[int]: ...
@@ -242,7 +242,7 @@ class Relay:
             Human-readable name for this side (used for debugging).
         tx:
             Transmit callback. Called as ``tx(pkt: Packet)`` when the relay
-            wants to send a TelemetryPacket on this side.
+            wants to send a Packet on this side.
 
         Returns
         -------

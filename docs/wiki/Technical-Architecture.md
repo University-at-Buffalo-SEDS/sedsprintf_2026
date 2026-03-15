@@ -26,7 +26,7 @@ schema metadata (`MessageMeta`, `MessageElement`, `MessageDataType`, `MessageCla
 -
 
 src/telemetry_packet.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/src/telemetry_packet.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/telemetry_packet.rs)):
-`TelemetryPacket` validation, formatting, and packet IDs.
+`Packet` validation, formatting, and packet IDs.
 
 -
 
@@ -95,9 +95,9 @@ Why these structures exist:
   payloads.
 - **MessageClass is tied to element layout** so formatting and error generation know the intent of the message.
 
-## TelemetryPacket (the core runtime type)
+## Packet (the core runtime type)
 
-`TelemetryPacket` is the validated, shareable container used by the router and FFI layers. It contains:
+`Packet` is the validated, shareable container used by the router and FFI layers. It contains:
 
 - `ty: DataType` (logical message type).
 - `data_size: usize` (cached payload length; must match `payload.len()`).
@@ -106,7 +106,7 @@ Why these structures exist:
 - `timestamp: u64` (ms; treated as uptime below 1e12, or epoch ms otherwise).
 - `payload: StandardSmallPayload` (inline optimized; see below).
 
-Validation rules enforced by `TelemetryPacket::new` and `TelemetryPacket::validate`:
+Validation rules enforced by `Packet::new` and `Packet::validate`:
 
 - Endpoints list must be non-empty.
 - For static layouts, payload length must be exactly `count * data_type_size`.
@@ -115,7 +115,7 @@ Validation rules enforced by `TelemetryPacket::new` and `TelemetryPacket::valida
     - String types: trailing NULs are ignored and remaining bytes must be valid UTF-8.
     - Binary types: no UTF-8 requirement (raw bytes).
 
-Packet IDs are **not** serialized. `TelemetryPacket::packet_id` hashes:
+Packet IDs are **not** serialized. `Packet::packet_id` hashes:
 
 - sender bytes
 - message name (`DataType` as string)
@@ -162,7 +162,7 @@ Design choices:
 - **Endpoint bitmap** avoids repeated endpoint IDs; size is based on `MAX_VALUE_DATA_ENDPOINT`.
 - **Sender/payload compression** uses `zstd` (`zstd-safe`) and is applied only when it makes the payload smaller.
 
-`packet_id_from_wire` parses only as much as needed to compute the same packet ID as `TelemetryPacket::packet_id`. It
+`packet_id_from_wire` parses only as much as needed to compute the same packet ID as `Packet::packet_id`. It
 always hashes **decompressed** sender/payload bytes, so dedupe works across compressed and uncompressed links.
 
 `TelemetryEnvelope` is a header-only view that can be obtained by `peek_envelope` without copying the payload.
@@ -187,7 +187,7 @@ Key structures:
 - `RouterConfig`: holds local `EndpointHandler` definitions in an `Arc<[EndpointHandler]>`.
 - `EndpointHandler`: packet or serialized handler for a specific `DataEndpoint`.
 - `RouterSideId`: identifies a named side (UART/CAN/RADIO/etc.).
-- `RouterItem`: either `TelemetryPacket` or serialized bytes.
+- `RouterItem`: either `Packet` or serialized bytes.
 
 Receive flow:
 
@@ -206,8 +206,8 @@ Forwarding decision uses endpoint broadcast modes:
 
 Transmit flow:
 
-- `log*` builds a new `TelemetryPacket` from typed data, validates sizes, and serializes it.
-- `tx*` sends a pre-built `TelemetryPacket` (validated) or serialized bytes.
+- `log*` builds a new `Packet` from typed data, validates sizes, and serializes it.
+- `tx*` sends a pre-built `Packet` (validated) or serialized bytes.
 - Queue variants (`*_queue`) defer the work until `process_*_queue`.
 
 Error handling:

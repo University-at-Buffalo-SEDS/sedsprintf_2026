@@ -12,9 +12,9 @@
 //! an ingress side for relay-style behavior.
 
 use crate::{
-    config::DataEndpoint, do_vec_log_typed, get_needed_message_size, message_meta, router::{Clock, LeBytes, RouterSideOptions},
-    router::{EndpointHandler, Router, RouterConfig},
-    serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet}, telemetry_packet::TelemetryPacket, DataType,
+    config::DataEndpoint, do_vec_log_typed, get_needed_message_size, message_meta, packet::Packet,
+    router::{Clock, LeBytes, RouterSideOptions},
+    router::{EndpointHandler, Router, RouterConfig}, serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet}, DataType,
     MessageElement,
     TelemetryError,
     TelemetryErrorCode,
@@ -48,7 +48,7 @@ enum SedsResult {
 /// Opaque owned packet for C. Keeps Rust allocations alive across calls.
 #[repr(C)]
 pub struct SedsOwnedPacket {
-    inner: TelemetryPacket,
+    inner: Packet,
     // cache endpoints as u32 so the view can point at stable memory
     endpoints_u32: Vec<u32>,
 }
@@ -173,10 +173,10 @@ pub struct SedsLocalEndpointDesc {
 //  Internal helpers: view_to_packet, string buffer writing, clock adapter
 // ============================================================================
 
-/// Convert a C `SedsPacketView` into an owned Rust `TelemetryPacket`.
+/// Convert a C `SedsPacketView` into an owned Rust `Packet`.
 /// Returns `Err(())` if type/endpoints/sender are invalid or inconsistent.
 #[inline]
-fn view_to_packet(view: &SedsPacketView) -> Result<TelemetryPacket, ()> {
+fn view_to_packet(view: &SedsPacketView) -> Result<Packet, ()> {
     // Map type
     let ty = DataType::try_from_u32(view.ty).ok_or(())?;
 
@@ -206,7 +206,7 @@ fn view_to_packet(view: &SedsPacketView) -> Result<TelemetryPacket, ()> {
 
     let payload = Arc::<[u8]>::from(bytes);
 
-    TelemetryPacket::new(ty, &eps, sender_owned, view.timestamp, payload).map_err(|_| ())
+    Packet::new(ty, &eps, sender_owned, view.timestamp, payload).map_err(|_| ())
 }
 
 /// Write a Rust string into a C buffer, respecting "query mode":
@@ -396,7 +396,7 @@ pub extern "C" fn seds_router_new(
 
             // If a PACKET handler is provided, register it
             if let Some(cb_fn) = desc.packet_handler {
-                let eh = EndpointHandler::new_packet_handler(endpoint, move |pkt: &TelemetryPacket| {
+                let eh = EndpointHandler::new_packet_handler(endpoint, move |pkt: &Packet| {
                     // Fast path: up to STACK_EPS endpoints, no heap allocation
                     let mut stack_eps: [u32; STACK_EPS] = [0; STACK_EPS];
 
@@ -538,6 +538,7 @@ pub extern "C" fn seds_router_add_side_serialized(
 
     let opts = RouterSideOptions {
         reliable_enabled,
+        link_local_enabled: false,
     };
 
     let side_id = router.add_side_serialized_with_options(side_name, tx_fn, opts);
@@ -578,7 +579,7 @@ pub extern "C" fn seds_router_add_side_packet(
 
     let user_addr = tx_user as usize;
 
-    let tx_closure = move |pkt: &TelemetryPacket| -> TelemetryResult<()> {
+    let tx_closure = move |pkt: &Packet| -> TelemetryResult<()> {
         let mut stack_eps: [u32; STACK_EPS] = [0; STACK_EPS];
         let (endpoints_ptr, num_endpoints, _owned_vec): (*const u32, usize, Option<Vec<u32>>) =
             if pkt.endpoints().len() <= STACK_EPS {
@@ -619,6 +620,7 @@ pub extern "C" fn seds_router_add_side_packet(
 
     let opts = RouterSideOptions {
         reliable_enabled,
+        link_local_enabled: false,
     };
 
     let side_id = router.add_side_packet_with_options(side_name, tx_closure, opts);
@@ -719,6 +721,7 @@ pub extern "C" fn seds_relay_add_side_serialized(
 
     let opts = RelaySideOptions {
         reliable_enabled,
+        link_local_enabled: false,
     };
     let side_id: RelaySideId = relay.add_side_serialized_with_options(side_name, tx_fn, opts);
     side_id as i32
@@ -758,7 +761,7 @@ pub extern "C" fn seds_relay_add_side_packet(
 
     let user_addr = tx_user as usize;
 
-    let tx_closure = move |pkt: &TelemetryPacket| -> TelemetryResult<()> {
+    let tx_closure = move |pkt: &Packet| -> TelemetryResult<()> {
         let mut stack_eps: [u32; STACK_EPS] = [0; STACK_EPS];
         let (endpoints_ptr, num_endpoints, _owned_vec): (*const u32, usize, Option<Vec<u32>>) =
             if pkt.endpoints().len() <= STACK_EPS {
@@ -799,6 +802,7 @@ pub extern "C" fn seds_relay_add_side_packet(
 
     let opts = RelaySideOptions {
         reliable_enabled,
+        link_local_enabled: false,
     };
     let side_id: RelaySideId = relay.add_side_packet_with_options(side_name, tx_closure, opts);
     side_id as i32

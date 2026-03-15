@@ -2,9 +2,9 @@
 #[cfg(test)]
 mod single_threaded_test {
     use sedsprintf_rs_2026::config::{DataEndpoint, DataType};
+    use sedsprintf_rs_2026::packet::Packet;
     use sedsprintf_rs_2026::relay::Relay;
     use sedsprintf_rs_2026::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
-    use sedsprintf_rs_2026::telemetry_packet::TelemetryPacket;
     use sedsprintf_rs_2026::TelemetryResult;
 
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -25,7 +25,7 @@ mod single_threaded_test {
 
     /// Build a handler that counts packets received on the Radio endpoint.
     fn make_radio_handler(counter: Arc<AtomicUsize>) -> EndpointHandler {
-        EndpointHandler::new_packet_handler(DataEndpoint::Radio, move |_pkt: &TelemetryPacket| {
+        EndpointHandler::new_packet_handler(DataEndpoint::Radio, move |_pkt: &Packet| {
             counter.fetch_add(1, Ordering::SeqCst);
             Ok(())
         })
@@ -33,7 +33,7 @@ mod single_threaded_test {
 
     /// Build a handler that counts packets received on the SdCard endpoint.
     fn make_sd_handler(counter: Arc<AtomicUsize>) -> EndpointHandler {
-        EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt: &TelemetryPacket| {
+        EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt: &Packet| {
             counter.fetch_add(1, Ordering::SeqCst);
             Ok(())
         })
@@ -47,9 +47,8 @@ mod single_threaded_test {
     }
 
     /// Build a packet with endpoints [SD_CARD, Radio], mirroring the C system.
-    fn make_packet(ty: DataType, vals: &[f32], ts: u64) -> TelemetryPacket {
-        TelemetryPacket::from_f32_slice(ty, vals, &[DataEndpoint::SdCard, DataEndpoint::Radio], ts)
-            .unwrap()
+    fn make_packet(ty: DataType, vals: &[f32], ts: u64) -> Packet {
+        Packet::from_f32_slice(ty, vals, &[DataEndpoint::SdCard, DataEndpoint::Radio], ts).unwrap()
     }
 
     /// Drain both buses once and run the relay once.
@@ -143,22 +142,20 @@ mod single_threaded_test {
 
         // Relay side for bus1: TX from relay -> bus1_rx
         let relay_bus1_tx = bus1_tx.clone();
-        let bus1_side_id = relay.add_side_serialized("bus1", move |bytes: &[u8]| -> TelemetryResult<()> {
-            // from = usize::MAX so we never skip this in bus1 delivery
-            relay_bus1_tx
-                .send((usize::MAX, bytes.to_vec()))
-                .unwrap();
-            Ok(())
-        });
+        let bus1_side_id =
+            relay.add_side_serialized("bus1", move |bytes: &[u8]| -> TelemetryResult<()> {
+                // from = usize::MAX so we never skip this in bus1 delivery
+                relay_bus1_tx.send((usize::MAX, bytes.to_vec())).unwrap();
+                Ok(())
+            });
 
         // Relay side for bus2: TX from relay -> bus2_rx
         let relay_bus2_tx = bus2_tx.clone();
-        let bus2_side_id = relay.add_side_serialized("bus2", move |bytes: &[u8]| -> TelemetryResult<()> {
-            relay_bus2_tx
-                .send((usize::MAX, bytes.to_vec()))
-                .unwrap();
-            Ok(())
-        });
+        let bus2_side_id =
+            relay.add_side_serialized("bus2", move |bytes: &[u8]| -> TelemetryResult<()> {
+                relay_bus2_tx.send((usize::MAX, bytes.to_vec())).unwrap();
+                Ok(())
+            });
 
         // ---------- 2) Build nodes (same topology as threaded test) ----------
         //
@@ -271,13 +268,13 @@ mod single_threaded_test {
                 node.router.tx(pkt1).unwrap();
 
                 // message as string (TelemetryError)
-                let pkt2 = TelemetryPacket::from_str_slice(
+                let pkt2 = Packet::from_str_slice(
                     DataType::TelemetryError,
                     msg,
                     &[DataEndpoint::SdCard, DataEndpoint::Radio],
                     (i + 40_000) as u64,
                 )
-                    .unwrap();
+                .unwrap();
                 node.router.tx(pkt2).unwrap();
             }
 

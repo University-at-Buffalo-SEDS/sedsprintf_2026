@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 
 use crate::router::{encode_slice_le, Router};
 use crate::{
-    config::DEVICE_IDENTIFIER, message_meta, telemetry_packet::TelemetryPacket, DataEndpoint, DataType,
+    config::DEVICE_IDENTIFIER, message_meta, packet::Packet, DataEndpoint, DataType,
     TelemetryError, TelemetryResult,
 };
 
@@ -120,7 +120,7 @@ impl TimeSyncTracker {
 
     pub fn handle_announce(
         &mut self,
-        pkt: &TelemetryPacket,
+        pkt: &Packet,
         recv_ms: u64,
     ) -> TelemetryResult<TimeSyncUpdate> {
         let ann = decode_timesync_announce(pkt)?;
@@ -187,9 +187,9 @@ pub fn compute_offset_delay(t1_ms: u64, t2_ms: u64, t3_ms: u64, t4_ms: u64) -> T
     }
 }
 
-pub fn build_timesync_announce(priority: u64, time_ms: u64) -> TelemetryResult<TelemetryPacket> {
+pub fn build_timesync_announce(priority: u64, time_ms: u64) -> TelemetryResult<Packet> {
     let meta = message_meta(DataType::TimeSyncAnnounce);
-    TelemetryPacket::from_u64_slice(
+    Packet::from_u64_slice(
         DataType::TimeSyncAnnounce,
         &[priority, time_ms],
         meta.endpoints,
@@ -201,9 +201,9 @@ pub fn build_timesync_announce_with_sender(
     sender: &'static str,
     priority: u64,
     time_ms: u64,
-) -> TelemetryResult<TelemetryPacket> {
+) -> TelemetryResult<Packet> {
     let payload = encode_slice_le(&[priority, time_ms]);
-    TelemetryPacket::new(
+    Packet::new(
         DataType::TimeSyncAnnounce,
         &[DataEndpoint::TimeSync],
         sender,
@@ -216,9 +216,9 @@ pub fn send_timesync_announce(router: &Router, priority: u64, time_ms: u64) -> T
     router.log_ts(DataType::TimeSyncAnnounce, time_ms, &[priority, time_ms])
 }
 
-pub fn build_timesync_request(seq: u64, t1_ms: u64) -> TelemetryResult<TelemetryPacket> {
+pub fn build_timesync_request(seq: u64, t1_ms: u64) -> TelemetryResult<Packet> {
     let meta = message_meta(DataType::TimeSyncRequest);
-    TelemetryPacket::from_u64_slice(
+    Packet::from_u64_slice(
         DataType::TimeSyncRequest,
         &[seq, t1_ms],
         meta.endpoints,
@@ -235,9 +235,9 @@ pub fn build_timesync_response(
     t1_ms: u64,
     t2_ms: u64,
     t3_ms: u64,
-) -> TelemetryResult<TelemetryPacket> {
+) -> TelemetryResult<Packet> {
     let meta = message_meta(DataType::TimeSyncResponse);
-    TelemetryPacket::from_u64_slice(
+    Packet::from_u64_slice(
         DataType::TimeSyncResponse,
         &[seq, t1_ms, t2_ms, t3_ms],
         meta.endpoints,
@@ -259,7 +259,7 @@ pub fn send_timesync_response(
     )
 }
 
-pub fn decode_timesync_announce(pkt: &TelemetryPacket) -> TelemetryResult<TimeSyncAnnounceFields> {
+pub fn decode_timesync_announce(pkt: &Packet) -> TelemetryResult<TimeSyncAnnounceFields> {
     let vals = decode_u64_payload(pkt, DataType::TimeSyncAnnounce, TIMESYNC_ANNOUNCE_WORDS)?;
     Ok(TimeSyncAnnounceFields {
         priority: vals[0],
@@ -267,7 +267,7 @@ pub fn decode_timesync_announce(pkt: &TelemetryPacket) -> TelemetryResult<TimeSy
     })
 }
 
-pub fn decode_timesync_request(pkt: &TelemetryPacket) -> TelemetryResult<TimeSyncRequestFields> {
+pub fn decode_timesync_request(pkt: &Packet) -> TelemetryResult<TimeSyncRequestFields> {
     let vals = decode_u64_payload(pkt, DataType::TimeSyncRequest, TIMESYNC_REQUEST_WORDS)?;
     Ok(TimeSyncRequestFields {
         seq: vals[0],
@@ -275,7 +275,7 @@ pub fn decode_timesync_request(pkt: &TelemetryPacket) -> TelemetryResult<TimeSyn
     })
 }
 
-pub fn decode_timesync_response(pkt: &TelemetryPacket) -> TelemetryResult<TimeSyncResponseFields> {
+pub fn decode_timesync_response(pkt: &Packet) -> TelemetryResult<TimeSyncResponseFields> {
     let vals = decode_u64_payload(pkt, DataType::TimeSyncResponse, TIMESYNC_RESPONSE_WORDS)?;
     Ok(TimeSyncResponseFields {
         seq: vals[0],
@@ -286,7 +286,7 @@ pub fn decode_timesync_response(pkt: &TelemetryPacket) -> TelemetryResult<TimeSy
 }
 
 fn decode_u64_payload(
-    pkt: &TelemetryPacket,
+    pkt: &Packet,
     ty: DataType,
     words: usize,
 ) -> TelemetryResult<Vec<u64>> {

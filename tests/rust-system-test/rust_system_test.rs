@@ -1,9 +1,9 @@
 #[cfg(test)]
 mod threaded_system_tests {
     use sedsprintf_rs_2026::config::{DataEndpoint, DataType};
+    use sedsprintf_rs_2026::packet::Packet;
     use sedsprintf_rs_2026::relay::Relay;
     use sedsprintf_rs_2026::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
-    use sedsprintf_rs_2026::telemetry_packet::TelemetryPacket;
     use sedsprintf_rs_2026::TelemetryResult;
 
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -26,7 +26,7 @@ mod threaded_system_tests {
     /// Build a handler that counts packets received on the Radio endpoint
     /// (this plays the role of the "radio" handler in the C test).
     fn make_radio_handler(counter: Arc<AtomicUsize>) -> EndpointHandler {
-        EndpointHandler::new_packet_handler(DataEndpoint::Radio, move |_pkt: &TelemetryPacket| {
+        EndpointHandler::new_packet_handler(DataEndpoint::Radio, move |_pkt: &Packet| {
             counter.fetch_add(1, Ordering::SeqCst);
             Ok(())
         })
@@ -35,7 +35,7 @@ mod threaded_system_tests {
     /// Build a handler that counts packets received on the SdCard endpoint
     /// (this plays the role of the "SD" handler in the C test).
     fn make_sd_handler(counter: Arc<AtomicUsize>) -> EndpointHandler {
-        EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt: &TelemetryPacket| {
+        EndpointHandler::new_packet_handler(DataEndpoint::SdCard, move |_pkt: &Packet| {
             counter.fetch_add(1, Ordering::SeqCst);
             Ok(())
         })
@@ -50,9 +50,8 @@ mod threaded_system_tests {
 
     /// Build a packet with endpoints [SD_CARD, Radio], mirroring the C
     /// system’s idea that every message goes to both "radio" and "SD".
-    fn make_packet(ty: DataType, vals: &[f32], ts: u64) -> TelemetryPacket {
-        TelemetryPacket::from_f32_slice(ty, vals, &[DataEndpoint::SdCard, DataEndpoint::Radio], ts)
-            .unwrap()
+    fn make_packet(ty: DataType, vals: &[f32], ts: u64) -> Packet {
+        Packet::from_f32_slice(ty, vals, &[DataEndpoint::SdCard, DataEndpoint::Radio], ts).unwrap()
     }
 
     /// Threaded system test that mirrors `main.c` but now uses the Rust
@@ -71,18 +70,20 @@ mod threaded_system_tests {
 
         // Frames sent out of relay on "bus1" side get injected into bus1_rx
         let relay_bus1_tx = bus1_tx.clone();
-        let bus1_side_id = relay.add_side_serialized("bus1", move |bytes: &[u8]| -> TelemetryResult<()> {
-            // from = usize::MAX so we don't accidentally "skip" any node
-            relay_bus1_tx.send((usize::MAX, bytes.to_vec())).unwrap();
-            Ok(())
-        });
+        let bus1_side_id =
+            relay.add_side_serialized("bus1", move |bytes: &[u8]| -> TelemetryResult<()> {
+                // from = usize::MAX so we don't accidentally "skip" any node
+                relay_bus1_tx.send((usize::MAX, bytes.to_vec())).unwrap();
+                Ok(())
+            });
 
         // Frames sent out of relay on "bus2" side get injected into bus2_rx
         let relay_bus2_tx = bus2_tx.clone();
-        let bus2_side_id = relay.add_side_serialized("bus2", move |bytes: &[u8]| -> TelemetryResult<()> {
-            relay_bus2_tx.send((usize::MAX, bytes.to_vec())).unwrap();
-            Ok(())
-        });
+        let bus2_side_id =
+            relay.add_side_serialized("bus2", move |bytes: &[u8]| -> TelemetryResult<()> {
+                relay_bus2_tx.send((usize::MAX, bytes.to_vec())).unwrap();
+                Ok(())
+            });
 
         // ------------- 2) Build nodes -------------
         let stop_flag = Arc::new(AtomicBool::new(false));
@@ -322,13 +323,13 @@ mod threaded_system_tests {
                 thread::sleep(Duration::from_millis(5));
 
                 let msg = "hello world!";
-                let pkt2 = TelemetryPacket::from_str_slice(
+                let pkt2 = Packet::from_str_slice(
                     DataType::TelemetryError,
                     msg,
                     &[DataEndpoint::SdCard, DataEndpoint::Radio],
                     i + 300,
                 )
-                    .unwrap();
+                .unwrap();
                 power_router.tx(pkt2).unwrap();
                 thread::sleep(Duration::from_millis(5));
             }

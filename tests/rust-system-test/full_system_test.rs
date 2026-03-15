@@ -1,9 +1,9 @@
 #[cfg(test)]
 mod mega_library_system_tests {
     use sedsprintf_rs_2026::config::{DataEndpoint, DataType};
+    use sedsprintf_rs_2026::packet::Packet;
     use sedsprintf_rs_2026::relay::Relay;
     use sedsprintf_rs_2026::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
-    use sedsprintf_rs_2026::telemetry_packet::TelemetryPacket;
     use sedsprintf_rs_2026::TelemetryResult;
 
     use sedsprintf_rs_2026::serialize::serialize_packet;
@@ -20,7 +20,7 @@ mod mega_library_system_tests {
     type BusMsg = (&'static str, Vec<u8>);
 
     fn mk_counter_handler(endpoint: DataEndpoint, counter: Arc<AtomicUsize>) -> EndpointHandler {
-        EndpointHandler::new_packet_handler(endpoint, move |_pkt: &TelemetryPacket| {
+        EndpointHandler::new_packet_handler(endpoint, move |_pkt: &Packet| {
             counter.fetch_add(1, Ordering::SeqCst);
             Ok(())
         })
@@ -32,9 +32,9 @@ mod mega_library_system_tests {
         }
     }
 
-    fn make_packet(ty: DataType, vals: &[f32], ts: u64) -> TelemetryPacket {
+    fn make_packet(ty: DataType, vals: &[f32], ts: u64) -> Packet {
         // Every packet targets BOTH endpoints (full coverage)
-        TelemetryPacket::from_f32_slice(ty, vals, &[DataEndpoint::SdCard, DataEndpoint::Radio], ts).unwrap()
+        Packet::from_f32_slice(ty, vals, &[DataEndpoint::SdCard, DataEndpoint::Radio], ts).unwrap()
     }
 
     #[test]
@@ -52,22 +52,25 @@ mod mega_library_system_tests {
         let relay = Arc::new(Relay::new(zero_clock()));
 
         let r_a_tx = bus_a_tx.clone();
-        let relay_side_a = relay.add_side_serialized("bus_a", move |bytes: &[u8]| -> TelemetryResult<()> {
-            r_a_tx.send(("relay", bytes.to_vec())).unwrap();
-            Ok(())
-        });
+        let relay_side_a =
+            relay.add_side_serialized("bus_a", move |bytes: &[u8]| -> TelemetryResult<()> {
+                r_a_tx.send(("relay", bytes.to_vec())).unwrap();
+                Ok(())
+            });
 
         let r_b_tx = bus_b_tx.clone();
-        let relay_side_b = relay.add_side_serialized("bus_b", move |bytes: &[u8]| -> TelemetryResult<()> {
-            r_b_tx.send(("relay", bytes.to_vec())).unwrap();
-            Ok(())
-        });
+        let relay_side_b =
+            relay.add_side_serialized("bus_b", move |bytes: &[u8]| -> TelemetryResult<()> {
+                r_b_tx.send(("relay", bytes.to_vec())).unwrap();
+                Ok(())
+            });
 
         let r_c_tx = bus_c_tx.clone();
-        let relay_side_c = relay.add_side_serialized("bus_c", move |bytes: &[u8]| -> TelemetryResult<()> {
-            r_c_tx.send(("relay", bytes.to_vec())).unwrap();
-            Ok(())
-        });
+        let relay_side_c =
+            relay.add_side_serialized("bus_c", move |bytes: &[u8]| -> TelemetryResult<()> {
+                r_c_tx.send(("relay", bytes.to_vec())).unwrap();
+                Ok(())
+            });
 
         // -------------------------------
         // 3) Stop + stats
@@ -309,13 +312,13 @@ mod mega_library_system_tests {
             thread::spawn(move || {
                 for i in 0..8 {
                     let msg = format!("hello-{i}");
-                    let pkt = TelemetryPacket::from_str_slice(
+                    let pkt = Packet::from_str_slice(
                         DataType::TelemetryError,
                         &msg,
                         &[DataEndpoint::SdCard, DataEndpoint::Radio],
                         200 + i as u64,
                     )
-                        .unwrap();
+                    .unwrap();
 
                     let wire = serialize_packet(&pkt);
                     r.tx_serialized_queue(wire).unwrap();
@@ -342,13 +345,13 @@ mod mega_library_system_tests {
                     hub.tx_serialized(wire_b.clone()).unwrap();
                     hub.tx_serialized_queue(wire_b).unwrap();
 
-                    let pkt_c = TelemetryPacket::from_str_slice(
+                    let pkt_c = Packet::from_str_slice(
                         DataType::TelemetryError,
                         "hub-msg",
                         &[DataEndpoint::SdCard, DataEndpoint::Radio],
                         3000 + i,
                     )
-                        .unwrap();
+                    .unwrap();
                     let wire_c = serialize_packet(&pkt_c);
                     hub.tx_serialized_queue(wire_c).unwrap();
 
@@ -422,11 +425,20 @@ mod mega_library_system_tests {
         let c_r = c_radio_hits.load(Ordering::SeqCst);
         let c_s = c_sd_hits.load(Ordering::SeqCst);
 
-        assert!(a_r >= min_per_node_per_endpoint, "node A radio too low: {a_r}");
+        assert!(
+            a_r >= min_per_node_per_endpoint,
+            "node A radio too low: {a_r}"
+        );
         assert!(a_s >= min_per_node_per_endpoint, "node A sd too low: {a_s}");
-        assert!(b_r >= min_per_node_per_endpoint, "node B radio too low: {b_r}");
+        assert!(
+            b_r >= min_per_node_per_endpoint,
+            "node B radio too low: {b_r}"
+        );
         assert!(b_s >= min_per_node_per_endpoint, "node B sd too low: {b_s}");
-        assert!(c_r >= min_per_node_per_endpoint, "node C radio too low: {c_r}");
+        assert!(
+            c_r >= min_per_node_per_endpoint,
+            "node C radio too low: {c_r}"
+        );
         assert!(c_s >= min_per_node_per_endpoint, "node C sd too low: {c_s}");
 
         // Link-specific handler provenance is no longer exposed (sides are internal).

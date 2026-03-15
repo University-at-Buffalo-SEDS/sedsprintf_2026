@@ -128,7 +128,12 @@ pub const RELIABLE_MAX_PENDING: usize = match option_env!("RELIABLE_MAX_PENDING"
 
 
 // Schema path can be overridden at build time via SEDSPRINTF_RS_SCHEMA_PATH.
-#[cfg(feature = "timesync")]
+// Board-local IPC/link-local additions can be merged via SEDSPRINTF_RS_IPC_SCHEMA_PATH.
+#[cfg(all(feature = "timesync", feature = "discovery"))]
+define_telemetry_schema!(path = "telemetry_config.json", timesync = true, discovery = true);
+#[cfg(all(feature = "timesync", not(feature = "discovery")))]
 define_telemetry_schema!(path = "telemetry_config.json", timesync = true);
-#[cfg(not(feature = "timesync"))]
+#[cfg(all(not(feature = "timesync"), feature = "discovery"))]
+define_telemetry_schema!(path = "telemetry_config.json", discovery = true);
+#[cfg(all(not(feature = "timesync"), not(feature = "discovery")))]
 define_telemetry_schema!(path = "telemetry_config.json");

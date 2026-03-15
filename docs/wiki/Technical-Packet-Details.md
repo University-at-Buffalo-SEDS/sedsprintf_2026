@@ -1,12 +1,12 @@
-# TelemetryPacket Details (Technical)
+# Packet Details (Technical)
 
-This page documents `TelemetryPacket` in
+This page documents `Packet` in
 src/telemetry_packet.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/src/telemetry_packet.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/telemetry_packet.rs))
 and how payload validation works.
 
 ## Structure
 
-`TelemetryPacket` contains:
+`Packet` contains:
 
 - `ty: DataType`
 - `data_size: usize`
@@ -19,7 +19,7 @@ and how payload validation works.
 
 ## Validation rules
 
-`TelemetryPacket::new` and `TelemetryPacket::validate` enforce:
+`Packet::new` and `Packet::validate` enforce:
 
 - Endpoints must be non‑empty.
 - `payload.len() == data_size`.
@@ -42,7 +42,7 @@ For dynamic layouts, the element width is derived from `MessageDataType`:
 
 ## Packet IDs
 
-`TelemetryPacket::packet_id` generates a stable 64‑bit hash for dedupe. It hashes:
+`Packet::packet_id` generates a stable 64‑bit hash for dedupe. It hashes:
 
 - sender bytes
 - message name (`DataType` as string)
@@ -54,7 +54,7 @@ Packet IDs are intentionally side‑agnostic so duplicates on different sides ar
 
 ## Conversions and helpers
 
-TelemetryPacket exposes helpers to decode payloads based on schema metadata:
+Packet exposes helpers to decode payloads based on schema metadata:
 
 - `data_as_f32`, `data_as_i16`, etc. decode little‑endian slices.
 - `data_as_bool` validates boolean payloads.
@@ -70,7 +70,7 @@ values are treated as epoch milliseconds and formatted as UTC date‑time.
 
 ## Formatting for logs
 
-`TelemetryPacket::to_string` builds a human‑readable string that includes:
+`Packet::to_string` builds a human‑readable string that includes:
 
 - Sender ID
 - Message name and class

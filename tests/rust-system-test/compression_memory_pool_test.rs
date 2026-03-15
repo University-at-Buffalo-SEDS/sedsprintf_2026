@@ -1,8 +1,8 @@
 #[cfg(feature = "compression")]
 mod compression_memory_pool_test {
     use sedsprintf_rs_2026::config::{DataEndpoint, DataType};
+    use sedsprintf_rs_2026::packet::Packet;
     use sedsprintf_rs_2026::serialize;
-    use sedsprintf_rs_2026::telemetry_packet::TelemetryPacket;
 
     use std::alloc::{GlobalAlloc, Layout, System};
     use std::ptr::null_mut;
@@ -34,12 +34,8 @@ mod compression_memory_pool_test {
     fn update_peak(live: usize) {
         let mut cur = PEAK_BYTES.load(Ordering::Relaxed);
         while live > cur {
-            match PEAK_BYTES.compare_exchange_weak(
-                cur,
-                live,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
+            match PEAK_BYTES.compare_exchange_weak(cur, live, Ordering::Relaxed, Ordering::Relaxed)
+            {
                 Ok(_) => break,
                 Err(v) => cur = v,
             }
@@ -51,9 +47,7 @@ mod compression_memory_pool_test {
         loop {
             let live = LIVE_BYTES.load(Ordering::Relaxed);
             let next = live.saturating_add(bytes);
-            if ENABLE_LIMIT.load(Ordering::Relaxed)
-                && next > LIMIT_BYTES.load(Ordering::Relaxed)
-            {
+            if ENABLE_LIMIT.load(Ordering::Relaxed) && next > LIMIT_BYTES.load(Ordering::Relaxed) {
                 return false;
             }
             if LIVE_BYTES
@@ -150,15 +144,15 @@ mod compression_memory_pool_test {
         ENABLE_LIMIT.store(false, Ordering::Relaxed);
     }
 
-    fn make_packet(payload: &[u8], ts: u64) -> TelemetryPacket {
-        TelemetryPacket::new(
+    fn make_packet(payload: &[u8], ts: u64) -> Packet {
+        Packet::new(
             DataType::MessageData,
             &[DataEndpoint::SdCard],
             "POOL_TEST",
             ts,
             Arc::<[u8]>::from(payload),
         )
-            .expect("packet build failed")
+        .expect("packet build failed")
     }
 
     #[test]

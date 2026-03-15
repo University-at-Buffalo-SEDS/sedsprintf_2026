@@ -10,6 +10,15 @@ Location:
 telemetry_config.json ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/telemetry_config.json) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/telemetry_config.json)) (
 override path with `SEDSPRINTF_RS_SCHEMA_PATH`)
 
+Optional board-local IPC overlay:
+
+- Set `SEDSPRINTF_RS_IPC_SCHEMA_PATH` to a second JSON file.
+- Its endpoints and types are merged after the base schema during code generation.
+- Overlay endpoints are treated as link-local automatically.
+- Base-schema endpoints are treated as non-link-local automatically.
+- Overlay endpoint/type names must not collide with the base schema.
+- The GUI editor can load/edit/save the base schema and IPC overlay separately.
+
 Generated outputs:
 
 - Rust enums and metadata: `define_telemetry_schema!` in
@@ -37,6 +46,7 @@ Safe changes:
 
 - Appending new endpoints/types to the end of the list.
 - Updating documentation fields (`doc`).
+- Adding board-specific link-local IPC endpoints/types in a separate overlay file via `SEDSPRINTF_RS_IPC_SCHEMA_PATH`.
 
 Risky changes:
 
@@ -56,12 +66,22 @@ Top-level keys:
 - `name`: wire/display name (typically ALL_CAPS).
 - `doc`: optional description.
 - `broadcast_mode`: `Default`, `Always`, or `Never`.
+- `link_local_only`: derived by schema file. Endpoints coming from the IPC overlay are link-local-only; endpoints coming
+  from the base schema are not.
 
 `broadcast_mode` influences forwarding in `RouterMode::Relay`:
 
 - `Always`: forward even if a local handler exists.
 - `Never`: never forward.
 - `Default`: forward only if the endpoint is not handled locally.
+
+Link-local scope further constrains forwarding:
+
+- Base schema endpoint: the endpoint can use any side.
+- IPC overlay endpoint: the endpoint is restricted to link-local/software-bus sides and is excluded from discovery
+  advertisements sent on non-link-local sides.
+
+To keep packet semantics unambiguous, a type must not mix link-local-only endpoints with normal endpoints.
 
 ### Type fields
 
@@ -119,9 +139,9 @@ Helpers:
 
 ## How the schema is used at runtime
 
-- `TelemetryPacket::new` validates payload sizes against `message_meta`.
+- `Packet::new` validates payload sizes against `message_meta`.
 - `Router::log*` uses the schema to validate payload lengths before serialization.
-- `TelemetryPacket::to_string` uses `MessageClass` and `MessageDataType` to format payloads.
+- `Packet::to_string` uses `MessageClass` and `MessageDataType` to format payloads.
 
 ## Example
 
@@ -143,6 +163,9 @@ Helpers:
   ]
 }
 ```
+
+An IPC overlay file uses the same shape. Its endpoints become link-local automatically because they come from the
+overlay file, not because they carry a separate flag.
 
 ## Compatibility checklist
 
