@@ -12,9 +12,9 @@
 //! an ingress side for relay-style behavior.
 
 use crate::{
-    config::DataEndpoint, do_vec_log_typed, get_needed_message_size, message_meta, router::{Clock, LeBytes, RouterSideOptions},
-    router::{EndpointHandler, Router, RouterConfig},
-    serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet}, packet::Packet, DataType,
+    config::DataEndpoint, do_vec_log_typed, get_needed_message_size, message_meta, packet::Packet,
+    router::{Clock, LeBytes, RouterSideOptions},
+    router::{EndpointHandler, Router, RouterConfig}, serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet}, DataType,
     MessageElement,
     TelemetryError,
     TelemetryErrorCode,

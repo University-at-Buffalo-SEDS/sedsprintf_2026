@@ -24,6 +24,7 @@
 //   - SEDSPRINTF_RS_CONFIG_RS=path/to.rs    -> override source file to scan (default: src/config.rs)
 //   - SEDSPRINTF_RS_LIB_RS=path/to.rs       -> override lib.rs to scan (default: src/lib.rs)
 //   - SEDSPRINTF_RS_SCHEMA_PATH=path        -> override telemetry_config.json path
+//   - SEDSPRINTF_RS_IPC_SCHEMA_PATH=path    -> merge a board-local IPC/link-local overlay schema
 
 use regex::Regex;
 use serde::Deserialize;
@@ -33,6 +34,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const SCHEMA_PATH_ENV: &str = "SEDSPRINTF_RS_SCHEMA_PATH";
+const IPC_SCHEMA_PATH_ENV: &str = "SEDSPRINTF_RS_IPC_SCHEMA_PATH";
 const TEST_SCHEMA_FILE: &str = "telemetry_config.test.json";
 
 // ========================= JSON schema =========================
@@ -53,10 +55,10 @@ struct JsonEndpoint {
     #[serde(default)]
     doc: Option<String>,
     /// Optional broadcast mode variant name, e.g. "Default"
-    #[serde(default)]
+    #[serde(default, alias = "broadcast_mode")]
     _broadcast_mode: Option<String>,
     /// Whether this endpoint is restricted to link-local/software-bus sides.
-    #[serde(default)]
+    #[serde(default, alias = "link_local_only")]
     _link_local_only: Option<bool>,
 }
 
@@ -69,7 +71,7 @@ struct JsonType {
     #[serde(default)]
     doc: Option<String>,
 
-    #[serde(default)]
+    #[serde(default, alias = "reliable")]
     _reliable: Option<bool>,
 
     element: JsonElement,
@@ -109,15 +111,18 @@ fn main() {
 
     // Discover schema json path by scanning config.rs for define_telemetry_schema!(path="...")
     let schema_path = resolve_schema_path(&crate_dir, &config_rs_path);
+    let ipc_schema_path = resolve_optional_overlay_path(&crate_dir);
     println!("cargo:rerun-if-changed={}", schema_path.display());
-    // Rebuild if the schema json changes
-    println!("cargo:rerun-if-changed={}", schema_path.display());
+    if let Some(path) = &ipc_schema_path {
+        println!("cargo:rerun-if-changed={}", path.display());
+    }
 
     // Re-run if the override env vars change (so switching paths rebuilds)
     println!("cargo:rerun-if-env-changed=SEDSPRINTF_RS_CONFIG_RS");
     println!("cargo:rerun-if-env-changed=SEDSPRINTF_RS_LIB_RS");
     println!("cargo:rerun-if-env-changed=SEDSPRINTF_RS_SKIP_ENUMGEN");
     println!("cargo:rerun-if-env-changed={SCHEMA_PATH_ENV}");
+    println!("cargo:rerun-if-env-changed={IPC_SCHEMA_PATH_ENV}");
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_TIMESYNC");
 
     // Make the discovered JSON path available to the crate at compile time.
@@ -126,6 +131,9 @@ fn main() {
         "cargo:rustc-env=SEDSPRINTF_RS_SCHEMA_JSON={}",
         schema_path.display()
     );
+    if let Some(path) = &ipc_schema_path {
+        println!("cargo:rustc-env={IPC_SCHEMA_PATH_ENV}={}", path.display());
+    }
 
     // Templates: rebuild if they change
     let header_tpl_path = crate_dir.join("header_templates/sedsprintf.h.txt");
@@ -135,6 +143,11 @@ fn main() {
 
     // Load + validate JSON schema
     let mut cfg = load_schema_absolute(&schema_path);
+    normalize_base_schema(&mut cfg);
+    if let Some(path) = &ipc_schema_path {
+        let overlay = load_schema_absolute(path);
+        merge_ipc_overlay(&mut cfg, overlay, path);
+    }
     let timesync_enabled = is_timesync_enabled();
     let discovery_enabled = is_discovery_enabled();
     validate_schema(&cfg, timesync_enabled, discovery_enabled);
@@ -233,6 +246,19 @@ fn resolve_schema_path(crate_dir: &Path, config_rs_path: &Path) -> PathBuf {
     find_schema_path_from_config_rs(config_rs_path, crate_dir)
 }
 
+fn resolve_optional_overlay_path(crate_dir: &Path) -> Option<PathBuf> {
+    let val = env::var(IPC_SCHEMA_PATH_ENV).ok()?;
+    if val.trim().is_empty() {
+        panic!("{IPC_SCHEMA_PATH_ENV} is set but empty");
+    }
+    let path = PathBuf::from(val);
+    Some(if path.is_absolute() {
+        path
+    } else {
+        crate_dir.join(path)
+    })
+}
+
 // ========================= load / validate =========================
 
 fn load_schema_absolute(path: &Path) -> TelemetryConfig {
@@ -245,6 +271,61 @@ fn load_schema_absolute(path: &Path) -> TelemetryConfig {
             path.display()
         )
     })
+}
+
+fn normalize_base_schema(base: &mut TelemetryConfig) {
+    for ep in &mut base.endpoints {
+        ep._link_local_only = Some(false);
+    }
+}
+
+fn merge_ipc_overlay(base: &mut TelemetryConfig, overlay: TelemetryConfig, overlay_path: &Path) {
+    let mut overlay = overlay;
+    let mut endpoint_rust: HashSet<&str> = base.endpoints.iter().map(|ep| ep.rust.as_str()).collect();
+    let mut endpoint_name: HashSet<&str> = base.endpoints.iter().map(|ep| ep.name.as_str()).collect();
+    let mut type_rust: HashSet<&str> = base.types.iter().map(|ty| ty.rust.as_str()).collect();
+    let mut type_name: HashSet<&str> = base.types.iter().map(|ty| ty.name.as_str()).collect();
+
+    for ep in &mut overlay.endpoints {
+        ep._link_local_only = Some(true);
+    }
+
+    for ep in &overlay.endpoints {
+        if !endpoint_rust.insert(ep.rust.as_str()) {
+            panic!(
+                "{}: IPC overlay endpoint rust variant {:?} collides with the base schema",
+                overlay_path.display(),
+                ep.rust
+            );
+        }
+        if !endpoint_name.insert(ep.name.as_str()) {
+            panic!(
+                "{}: IPC overlay endpoint name {:?} collides with the base schema",
+                overlay_path.display(),
+                ep.name
+            );
+        }
+    }
+
+    for ty in &overlay.types {
+        if !type_rust.insert(ty.rust.as_str()) {
+            panic!(
+                "{}: IPC overlay type rust variant {:?} collides with the base schema",
+                overlay_path.display(),
+                ty.rust
+            );
+        }
+        if !type_name.insert(ty.name.as_str()) {
+            panic!(
+                "{}: IPC overlay type name {:?} collides with the base schema",
+                overlay_path.display(),
+                ty.name
+            );
+        }
+    }
+
+    base.endpoints.extend(overlay.endpoints);
+    base.types.extend(overlay.types);
 }
 
 fn validate_schema(cfg: &TelemetryConfig, timesync_enabled: bool, discovery_enabled: bool) {

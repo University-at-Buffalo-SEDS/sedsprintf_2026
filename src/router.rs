@@ -15,18 +15,18 @@ use crate::config::{
 use crate::discovery::{
     self, DiscoveryCadenceState, TopologySideRoute, TopologySnapshot, DISCOVERY_ROUTE_TTL_MS,
 };
+use crate::packet::hash_bytes_u64;
 use crate::queue::{BoundedDeque, ByteCost};
 #[cfg(all(not(feature = "std"), target_os = "none"))]
 use crate::seds_error_msg;
-use crate::packet::hash_bytes_u64;
 use crate::{
     config::{
         DataEndpoint, DataType, DEVICE_IDENTIFIER, MAX_HANDLER_RETRIES, RELIABLE_MAX_PENDING,
         RELIABLE_MAX_RETRIES, RELIABLE_RETRANSMIT_MS,
     }, get_needed_message_size, impl_letype_num, is_reliable_type,
     lock::RouterMutex,
-    message_meta, reliable_mode, serialize,
-    packet::Packet,
+    message_meta, packet::Packet, reliable_mode,
+    serialize,
     EndpointsBroadcastMode, MessageElement, TelemetryError,
     TelemetryResult,
 };
@@ -804,10 +804,10 @@ impl Router {
                 }
                 if restrict_link_local
                     && st
-                        .sides
-                        .get(side)
-                        .map(|s| !s.opts.link_local_enabled)
-                        .unwrap_or(true)
+                    .sides
+                    .get(side)
+                    .map(|s| !s.opts.link_local_enabled)
+                    .unwrap_or(true)
                 {
                     continue;
                 }

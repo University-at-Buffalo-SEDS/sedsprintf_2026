@@ -1,11 +1,11 @@
 #[cfg(test)]
 mod reliable_drop_tests {
     use sedsprintf_rs::config::{DataEndpoint, DataType, RELIABLE_RETRANSMIT_MS};
+    use sedsprintf_rs::packet::Packet;
     use sedsprintf_rs::router::{
         Clock, EndpointHandler, Router, RouterConfig, RouterMode, RouterSideOptions,
     };
     use sedsprintf_rs::serialize;
-    use sedsprintf_rs::packet::Packet;
     use sedsprintf_rs::TelemetryResult;
 
     use std::collections::VecDeque;

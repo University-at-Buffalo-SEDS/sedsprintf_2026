@@ -1,7 +1,7 @@
 use crate::config::{get_message_meta, STATIC_HEX_LENGTH, STATIC_STRING_LENGTH};
 use crate::get_needed_message_size;
-use crate::router::{Clock, EndpointHandler};
 use crate::packet::Packet;
+use crate::router::{Clock, EndpointHandler};
 use crate::{get_data_type, message_meta, DataEndpoint, DataType, MessageDataType, TelemetryError};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -28,8 +28,8 @@ impl Clock for UnixClock {
 #[cfg(feature = "compression")]
 mod compression_memory_tests {
     use crate::config::{DataEndpoint, DataType};
-    use crate::serialize;
     use crate::packet::Packet;
+    use crate::serialize;
     use std::sync::Arc;
 
     const FLAG_COMPRESSED_PAYLOAD: u8 = 0x01;
@@ -181,9 +181,9 @@ mod tests2 {
     use crate::tests::{get_sd_card_handler, SeenType};
     use crate::{
         config::{DataEndpoint, DataType},
+        packet::Packet,
         router::Router,
         serialize,
-        packet::Packet,
         TelemetryResult,
     };
     use std::sync::{Arc, Mutex};
@@ -699,7 +699,7 @@ mod timeout_tests {
     use crate::router::{EndpointHandler, RouterMode};
     use crate::tests::{get_handler, UnixClock};
     use crate::{
-        router::Clock, router::Router, router::RouterConfig, packet::Packet, DataType,
+        packet::Packet, router::Clock, router::Router, router::RouterConfig, DataType,
         TelemetryResult,
     };
     use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -978,8 +978,8 @@ mod tests_extra {
     use crate::router::RouterMode;
     use crate::tests::test_payload_len_for;
     use crate::{
-        config::DataType, router::{Clock, EndpointHandler, Router, RouterConfig}, serialize,
-        packet::Packet,
+        config::DataType, packet::Packet, router::{Clock, EndpointHandler, Router, RouterConfig},
+        serialize,
         TelemetryError,
         TelemetryErrorCode,
         TelemetryResult,
@@ -1080,7 +1080,7 @@ mod tests_extra {
     #[test]
     fn serializer_is_canonical_roundtrip() {
         use crate::config::{DataEndpoint, DataType};
-        use crate::{serialize, packet::Packet};
+        use crate::{packet::Packet, serialize};
 
         // Dynamic payload to avoid schema constraints and let us vary sizes later.
         let msg = "hello world";
@@ -1105,7 +1105,7 @@ mod tests_extra {
     #[test]
     fn serializer_varint_scalars_grow_as_expected() {
         use crate::config::{DataEndpoint, DataType};
-        use crate::{serialize, packet::Packet};
+        use crate::{packet::Packet, serialize};
 
         fn non_rle_ascii(len: usize) -> Vec<u8> {
             let mut out = Vec::with_capacity(len);
@@ -1167,8 +1167,8 @@ mod tests_extra {
     fn endpoints_bitpack_roundtrip_many_and_extremes() {
         use crate::{
             config::{DataEndpoint, DataType},
-            serialize,
             packet::Packet,
+            serialize,
             MAX_VALUE_DATA_ENDPOINT,
         };
 
@@ -1211,7 +1211,7 @@ mod tests_extra {
     #[test]
     fn peek_envelope_matches_full_parse_on_large_values() {
         use crate::config::{DataEndpoint, DataType};
-        use crate::{serialize, packet::Packet};
+        use crate::{packet::Packet, serialize};
 
         let sender = "S".repeat(10_000); // big sender (varint grows)
         let payload = vec![b'h'; 4096];
@@ -1247,8 +1247,8 @@ mod tests_extra {
     fn corrupt_endpoint_bits_yields_bad_endpoint_error() {
         use crate::{
             config::{DataEndpoint, DataType},
-            serialize,
             packet::Packet,
+            serialize,
             MAX_VALUE_DATA_ENDPOINT,
         };
 
@@ -1305,7 +1305,7 @@ mod tests_extra {
     #[test]
     fn header_size_is_prefix_and_less_than_total() {
         use crate::config::{DataEndpoint, DataType};
-        use crate::{serialize, packet::Packet};
+        use crate::{packet::Packet, serialize};
 
         let pkt = Packet::from_f32_slice(
             DataType::GpsData,
@@ -1603,7 +1603,7 @@ mod tests_more {
     use crate::tests::UnixClock;
     use crate::{
         config::{DataEndpoint, DataType}, get_data_type, get_needed_message_size, message_meta,
-        router::{Clock, EndpointHandler, Router, RouterConfig}, serialize, packet::Packet,
+        packet::Packet, router::{Clock, EndpointHandler, Router, RouterConfig}, serialize,
         MessageDataType,
         MessageElement, TelemetryError, TelemetryErrorCode,
         TelemetryResult,
@@ -1992,7 +1992,7 @@ mod tests_more {
     #[test]
     fn serialize_packet_is_order_invariant_for_endpoints() {
         use crate::config::{DataEndpoint, DataType};
-        use crate::{serialize, packet::Packet};
+        use crate::{packet::Packet, serialize};
 
         let eps_a = &[DataEndpoint::Radio, DataEndpoint::SdCard];
         let eps_b = &[DataEndpoint::SdCard, DataEndpoint::Radio];
@@ -2079,9 +2079,9 @@ mod concurrency_tests {
     use crate::router::RouterMode;
     use crate::{
         config::{DataEndpoint, DataType},
+        packet::Packet,
         router::{Clock, EndpointHandler, Router, RouterConfig},
         serialize,
-        packet::Packet,
         TelemetryResult,
     };
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -2716,7 +2716,7 @@ mod relay_tests {
 
     use crate::relay::Relay;
     use crate::tests::timeout_tests::StepClock;
-    use crate::{serialize, packet::Packet, TelemetryError, TelemetryResult};
+    use crate::{packet::Packet, serialize, TelemetryError, TelemetryResult};
     use core::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
@@ -2987,7 +2987,7 @@ mod dedupe_tests {
     use crate::relay::Relay;
     use crate::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
     use crate::tests::timeout_tests::StepClock;
-    use crate::{serialize, packet::Packet, TelemetryResult};
+    use crate::{packet::Packet, serialize, TelemetryResult};
 
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
@@ -3286,7 +3286,7 @@ mod relay_reliable_tests {
     use crate::relay::{Relay, RelaySideOptions};
     use crate::router::Clock;
     use crate::tests::timeout_tests::StepClock;
-    use crate::{serialize, packet::Packet, TelemetryResult};
+    use crate::{packet::Packet, serialize, TelemetryResult};
 
     use std::sync::{Arc, Mutex};
 
@@ -3578,7 +3578,7 @@ mod reliable_tests {
         Clock, EndpointHandler, Router, RouterConfig, RouterMode, RouterSideOptions,
     };
     use crate::tests::timeout_tests::StepClock;
-    use crate::{serialize, packet::Packet, TelemetryResult};
+    use crate::{packet::Packet, serialize, TelemetryResult};
 
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
@@ -3810,8 +3810,8 @@ mod router_tests {
     // -------------------------------------------------------------------------
 
     use crate::config::{DataEndpoint, DataType};
-    use crate::router::{EndpointHandler, Router, RouterMode};
     use crate::packet::Packet;
+    use crate::router::{EndpointHandler, Router, RouterMode};
     use crate::tests::timeout_tests::StepClock;
     use crate::{serialize, TelemetryResult};
     use std::sync::{Arc, Mutex};
@@ -3960,12 +3960,34 @@ mod router_tests {
         use crate::relay::Relay;
         use crate::router::{Clock, EndpointHandler, RouterConfig};
         use crate::tests::timeout_tests::StepClock;
-        use crate::{DataEndpoint, DataType, TelemetryResult};
         use crate::{packet::Packet, router::{Router, RouterMode}};
+        use crate::{DataEndpoint, DataType, TelemetryResult};
         use std::sync::{Arc, Mutex};
 
         fn zero_clock() -> Box<dyn Clock + Send + Sync> {
             StepClock::new_box(0, 0)
+        }
+
+        fn endpoint_by_name(name: &str) -> Option<DataEndpoint> {
+            for i in 0..=crate::MAX_VALUE_DATA_ENDPOINT {
+                if let Some(ep) = DataEndpoint::try_from_u32(i)
+                    && ep.as_str() == name
+                {
+                    return Some(ep);
+                }
+            }
+            None
+        }
+
+        fn datatype_by_name(name: &str) -> Option<DataType> {
+            for i in 0..=crate::MAX_VALUE_DATA_TYPE {
+                if let Some(ty) = DataType::try_from_u32(i)
+                    && crate::get_message_name(ty) == name
+                {
+                    return Some(ty);
+                }
+            }
+            None
         }
 
         #[test]
@@ -3995,7 +4017,7 @@ mod router_tests {
                 &[DataEndpoint::Radio],
                 1,
             )
-            .unwrap();
+                .unwrap();
             router.tx(msg).unwrap();
 
             let got_a = seen_a.lock().unwrap().clone();
@@ -4036,7 +4058,7 @@ mod router_tests {
                 &[DataEndpoint::Radio],
                 2,
             )
-            .unwrap();
+                .unwrap();
             relay.rx_from_side(side_c, msg).unwrap();
             relay.process_all_queues().unwrap();
 
@@ -4106,7 +4128,7 @@ mod router_tests {
                 &[DataEndpoint::Radio],
                 3,
             )
-            .unwrap();
+                .unwrap();
             router.tx(msg).unwrap();
 
             assert_eq!(seen_a.lock().unwrap().len(), 1);
@@ -4132,6 +4154,8 @@ mod router_tests {
 
         #[test]
         fn link_local_only_packets_stay_on_software_bus_sides() {
+            let Some(software_bus) = endpoint_by_name("SOFTWARE_BUS") else { return; };
+            let Some(ipc_message) = datatype_by_name("IPC_MESSAGE") else { return; };
             let seen_net: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
             let seen_ll: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
             let seen_net_c = seen_net.clone();
@@ -4155,11 +4179,56 @@ mod router_tests {
             );
 
             let pkt = Packet::new(
-                DataType::IpcMessage,
-                &[DataEndpoint::SoftwareBus],
+                ipc_message,
+                &[software_bus],
                 "IPC_NODE",
                 7,
                 Arc::<[u8]>::from(b"hello-ipc".as_slice()),
+            )
+                .unwrap();
+            router.tx(pkt).unwrap();
+
+            assert!(seen_net.lock().unwrap().is_empty());
+            assert_eq!(seen_ll.lock().unwrap().len(), 1);
+        }
+
+        #[test]
+        fn link_local_routes_ignore_non_link_local_discovery_candidates() {
+            let Some(software_bus) = endpoint_by_name("SOFTWARE_BUS") else { return; };
+            let Some(ipc_message) = datatype_by_name("IPC_MESSAGE") else { return; };
+            let seen_net: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_ll: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_net_c = seen_net.clone();
+            let seen_ll_c = seen_ll.clone();
+
+            let router = Router::new(RouterMode::Sink, RouterConfig::default(), zero_clock());
+            let side_net = router.add_side_packet("NET", move |pkt: &Packet| -> TelemetryResult<()> {
+                seen_net_c.lock().unwrap().push(pkt.clone());
+                Ok(())
+            });
+            let side_ll = router.add_side_packet_with_options(
+                "LL",
+                move |pkt: &Packet| -> TelemetryResult<()> {
+                    seen_ll_c.lock().unwrap().push(pkt.clone());
+                    Ok(())
+                },
+                crate::router::RouterSideOptions {
+                    reliable_enabled: false,
+                    link_local_enabled: true,
+                },
+            );
+
+            let pkt_net = build_discovery_announce("NET_NODE", 0, &[software_bus]).unwrap();
+            router.rx_from_side(&pkt_net, side_net).unwrap();
+            let pkt_ll = build_discovery_announce("LL_NODE", 0, &[software_bus]).unwrap();
+            router.rx_from_side(&pkt_ll, side_ll).unwrap();
+
+            let pkt = Packet::new(
+                ipc_message,
+                &[software_bus],
+                "IPC_NODE",
+                8,
+                Arc::<[u8]>::from(b"stay-local".as_slice()),
             )
             .unwrap();
             router.tx(pkt).unwrap();
@@ -4169,7 +4238,58 @@ mod router_tests {
         }
 
         #[test]
+        fn relay_link_local_routes_ignore_non_link_local_discovery_candidates() {
+            let Some(software_bus) = endpoint_by_name("SOFTWARE_BUS") else { return; };
+            let Some(ipc_message) = datatype_by_name("IPC_MESSAGE") else { return; };
+            let seen_net: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_ll: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_net_c = seen_net.clone();
+            let seen_ll_c = seen_ll.clone();
+
+            let relay = Relay::new(zero_clock());
+            let side_net = relay.add_side_packet("NET", move |pkt: &Packet| -> TelemetryResult<()> {
+                seen_net_c.lock().unwrap().push(pkt.clone());
+                Ok(())
+            });
+            let side_ll = relay.add_side_packet_with_options(
+                "LL",
+                move |pkt: &Packet| -> TelemetryResult<()> {
+                    seen_ll_c.lock().unwrap().push(pkt.clone());
+                    Ok(())
+                },
+                crate::relay::RelaySideOptions {
+                    reliable_enabled: false,
+                    link_local_enabled: true,
+                },
+            );
+            let side_src = relay.add_side_packet("SRC", |_pkt: &Packet| -> TelemetryResult<()> { Ok(()) });
+
+            let pkt_net = build_discovery_announce("NET_NODE", 0, &[software_bus]).unwrap();
+            relay.rx_from_side(side_net, pkt_net).unwrap();
+            let pkt_ll = build_discovery_announce("LL_NODE", 0, &[software_bus]).unwrap();
+            relay.rx_from_side(side_ll, pkt_ll).unwrap();
+            relay.process_all_queues().unwrap();
+            seen_net.lock().unwrap().clear();
+            seen_ll.lock().unwrap().clear();
+
+            let pkt = Packet::new(
+                ipc_message,
+                &[software_bus],
+                "IPC_NODE",
+                9,
+                Arc::<[u8]>::from(b"relay-local".as_slice()),
+            )
+            .unwrap();
+            relay.rx_from_side(side_src, pkt).unwrap();
+            relay.process_all_queues().unwrap();
+
+            assert!(seen_net.lock().unwrap().is_empty());
+            assert_eq!(seen_ll.lock().unwrap().len(), 1);
+        }
+
+        #[test]
         fn discovery_hides_link_local_endpoints_from_network_sides() {
+            let Some(software_bus) = endpoint_by_name("SOFTWARE_BUS") else { return; };
             let seen_net: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
             let seen_ll: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
             let seen_net_c = seen_net.clone();
@@ -4178,7 +4298,7 @@ mod router_tests {
             let router = Router::new(
                 RouterMode::Sink,
                 RouterConfig::new(vec![
-                    EndpointHandler::new_packet_handler(DataEndpoint::SoftwareBus, |_pkt| Ok(())),
+                    EndpointHandler::new_packet_handler(software_bus, |_pkt| Ok(())),
                     EndpointHandler::new_packet_handler(DataEndpoint::Radio, |_pkt| Ok(())),
                 ]),
                 zero_clock(),
@@ -4208,9 +4328,9 @@ mod router_tests {
             assert_eq!(ll.len(), 1);
             let net_eps = crate::discovery::decode_discovery_announce(&net[0]).unwrap();
             let ll_eps = crate::discovery::decode_discovery_announce(&ll[0]).unwrap();
-            assert!(!net_eps.contains(&DataEndpoint::SoftwareBus));
+            assert!(!net_eps.contains(&software_bus));
             assert!(net_eps.contains(&DataEndpoint::Radio));
-            assert!(ll_eps.contains(&DataEndpoint::SoftwareBus));
+            assert!(ll_eps.contains(&software_bus));
         }
     }
 

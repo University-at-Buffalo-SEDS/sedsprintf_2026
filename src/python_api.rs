@@ -33,9 +33,9 @@ use pyo3::types::{PyBytes, PyDict, PyList, PyModule, PyTuple};
 use std::sync::{Arc as SArc, Mutex, OnceLock};
 
 use crate::{
-    config::{DataEndpoint, DataType}, get_message_name, get_needed_message_size, message_meta, relay::{Relay, RelaySideOptions},
-    router::{Clock, EndpointHandler, LeBytes, Router, RouterConfig, RouterMode, RouterSideOptions},
-    serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet}, packet::Packet, try_enum_from_u32,
+    config::{DataEndpoint, DataType}, get_message_name, get_needed_message_size, message_meta, packet::Packet,
+    relay::{Relay, RelaySideOptions},
+    router::{Clock, EndpointHandler, LeBytes, Router, RouterConfig, RouterMode, RouterSideOptions}, serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet}, try_enum_from_u32,
     MessageElement,
     TelemetryError,
     TelemetryResult,

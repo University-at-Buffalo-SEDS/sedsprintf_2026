@@ -55,6 +55,8 @@ MESSAGE_CLASS_OPTIONS = ["Data", "Error", "Warning"]
 BROADCAST_MODE_OPTIONS = ["Always", "Never", "Default"]
 ELEMENT_KIND_OPTIONS = ["Static", "Dynamic"]
 RELIABLE_MODE_OPTIONS = ["None", "Ordered", "Unordered"]
+SCHEMA_SCOPE_BASE = "base"
+SCHEMA_SCOPE_IPC = "ipc"
 
 
 def _is_reserved_telemetry_error(rust: str) -> bool:
@@ -104,6 +106,15 @@ def find_schema_json_from_config_rs(config_rs: Path, crate_root: Path) -> Option
             f"Multiple define_telemetry_schema!(path=...) entries found in {config_rs} with different paths"
         )
     return (script_root / first).resolve()
+
+
+def find_ipc_schema_json() -> Optional[Path]:
+    script_root = Path(__file__).resolve().parent
+    raw = os.environ.get("SEDSPRINTF_RS_IPC_SCHEMA_PATH", "").strip()
+    if not raw:
+        return None
+    p = Path(raw)
+    return (p if p.is_absolute() else (script_root / p)).resolve()
 
 
 def default_blank_config() -> Dict[str, Any]:
@@ -224,23 +235,45 @@ def _lb_add_unique(lb: tk.Listbox, items: List[str]) -> None:
 
 
 class TelemetryConfigEditor(tk.Tk):
-    def __init__(self, crate_root: Path, config_rs: Path, json_path: Optional[Path]):
+    def __init__(
+        self,
+        crate_root: Path,
+        config_rs: Path,
+        base_json_path: Optional[Path],
+        ipc_json_path: Optional[Path],
+    ):
         super().__init__()
         self.title("Telemetry Config Editor (sedsprintf_rs)")
         self.geometry("1200x760")
 
         self.crate_root = crate_root
         self.config_rs_path = config_rs
-        self.json_path = json_path
-
-        self.config_obj: Dict[str, Any] = default_blank_config()
+        self.scope_var = tk.StringVar(value=SCHEMA_SCOPE_BASE)
+        self.config_objs: Dict[str, Dict[str, Any]] = {
+            SCHEMA_SCOPE_BASE: default_blank_config(),
+            SCHEMA_SCOPE_IPC: default_blank_config(),
+        }
+        self.json_paths: Dict[str, Optional[Path]] = {
+            SCHEMA_SCOPE_BASE: base_json_path,
+            SCHEMA_SCOPE_IPC: ipc_json_path,
+        }
         self.status_var = tk.StringVar(value="")
-        self.json_path_var = tk.StringVar(value=self._json_path_display())
+        self.base_json_path_var = tk.StringVar(value=self._json_path_display(SCHEMA_SCOPE_BASE))
+        self.ipc_json_path_var = tk.StringVar(value=self._json_path_display(SCHEMA_SCOPE_IPC))
 
         # HASH-BASED dirty state
-        self._saved_hash: str = ""  # baseline (loaded/saved)
-        self._cur_hash: str = ""  # current
-        self.dirty = False
+        self._saved_hashes: Dict[str, str] = {
+            SCHEMA_SCOPE_BASE: "",
+            SCHEMA_SCOPE_IPC: "",
+        }
+        self._cur_hashes: Dict[str, str] = {
+            SCHEMA_SCOPE_BASE: "",
+            SCHEMA_SCOPE_IPC: "",
+        }
+        self.dirty_map: Dict[str, bool] = {
+            SCHEMA_SCOPE_BASE: False,
+            SCHEMA_SCOPE_IPC: False,
+        }
 
         # Live-edit bookkeeping
         self._suspend_live = False
@@ -263,58 +296,87 @@ class TelemetryConfigEditor(tk.Tk):
         self.nb.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
         # Initial load
-        if self.json_path and self.json_path.exists():
-            self.load_from_path(self.json_path)
-        else:
-            self.refresh_lists()
-            # baseline = current (no "unsaved changes" just for being open)
-            self._reset_saved_hash_to_current()
-            self._set_status(
-                "No JSON loaded. Use File → Save As… to create one, or choose an existing file.",
-            )
+        self._load_initial_scope(SCHEMA_SCOPE_BASE)
+        self._load_initial_scope(SCHEMA_SCOPE_IPC)
+        self.refresh_lists()
+        self._set_status_for_scope()
 
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.after(0, self._bring_to_front)  # type: ignore
 
     # ---------------- Hash + dirty management ----------------
 
-    def _canonical_bytes(self) -> bytes:
+    def _current_scope(self) -> str:
+        scope = self.scope_var.get()
+        if scope not in (SCHEMA_SCOPE_BASE, SCHEMA_SCOPE_IPC):
+            return SCHEMA_SCOPE_BASE
+        return scope
+
+    def _active_config(self) -> Dict[str, Any]:
+        return self.config_objs[self._current_scope()]
+
+    def _active_path(self) -> Optional[Path]:
+        return self.json_paths[self._current_scope()]
+
+    def _set_active_path(self, path: Optional[Path]):
+        scope = self._current_scope()
+        self.json_paths[scope] = path
+        if scope == SCHEMA_SCOPE_BASE:
+            self.base_json_path_var.set(self._json_path_display(SCHEMA_SCOPE_BASE))
+        else:
+            self.ipc_json_path_var.set(self._json_path_display(SCHEMA_SCOPE_IPC))
+
+    def _scope_label(self, scope: Optional[str] = None) -> str:
+        scope = self._current_scope() if scope is None else scope
+        return "IPC overlay" if scope == SCHEMA_SCOPE_IPC else "base schema"
+
+    def _load_initial_scope(self, scope: str):
+        path = self.json_paths[scope]
+        if path and path.exists():
+            self.load_from_path(scope, path)
+            return
+        self.config_objs[scope] = default_blank_config()
+        self._reset_saved_hash_to_current(scope)
+
+    def _canonical_bytes(self, scope: Optional[str] = None) -> bytes:
         """
         Stable serialization for hashing.
         - sort_keys=True so dict key ordering doesn't matter.
         - separators minimize whitespace differences.
         - keep list order (endpoints/types order is meaningful).
         """
-        blob = json.dumps(self.config_obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        cfg = self.config_objs[self._current_scope() if scope is None else scope]
+        blob = json.dumps(cfg, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         return blob.encode("utf-8")
 
-    def _compute_hash(self) -> str:
-        return hashlib.sha256(self._canonical_bytes()).hexdigest()
+    def _compute_hash(self, scope: Optional[str] = None) -> str:
+        return hashlib.sha256(self._canonical_bytes(scope)).hexdigest()
 
-    def _update_hash_state(self, *, set_status: bool = False):
-        self._cur_hash = self._compute_hash()
-        self.dirty = (self._cur_hash != self._saved_hash)
+    def _update_hash_state(self, scope: Optional[str] = None, *, set_status: bool = False):
+        scope = self._current_scope() if scope is None else scope
+        self._cur_hashes[scope] = self._compute_hash(scope)
+        self.dirty_map[scope] = self._cur_hashes[scope] != self._saved_hashes[scope]
         if set_status:
-            if self.dirty:
-                if self.json_path:
-                    self._set_status(f"Modified (not saved) — {self.json_path}")
+            path = self.json_paths[scope]
+            if self.dirty_map[scope]:
+                if path:
+                    self._set_status(f"{self._scope_label(scope).capitalize()} modified — {path}")
                 else:
-                    self._set_status("Modified (not saved) — no JSON path yet")
+                    self._set_status(f"{self._scope_label(scope).capitalize()} modified — no JSON path yet")
             else:
-                # don't spam status; only set if we have something meaningful
-                if self.json_path:
-                    self._set_status(f"Up to date — {self.json_path}")
+                if path:
+                    self._set_status(f"{self._scope_label(scope).capitalize()} up to date — {path}")
                 else:
-                    self._set_status("Up to date")
+                    self._set_status(f"{self._scope_label(scope).capitalize()} up to date")
 
     def _mark_changed(self):
-        # Call after any mutation that might change the config
         self._update_hash_state(set_status=True)
 
-    def _reset_saved_hash_to_current(self):
-        self._cur_hash = self._compute_hash()
-        self._saved_hash = self._cur_hash
-        self.dirty = False
+    def _reset_saved_hash_to_current(self, scope: Optional[str] = None):
+        scope = self._current_scope() if scope is None else scope
+        self._cur_hashes[scope] = self._compute_hash(scope)
+        self._saved_hashes[scope] = self._cur_hashes[scope]
+        self.dirty_map[scope] = False
 
     # ---------------- Shortcuts ----------------
 
@@ -342,7 +404,6 @@ class TelemetryConfigEditor(tk.Tk):
     def _setup_live_edit_traces(self):
         self.ep_rust_var.trace_add("write", lambda *_: self._schedule_live_endpoint_apply())  # type: ignore
         self.ep_bm_var.trace_add("write", lambda *_: self._schedule_live_endpoint_apply())  # type: ignore
-        self.ep_link_local_var.trace_add("write", lambda *_: self._schedule_live_endpoint_apply())  # type: ignore
         self.ep_doc_text.bind("<<Modified>>", self._on_ep_doc_modified)
 
         self.ty_rust_var.trace_add("write", lambda *_: self._schedule_live_type_apply())  # type: ignore
@@ -422,7 +483,8 @@ class TelemetryConfigEditor(tk.Tk):
         idx = self._ep_edit_idx
         if idx is None:
             return
-        eps = self.config_obj.get("endpoints", [])
+        cfg = self._active_config()
+        eps = cfg.get("endpoints", [])
         if idx < 0 or idx >= len(eps):
             return
 
@@ -432,7 +494,6 @@ class TelemetryConfigEditor(tk.Tk):
         old_rust = str(ep.get("rust", ""))
         new_rust = self.ep_rust_var.get().strip()
         new_bm = (self.ep_bm_var.get() or "Default").strip()
-        new_link_local = bool(self.ep_link_local_var.get())
         new_doc = self.ep_doc_text.get("1.0", tk.END).strip()
 
         if new_rust and _is_reserved_telemetry_error(new_rust):
@@ -453,7 +514,10 @@ class TelemetryConfigEditor(tk.Tk):
             ep["name"] = rust_ident_to_schema_name(new_rust)
         ep["doc"] = new_doc
         ep["broadcast_mode"] = new_bm
-        ep["link_local_only"] = new_link_local
+        if self._current_scope() == SCHEMA_SCOPE_IPC:
+            ep["link_local_only"] = True
+        else:
+            ep.pop("link_local_only", None)
 
         rename_map = None
         if old_rust and new_rust and old_rust != new_rust:
@@ -474,7 +538,8 @@ class TelemetryConfigEditor(tk.Tk):
         idx = self._ty_edit_idx
         if idx is None:
             return
-        tys = self.config_obj.get("types", [])
+        cfg = self._active_config()
+        tys = cfg.get("types", [])
         if idx < 0 or idx >= len(tys):
             return
 
@@ -482,7 +547,7 @@ class TelemetryConfigEditor(tk.Tk):
         before = self._compute_hash()
 
         sel_eps = _lb_all(self.ty_selected_endpoints)
-        known_eps = {ep.get("rust", "") for ep in self.config_obj.get("endpoints", []) if ep.get("rust", "")}
+        known_eps = {ep.get("rust", "") for ep in cfg.get("endpoints", []) if ep.get("rust", "")}
 
         new_rust = self.ty_rust_var.get().strip()
         new_class = (self.ty_class_var.get() or "Data").strip()
@@ -554,19 +619,41 @@ class TelemetryConfigEditor(tk.Tk):
             except Exception:
                 pass
 
-    def _json_path_display(self) -> str:
-        return "(not found)" if self.json_path is None else str(self.json_path)
+    def _json_path_display(self, scope: str) -> str:
+        path = self.json_paths[scope]
+        if path is None:
+            return "(not set)"
+        return str(path)
+
+    def _set_status_for_scope(self):
+        scope = self._current_scope()
+        path = self.json_paths[scope]
+        if self.dirty_map[scope]:
+            if path:
+                self._set_status(f"Editing {self._scope_label(scope)} — modified — {path}")
+            else:
+                self._set_status(f"Editing {self._scope_label(scope)} — modified — no JSON path yet")
+            return
+        if path:
+            self._set_status(f"Editing {self._scope_label(scope)} — {path}")
+        else:
+            self._set_status(f"Editing {self._scope_label(scope)} — no JSON path yet")
 
     # ---------------- UI scaffolding ----------------
 
     def _build_menu(self):
         menubar = tk.Menu(self)
         filem = tk.Menu(menubar, tearoff=0)
-        filem.add_command(label="Open JSON…", command=self.menu_open_json)
-        filem.add_command(label="Save", command=self.menu_save, accelerator="Ctrl/Cmd+S")
-        filem.add_command(label="Save As…", command=self.menu_save_as)
+        filem.add_command(label="Open Base JSON…", command=lambda: self.menu_open_json(SCHEMA_SCOPE_BASE))
+        filem.add_command(label="Open IPC JSON…", command=lambda: self.menu_open_json(SCHEMA_SCOPE_IPC))
         filem.add_separator()
-        filem.add_command(label="Re-scan config.rs for JSON path", command=self.menu_rescan)
+        filem.add_command(label="Save Current", command=self.menu_save, accelerator="Ctrl/Cmd+S")
+        filem.add_command(label="Save Current As…", command=self.menu_save_as)
+        filem.add_command(label="Save Base", command=lambda: self.menu_save_scope(SCHEMA_SCOPE_BASE))
+        filem.add_command(label="Save IPC", command=lambda: self.menu_save_scope(SCHEMA_SCOPE_IPC))
+        filem.add_separator()
+        filem.add_command(label="Re-scan base path from config.rs", command=self.menu_rescan_base)
+        filem.add_command(label="Re-scan IPC path from env", command=self.menu_rescan_ipc)
         filem.add_separator()
         filem.add_command(label="Quit", command=self.on_close)
         menubar.add_cascade(label="File", menu=filem)
@@ -585,8 +672,33 @@ class TelemetryConfigEditor(tk.Tk):
         ttk.Label(hdr, text="config.rs:").pack(side="left")
         ttk.Label(hdr, text=str(self.config_rs_path), foreground="gray").pack(side="left", padx=(6, 14))
 
-        ttk.Label(hdr, text="json:").pack(side="left")
-        ttk.Label(hdr, textvariable=self.json_path_var, foreground="gray").pack(side="left", padx=(6, 14))
+        ttk.Label(hdr, text="base json:").pack(side="left")
+        ttk.Label(hdr, textvariable=self.base_json_path_var, foreground="gray").pack(
+            side="left", padx=(6, 14)
+        )
+
+        ttk.Label(hdr, text="ipc json:").pack(side="left")
+        ttk.Label(hdr, textvariable=self.ipc_json_path_var, foreground="gray").pack(
+            side="left", padx=(6, 14)
+        )
+
+        scope = ttk.Frame(top)
+        scope.pack(fill="x", pady=(10, 0))
+        ttk.Label(scope, text="Editing:").pack(side="left")
+        ttk.Radiobutton(
+            scope,
+            text="Base schema",
+            value=SCHEMA_SCOPE_BASE,
+            variable=self.scope_var,
+            command=self.on_scope_changed,
+        ).pack(side="left", padx=(8, 0))
+        ttk.Radiobutton(
+            scope,
+            text="IPC overlay",
+            value=SCHEMA_SCOPE_IPC,
+            variable=self.scope_var,
+            command=self.on_scope_changed,
+        ).pack(side="left", padx=(8, 0))
 
         nb = ttk.Notebook(top)
         nb.pack(fill="both", expand=True, pady=(10, 0))
@@ -650,11 +762,10 @@ class TelemetryConfigEditor(tk.Tk):
             right, textvariable=self.ep_bm_var, values=BROADCAST_MODE_OPTIONS, state="readonly"
         ).grid(row=2, column=1, sticky="w", padx=(10, 0), pady=(10, 0))
 
-        self.ep_link_local_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
+        ttk.Label(
             right,
-            text="Link-local only (software bus / IPC)",
-            variable=self.ep_link_local_var,
+            text="Link-local scope is derived automatically from the active file.",
+            foreground="gray",
         ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(10, 0))
 
         ttk.Label(
@@ -809,27 +920,34 @@ class TelemetryConfigEditor(tk.Tk):
 
     # ---------------- Menu actions ----------------
 
-    def menu_open_json(self):
+    def on_scope_changed(self):
+        self._flush_all_pending()
+        self.refresh_lists()
+        self._set_status_for_scope()
+
+    def menu_open_json(self, scope: str):
         self._flush_all_pending()
         p = filedialog.askopenfilename(
-            title="Open telemetry_config.json",
+            title=f"Open {self._scope_label(scope)} JSON",
             initialdir=str(self.crate_root),
             filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
         )
         if not p:
             return
-        self.load_from_path(Path(p).resolve())
+        self.load_from_path(scope, Path(p).resolve())
+        if self._current_scope() == scope:
+            self.refresh_lists()
 
     def menu_save(self):
-        if self.json_path is None:
+        if self._active_path() is None:
             self.menu_save_as()
             return
-        self.save_to_path(self.json_path)
+        self.save_to_path(self._current_scope(), self._active_path())
 
     def menu_save_as(self):
         self._flush_all_pending()
         p = filedialog.asksaveasfilename(
-            title="Save telemetry_config.json as…",
+            title=f"Save {self._scope_label()} as…",
             initialdir=str(self.crate_root),
             defaultextension=".json",
             filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
@@ -837,11 +955,25 @@ class TelemetryConfigEditor(tk.Tk):
         if not p:
             return
         path = Path(p).resolve()
-        self.save_to_path(path)
-        self.json_path = path
-        self.json_path_var.set(str(self.json_path))
+        self.save_to_path(self._current_scope(), path)
+        self._set_active_path(path)
 
-    def menu_rescan(self):
+    def menu_save_scope(self, scope: str):
+        path = self.json_paths[scope]
+        if path is None:
+            current = self._current_scope()
+            try:
+                self.scope_var.set(scope)
+                self.menu_save_as()
+            finally:
+                self.scope_var.set(current)
+                self.refresh_lists()
+            return
+        self.save_to_path(scope, path)
+        if self._current_scope() == scope:
+            self.refresh_lists()
+
+    def menu_rescan_base(self):
         self._flush_all_pending()
         found = find_schema_json_from_config_rs(self.config_rs_path, self.crate_root)
         if found is None:
@@ -849,25 +981,54 @@ class TelemetryConfigEditor(tk.Tk):
                 f"Could not find define_telemetry_schema!(path=...) in {self.config_rs_path}",
             )
             return
-        self.json_path = found
-        self.json_path_var.set(str(found))
+        self.json_paths[SCHEMA_SCOPE_BASE] = found
+        self.base_json_path_var.set(str(found))
         if found.exists():
-            self.load_from_path(found)
+            self.load_from_path(SCHEMA_SCOPE_BASE, found)
+            if self._current_scope() == SCHEMA_SCOPE_BASE:
+                self.refresh_lists()
         else:
-            self._set_status(f"Discovered JSON path: {found} (does not exist yet)")
+            self._set_status(f"Discovered base schema path: {found} (does not exist yet)")
+
+    def menu_rescan_ipc(self):
+        self._flush_all_pending()
+        found = find_ipc_schema_json()
+        self.json_paths[SCHEMA_SCOPE_IPC] = found
+        self.ipc_json_path_var.set(self._json_path_display(SCHEMA_SCOPE_IPC))
+        if found is None:
+            self._set_status("SEDSPRINTF_RS_IPC_SCHEMA_PATH is not set")
+            return
+        if found.exists():
+            self.load_from_path(SCHEMA_SCOPE_IPC, found)
+            if self._current_scope() == SCHEMA_SCOPE_IPC:
+                self.refresh_lists()
+        else:
+            self.config_objs[SCHEMA_SCOPE_IPC] = default_blank_config()
+            self._reset_saved_hash_to_current(SCHEMA_SCOPE_IPC)
+            if self._current_scope() == SCHEMA_SCOPE_IPC:
+                self.refresh_lists()
+            self._set_status(f"Discovered IPC overlay path: {found} (does not exist yet)")
 
     # ---------------- Load / save ----------------
 
     def _normalize_schema_names(self) -> bool:
         changed = False
-        for ep in self.config_obj.get("endpoints", []) or []:
+        cfg = self._active_config()
+        for ep in cfg.get("endpoints", []) or []:
             rust = str(ep.get("rust", "")).strip()
             expected = rust_ident_to_schema_name(rust)
             if ep.get("name") != expected:
                 ep["name"] = expected
                 changed = True
+            if self._current_scope() == SCHEMA_SCOPE_IPC:
+                if ep.get("link_local_only") is not True:
+                    ep["link_local_only"] = True
+                    changed = True
+            elif "link_local_only" in ep:
+                ep.pop("link_local_only", None)
+                changed = True
 
-        for ty in self.config_obj.get("types", []) or []:
+        for ty in cfg.get("types", []) or []:
             rust = str(ty.get("rust", "")).strip()
             expected = rust_ident_to_schema_name(rust)
             if ty.get("name") != expected:
@@ -876,9 +1037,10 @@ class TelemetryConfigEditor(tk.Tk):
         return changed
 
     def _sync_type_endpoints_to_known(self, rename_map: Optional[Dict[str, str]] = None) -> bool:
-        known = {ep.get("rust", "") for ep in self.config_obj.get("endpoints", []) if ep.get("rust", "")}
+        cfg = self._active_config()
+        known = {ep.get("rust", "") for ep in cfg.get("endpoints", []) if ep.get("rust", "")}
         changed = False
-        for ty in self.config_obj.get("types", []) or []:
+        for ty in cfg.get("types", []) or []:
             eps = ty.get("endpoints", []) or []
             if not isinstance(eps, list):
                 ty["endpoints"] = []
@@ -896,62 +1058,76 @@ class TelemetryConfigEditor(tk.Tk):
                 changed = True
         return changed
 
-    def load_from_path(self, path: Path):
+    def load_from_path(self, scope: str, path: Path):
         self._flush_all_pending()
         obj = safe_read_json(path)
         if obj is None:
-            self.config_obj = default_blank_config()
-            self.json_path = path
-            self.json_path_var.set(str(path))
-            self.refresh_lists()
-            self._reset_saved_hash_to_current()
-            self._set_status(f"File does not exist: {path}. Starting with blank config.")
+            self.config_objs[scope] = default_blank_config()
+            self.json_paths[scope] = path
+            self.base_json_path_var.set(self._json_path_display(SCHEMA_SCOPE_BASE))
+            self.ipc_json_path_var.set(self._json_path_display(SCHEMA_SCOPE_IPC))
+            if self._current_scope() == scope:
+                self.refresh_lists()
+            self._reset_saved_hash_to_current(scope)
+            self._set_status(f"{self._scope_label(scope).capitalize()} file does not exist: {path}. Starting blank.")
             return
 
-        self.config_obj = obj
-        self.json_path = path
-        self.json_path_var.set(str(path))
+        saved_hash_original = hashlib.sha256(
+            json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        ).hexdigest()
+        prev_scope = self._current_scope()
+        self.scope_var.set(scope)
+        self.config_objs[scope] = obj
+        self.json_paths[scope] = path
+        self.base_json_path_var.set(self._json_path_display(SCHEMA_SCOPE_BASE))
+        self.ipc_json_path_var.set(self._json_path_display(SCHEMA_SCOPE_IPC))
 
         # normalize/enforce (may change config)
         self._normalize_schema_names()
         self._sync_type_endpoints_to_known()
 
-        self.refresh_lists()
+        if prev_scope == scope:
+            self.refresh_lists()
+        self.scope_var.set(prev_scope)
 
         # baseline is the *loaded file state* (but we normalized/enforced already),
         # so if normalization changed anything, it should be considered unsaved.
         # Achieve that by:
         #  - saved_hash = hash of the ORIGINAL file content
         #  - current_hash = hash after normalize/enforce
-        saved_hash_original = hashlib.sha256(
-            json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-        ).hexdigest()
-        self._saved_hash = saved_hash_original
-        self._update_hash_state(set_status=False)
+        self._saved_hashes[scope] = saved_hash_original
+        self._update_hash_state(scope, set_status=False)
 
-        if self.dirty:
-            self._set_status(f"Loaded {path} (normalized/enforced invariants; please Save)")
-        else:
-            self._set_status(f"Loaded {path}")
+        if self.dirty_map[scope]:
+            self._set_status(
+                f"Loaded {self._scope_label(scope)} {path} (normalized/enforced invariants; please Save)"
+            )
+        elif self._current_scope() == scope:
+            self._set_status(f"Loaded {self._scope_label(scope)} {path}")
 
-    def save_to_path(self, path: Path):
+    def save_to_path(self, scope: str, path: Path):
         self._flush_all_pending()
+        prev_scope = self._current_scope()
+        self.scope_var.set(scope)
         self._normalize_schema_names()
         self._sync_type_endpoints_to_known()
 
         try:
-            self.validate_current_config()
+            self.validate_current_config(scope)
         except Exception as e:
+            self.scope_var.set(prev_scope)
             messagebox.showerror("Validation error", str(e))
             return
 
-        safe_write_json(path, self.config_obj)
-        self.json_path = path
-        self.json_path_var.set(str(path))
+        safe_write_json(path, self._active_config())
+        self.json_paths[scope] = path
+        self.base_json_path_var.set(self._json_path_display(SCHEMA_SCOPE_BASE))
+        self.ipc_json_path_var.set(self._json_path_display(SCHEMA_SCOPE_IPC))
 
         # after actual save, baseline becomes current
-        self._reset_saved_hash_to_current()
-        self._set_status(f"Saved {path}")
+        self._reset_saved_hash_to_current(scope)
+        self.scope_var.set(prev_scope)
+        self._set_status(f"Saved {self._scope_label(scope)} {path}")
 
     # ---------------- Helpers ----------------
 
@@ -960,16 +1136,25 @@ class TelemetryConfigEditor(tk.Tk):
 
     def on_close(self):
         self._flush_all_pending()
-        self._update_hash_state(set_status=False)
-        if self.dirty:
+        self._update_hash_state(SCHEMA_SCOPE_BASE, set_status=False)
+        self._update_hash_state(SCHEMA_SCOPE_IPC, set_status=False)
+        if any(self.dirty_map.values()):
             if not messagebox.askyesno("Unsaved changes", "You have unsaved changes. Quit anyway?"):
                 return
         self.destroy()
 
-    def validate_current_config(self):
-        obj = self.config_obj
+    def validate_current_config(self, scope: Optional[str] = None):
+        scope = self._current_scope() if scope is None else scope
+        obj = self.config_objs[scope]
+        other_scope = SCHEMA_SCOPE_IPC if scope == SCHEMA_SCOPE_BASE else SCHEMA_SCOPE_BASE
+        other_obj = self.config_objs[other_scope]
         if "endpoints" not in obj or "types" not in obj:
             raise RuntimeError("JSON must contain top-level keys: endpoints, types")
+
+        other_endpoint_rust = {str(ep.get("rust", "")).strip() for ep in other_obj.get("endpoints", [])}
+        other_endpoint_name = {str(ep.get("name", "")).strip() for ep in other_obj.get("endpoints", [])}
+        other_type_rust = {str(ty.get("rust", "")).strip() for ty in other_obj.get("types", [])}
+        other_type_name = {str(ty.get("name", "")).strip() for ty in other_obj.get("types", [])}
 
         for i, ep in enumerate(obj["endpoints"]):
             rust = str(ep.get("rust", "")).strip()
@@ -986,6 +1171,14 @@ class TelemetryConfigEditor(tk.Tk):
                 )
             if name == "TELEMETRY_ERROR":
                 raise RuntimeError("TelemetryError endpoint is built-in and must not be defined in the schema")
+            if rust in other_endpoint_rust:
+                raise RuntimeError(
+                    f"endpoints[{i}].rust collides with {self._scope_label(other_scope)} endpoint {rust!r}"
+                )
+            if name in other_endpoint_name:
+                raise RuntimeError(
+                    f"endpoints[{i}].name collides with {self._scope_label(other_scope)} endpoint {name!r}"
+                )
 
             bm = ep.get("broadcast_mode", "Default")
             if bm not in BROADCAST_MODE_OPTIONS:
@@ -993,9 +1186,17 @@ class TelemetryConfigEditor(tk.Tk):
                     f"endpoints[{i}].broadcast_mode must be one of {BROADCAST_MODE_OPTIONS}, got {bm!r}"
                 )
             ll = ep.get("link_local_only", False)
-            if not isinstance(ll, bool):
+            if "link_local_only" in ep and not isinstance(ll, bool):
                 raise RuntimeError(
                     f"endpoints[{i}].link_local_only must be boolean, got {ll!r}"
+                )
+            if scope == SCHEMA_SCOPE_IPC and ll is not True:
+                raise RuntimeError(
+                    f"endpoints[{i}] ({rust}) in the IPC overlay must set link_local_only=true"
+                )
+            if scope == SCHEMA_SCOPE_BASE and "link_local_only" in ep:
+                raise RuntimeError(
+                    f"endpoints[{i}] ({rust}) in the base schema must not set link_local_only"
                 )
 
         endpoint_rust_set = {ep.get("rust", "") for ep in obj["endpoints"]}
@@ -1016,6 +1217,14 @@ class TelemetryConfigEditor(tk.Tk):
                 )
             if name == "TELEMETRY_ERROR":
                 raise RuntimeError("TelemetryError is built-in and must not be defined in the schema")
+            if rust in other_type_rust:
+                raise RuntimeError(
+                    f"types[{i}].rust collides with {self._scope_label(other_scope)} type {rust!r}"
+                )
+            if name in other_type_name:
+                raise RuntimeError(
+                    f"types[{i}].name collides with {self._scope_label(other_scope)} type {name!r}"
+                )
 
             cls = ty.get("class", "")
             if cls not in MESSAGE_CLASS_OPTIONS:
@@ -1057,40 +1266,63 @@ class TelemetryConfigEditor(tk.Tk):
                         f"Known endpoints: {sorted(endpoint_rust_set)}"
                     )
             used_eps = [ep for ep in obj["endpoints"] if ep.get("rust", "") in eps]
-            has_link_local = any(bool(ep.get("link_local_only", False)) for ep in used_eps)
-            has_non_link_local = any(not bool(ep.get("link_local_only", False)) for ep in used_eps)
+            has_link_local = scope == SCHEMA_SCOPE_IPC and bool(used_eps)
+            has_non_link_local = scope == SCHEMA_SCOPE_BASE and bool(used_eps)
             if has_link_local and has_non_link_local:
                 raise RuntimeError(
                     f"types[{i}] ({rust}) mixes link-local-only and normal endpoints; split it into separate types"
                 )
 
     def refresh_lists(self):
+        cfg = self._active_config()
+        self._ep_edit_idx = None
+        self._ty_edit_idx = None
         self.endpoint_list.delete(0, tk.END)
-        for ep in self.config_obj.get("endpoints", []):
+        for ep in cfg.get("endpoints", []):
             self.endpoint_list.insert(tk.END, _endpoint_row_text(ep))
 
         self.type_list.delete(0, tk.END)
-        for ty in self.config_obj.get("types", []):
+        for ty in cfg.get("types", []):
             self.type_list.insert(tk.END, _type_row_text(ty))
 
         self.ty_available_endpoints.delete(0, tk.END)
-        for ep in self.config_obj.get("endpoints", []):
+        for ep in cfg.get("endpoints", []):
             r = ep.get("rust", "")
             if r:
                 self.ty_available_endpoints.insert(tk.END, r)
+
+        self.ty_selected_endpoints.delete(0, tk.END)
+        self._suspend_live = True
+        try:
+            self.ep_rust_var.set("")
+            self.ep_doc_text.delete("1.0", tk.END)
+            self.ep_doc_text.edit_modified(False)
+            self.ep_bm_var.set("Default")
+            self.ty_rust_var.set("")
+            self.ty_class_var.set("Data")
+            self.ty_kind_var.set("Static")
+            self.ty_dtype_var.set(DATA_TYPE_OPTIONS[0])
+            self.ty_count_var.set("1")
+            self.ty_reliable_mode_var.set("None")
+            self.ty_doc_text.configure(state="normal")
+            self.ty_doc_text.delete("1.0", tk.END)
+            self.ty_doc_text.edit_modified(False)
+            self._update_count_visibility()
+        finally:
+            self._suspend_live = False
 
     # ---------------- Endpoints actions ----------------
 
     def add_endpoint(self):
         self._flush_endpoint_only()
         rust = "NewEndpoint"
-        self.config_obj.setdefault("endpoints", []).append(
+        self._active_config().setdefault("endpoints", []).append(
             {
                 "rust": rust,
                 "name": rust_ident_to_schema_name(rust),
                 "doc": "",
                 "broadcast_mode": "Default",
-                "link_local_only": False,
+                **({"link_local_only": True} if self._current_scope() == SCHEMA_SCOPE_IPC else {}),
             }
         )
         self.refresh_lists()
@@ -1105,12 +1337,13 @@ class TelemetryConfigEditor(tk.Tk):
         idx = _selected_index(self.endpoint_list)
         if idx is None:
             return
-        ep = self.config_obj["endpoints"][idx]
+        cfg = self._active_config()
+        ep = cfg["endpoints"][idx]
         if not messagebox.askyesno("Delete endpoint", f"Delete endpoint {ep.get('rust')}?"):
             return
 
         removed_rust = ep.get("rust", "")
-        del self.config_obj["endpoints"][idx]
+        del cfg["endpoints"][idx]
 
         self._sync_type_endpoints_to_known(rename_map={removed_rust: ""})
         self.refresh_lists()
@@ -1126,7 +1359,7 @@ class TelemetryConfigEditor(tk.Tk):
             return
 
         self._ep_edit_idx = idx
-        ep = self.config_obj["endpoints"][idx]
+        ep = self._active_config()["endpoints"][idx]
 
         self._suspend_live = True
         try:
@@ -1135,7 +1368,6 @@ class TelemetryConfigEditor(tk.Tk):
             self.ep_doc_text.insert("1.0", ep.get("doc", "") or "")
             self.ep_doc_text.edit_modified(False)
             self.ep_bm_var.set(ep.get("broadcast_mode", "Default") or "Default")
-            self.ep_link_local_var.set(bool(ep.get("link_local_only", False)))
         finally:
             self._suspend_live = False
 
@@ -1144,7 +1376,7 @@ class TelemetryConfigEditor(tk.Tk):
     def add_type(self):
         self._flush_type_only()
         rust = "NewType"
-        self.config_obj.setdefault("types", []).append(
+        self._active_config().setdefault("types", []).append(
             {
                 "rust": rust,
                 "name": rust_ident_to_schema_name(rust),
@@ -1169,12 +1401,13 @@ class TelemetryConfigEditor(tk.Tk):
             idx = self._ty_edit_idx
         if idx is None:
             return
-        if idx < 0 or idx >= len(self.config_obj.get("types", [])):
+        cfg = self._active_config()
+        if idx < 0 or idx >= len(cfg.get("types", [])):
             return
-        ty = self.config_obj["types"][idx]
+        ty = cfg["types"][idx]
         if not messagebox.askyesno("Delete type", f"Delete type {ty.get('rust')}?"):
             return
-        del self.config_obj["types"][idx]
+        del cfg["types"][idx]
         self.refresh_lists()
         self._mark_changed()
 
@@ -1187,7 +1420,8 @@ class TelemetryConfigEditor(tk.Tk):
             return
 
         self._ty_edit_idx = idx
-        ty = self.config_obj["types"][idx]
+        cfg = self._active_config()
+        ty = cfg["types"][idx]
 
         self._suspend_live = True
         try:
@@ -1220,7 +1454,7 @@ class TelemetryConfigEditor(tk.Tk):
 
             selected = ty.get("endpoints", []) or []
             selected_set = set(selected)
-            all_eps = [ep.get("rust", "") for ep in self.config_obj.get("endpoints", []) if ep.get("rust", "")]
+            all_eps = [ep.get("rust", "") for ep in cfg.get("endpoints", []) if ep.get("rust", "")]
             available = [e for e in all_eps if e not in selected_set]
 
             self.ty_available_endpoints.delete(0, tk.END)
@@ -1237,7 +1471,7 @@ class TelemetryConfigEditor(tk.Tk):
     def _refresh_type_editor_if_selected(self):
         if self._ty_edit_idx is None:
             return
-        if self._ty_edit_idx < 0 or self._ty_edit_idx >= len(self.config_obj.get("types", [])):
+        if self._ty_edit_idx < 0 or self._ty_edit_idx >= len(self._active_config().get("types", [])):
             return
         idx = self._ty_edit_idx
         try:
@@ -1289,15 +1523,21 @@ def main():
             config_rs = Path(sys.argv[1]).resolve()
             crate_root = find_project_root(config_rs)
 
-    json_path = None
+    base_json_path = None
+    ipc_json_path = find_ipc_schema_json()
     if config_rs.exists():
         try:
-            json_path = find_schema_json_from_config_rs(config_rs, crate_root)
+            base_json_path = find_schema_json_from_config_rs(config_rs, crate_root)
         except Exception as e:
             print(f"warning: {e}", file=sys.stderr)
-            json_path = None
+            base_json_path = None
 
-    app = TelemetryConfigEditor(crate_root=crate_root, config_rs=config_rs, json_path=json_path)
+    app = TelemetryConfigEditor(
+        crate_root=crate_root,
+        config_rs=config_rs,
+        base_json_path=base_json_path,
+        ipc_json_path=ipc_json_path,
+    )
     app.mainloop()
 
 

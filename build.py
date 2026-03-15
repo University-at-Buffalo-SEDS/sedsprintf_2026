@@ -37,6 +37,7 @@ Options (can be combined where it makes sense):
   target=<triple>         Set Rust compilation target (e.g. target=thumbv7em-none-eabihf).
   device_id=<id>          Set DEVICE_IDENTIFIER env var for the build.
   schema_path=<path>      Set SEDSPRINTF_RS_SCHEMA_PATH for the build.
+  ipc_schema_path=<path>  Set SEDSPRINTF_RS_IPC_SCHEMA_PATH for a board-local IPC overlay.
 
 New (compile-time env vars):
   max_stack_payload=<n>   Set MAX_STACK_PAYLOAD for define_stack_payload!(env="MAX_STACK_PAYLOAD", ...).
@@ -638,6 +639,7 @@ def main(argv: list[str]) -> None:
     target = ""
     device_id = ""
     schema_path = ""
+    ipc_schema_path = ""
 
     env_overrides: dict[str, str] = {}
 
@@ -689,6 +691,12 @@ def main(argv: list[str]) -> None:
             if not schema_path:
                 print_help("schema_path requires a value")
             env_overrides["SEDSPRINTF_RS_SCHEMA_PATH"] = schema_path
+
+        elif arg.startswith("ipc_schema_path="):
+            ipc_schema_path = arg.split("=", 1)[1]
+            if not ipc_schema_path:
+                print_help("ipc_schema_path requires a value")
+            env_overrides["SEDSPRINTF_RS_IPC_SCHEMA_PATH"] = ipc_schema_path
 
         elif arg.startswith("max_stack_payload="):
             v = arg.split("=", 1)[1].strip()

@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use crate::router::encode_slice_le;
 use crate::{
-    packet::Packet, DataEndpoint, DataType, TelemetryError, TelemetryResult, try_enum_from_u32,
+    packet::Packet, try_enum_from_u32, DataEndpoint, DataType, TelemetryError, TelemetryResult,
 };
 
 pub const DISCOVERY_ROUTE_TTL_MS: u64 = 30_000;

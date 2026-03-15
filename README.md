@@ -239,8 +239,14 @@ You can edit it directly or use the GUI editor:
 ./telemetry_config_editor.py
 ```
 
-The editor auto-discovers the JSON path from `src/config.rs` (or `SEDSPRINTF_RS_SCHEMA_PATH`), lets you add
-endpoints/types, and writes the schema back to `telemetry_config.json`.
+The editor auto-discovers the base JSON path from `src/config.rs` (or `SEDSPRINTF_RS_SCHEMA_PATH`) and the IPC overlay
+path from `SEDSPRINTF_RS_IPC_SCHEMA_PATH`. It can switch between the shared base schema and the board-local IPC overlay
+and edit/save them independently.
+
+For board-local IPC/software-bus endpoints, keep the shared schema fixed and provide a second JSON file through
+`SEDSPRINTF_RS_IPC_SCHEMA_PATH` (or `./build.py ipc_schema_path=path/to/ipc_config.json`). That overlay is merged at
+build time. Endpoints from the IPC overlay are treated as link-local automatically; endpoints from the base schema are
+treated as non-link-local automatically.
 
 Note: `TelemetryError` (data type and endpoint) is built-in and must not appear in the JSON schema.
 
