@@ -166,9 +166,14 @@ set(SEDSPRINTF_RS_ENV_MAX_QUEUE_SIZE "65536" CACHE STRING "" FORCE)
 # Use the provided CMake glue
 add_subdirectory(${CMAKE_SOURCE_DIR}/sedsprintf_rs sedsprintf_rs_build)
 
+# Optional: prefer static linking even on host builds
+# set(SEDSPRINTF_RS_PREFER_DYNAMIC OFF CACHE BOOL "" FORCE)
+
 # Link against the imported target
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE sedsprintf_rs::sedsprintf_rs)
 ```
+
+Host CMake builds now prefer the shared Rust library when supported. Embedded builds still use the static library.
 
 - Configure telemetry schema via `telemetry_config.json` (endpoints + message types). The Rust enum metadata is
   generated
