@@ -248,6 +248,20 @@ def output_hint_for_cmd(
     return None
 
 
+def cargo_lib_build_cmd(
+        *,
+        build_mode: list[str],
+        build_args: list[str],
+        build_shared: bool,
+) -> list[str]:
+    cmd = ["cargo", "rustc", "--lib", *build_mode, *build_args]
+    crate_types = ["rlib", "staticlib"]
+    if build_shared:
+        crate_types.append("cdylib")
+    cmd.extend(["--crate-type", ",".join(crate_types)])
+    return cmd
+
+
 def run_cmd(
         cmd: list[str],
         *,
@@ -844,6 +858,7 @@ def main(argv: list[str]) -> None:
     build_args: list[str] = []
     embedded_profile = False
     feature_suffix = ",timesync" if build_timesync else ""
+    build_shared = not build_embedded and not build_python
 
     if build_embedded:
         if not target:
@@ -879,7 +894,7 @@ def main(argv: list[str]) -> None:
         before_sizes = collect_artifact_sizes(repo_root, target=target, profile=profile_name)
 
         run_cmd(
-            ["cargo", "build", *build_mode, *build_args],
+            cargo_lib_build_cmd(build_mode=build_mode, build_args=build_args, build_shared=False),
             env=env,
             repo_root=repo_root,
             title="cargo build (embedded)",
@@ -939,7 +954,7 @@ def main(argv: list[str]) -> None:
         build_args.extend(["--features", "timesync"])
 
     run_cmd(
-        ["cargo", "build", *build_mode, *build_args],
+        cargo_lib_build_cmd(build_mode=build_mode, build_args=build_args, build_shared=build_shared),
         env=env,
         repo_root=repo_root,
         title="cargo build",

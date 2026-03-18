@@ -12,7 +12,7 @@ categories = ["embedded", "no-std"]
 readme = "README.md"
 
 [lib]
-crate-type = ["rlib", "staticlib", "cdylib"]
+crate-type = ["rlib", "staticlib"]
 
 [features]
 default = ["std", "compression", "timesync", "discovery"]
