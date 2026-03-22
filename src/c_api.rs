@@ -625,6 +625,24 @@ pub extern "C" fn seds_router_configure_timesync(
 
 #[cfg(feature = "timesync")]
 #[unsafe(no_mangle)]
+pub extern "C" fn seds_router_poll_timesync(r: *mut SedsRouter, out_did_queue: *mut bool) -> i32 {
+    if r.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let router = unsafe { &(*r).inner };
+    match router.poll_timesync() {
+        Ok(did_queue) => {
+            if !out_did_queue.is_null() {
+                unsafe { *out_did_queue = did_queue };
+            }
+            status_from_result_code(SedsResult::SedsOk)
+        }
+        Err(e) => status_from_err(e),
+    }
+}
+
+#[cfg(feature = "timesync")]
+#[unsafe(no_mangle)]
 pub extern "C" fn seds_router_set_local_network_time(
     r: *mut SedsRouter,
     has_year: bool,
