@@ -56,8 +56,9 @@ Sedsprintf_rs also supports python bindings via pyo3. to use you need maturin in
 
 With the optional `discovery` feature, routers and relays can exchange built-in discovery packets, learn which
 endpoints are reachable through which sides, adapt the announce rate as the topology changes, and export a live topology
-snapshot for inspection. When a route is known, forwarding becomes more selective; when it is not known, the system
-falls back to ordinary flooding.
+snapshot for inspection. When `timesync` is also enabled, discovery can advertise concrete time source sender IDs so
+`TIME_SYNC` requests prefer exact source paths instead of generic endpoint flooding. When a route is known, forwarding
+becomes more selective; when it is not known, the system falls back to ordinary flooding.
 
 The size of the header in a serialized packet is around 20 bytes (the size will change based on the total number of
 endpoints in your system and the length of the sender string), plus a 4-byte CRC32 trailer. As a rough example, a packet
@@ -65,6 +66,16 @@ containing three floats is on the order of mid-30s bytes total. This small size 
 environments.
 
 ---
+
+## Version 3.4.1 highlights
+
+- Discovery can now advertise reachable time source sender IDs in addition to endpoint reachability.
+- `TIME_SYNC` routing now prefers the exact discovered path to the selected source instead of sending requests to every
+  side that merely exposes `TIME_SYNC`.
+- Same-priority time source failover now keeps standby sources active so backup selection can happen immediately when
+  the current winner times out.
+- Source-side time sync responses now return to the requesting ingress side, reducing unnecessary traffic.
+- Full changelog: [v3.4.0...v3.4.1](https://github.com/Rylan-Meilutis/sedsprintf_rs/compare/v3.4.0...v3.4.1)
 
 ## Version 3.4.0 highlights
 

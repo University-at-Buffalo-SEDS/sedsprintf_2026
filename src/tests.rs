@@ -3897,7 +3897,9 @@ mod router_tests {
 
     #[cfg(feature = "discovery")]
     mod discovery_tests {
-        use crate::discovery::{DISCOVERY_FAST_INTERVAL_MS, build_discovery_announce};
+        use crate::discovery::{
+            DISCOVERY_FAST_INTERVAL_MS, build_discovery_announce, build_discovery_timesync_sources,
+        };
         use crate::relay::Relay;
         use crate::router::{Clock, EndpointHandler, RouterConfig};
         use crate::tests::timeout_tests::StepClock;
@@ -4309,6 +4311,193 @@ mod router_tests {
             assert!(!net_eps.contains(&software_bus));
             assert!(net_eps.contains(&DataEndpoint::Radio));
             assert!(ll_eps.contains(&software_bus));
+        }
+
+        #[cfg(feature = "timesync")]
+        #[test]
+        fn discovery_advertises_timesync_endpoint_when_enabled() {
+            let seen: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_c = seen.clone();
+
+            let router = Router::new_with_clock(
+                RouterMode::Sink,
+                RouterConfig::default().with_timesync(crate::timesync::TimeSyncConfig::default()),
+                zero_clock(),
+            );
+            router.add_side_packet("NET", move |pkt: &Packet| -> TelemetryResult<()> {
+                seen_c.lock().unwrap().push(pkt.clone());
+                Ok(())
+            });
+
+            router.announce_discovery().unwrap();
+            router.process_tx_queue().unwrap();
+
+            let pkts = seen.lock().unwrap().clone();
+            let announce = pkts
+                .iter()
+                .find(|pkt| pkt.data_type() == DataType::DiscoveryAnnounce)
+                .unwrap();
+            let eps = crate::discovery::decode_discovery_announce(announce).unwrap();
+            assert!(eps.contains(&DataEndpoint::TimeSync));
+        }
+
+        #[cfg(all(feature = "timesync", feature = "discovery"))]
+        #[test]
+        fn timesync_packets_use_discovery_candidates_instead_of_flooding() {
+            let seen_a: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_b: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_a_c = seen_a.clone();
+            let seen_b_c = seen_b.clone();
+
+            let router = Router::new_with_clock(
+                RouterMode::Sink,
+                RouterConfig::default().with_timesync(crate::timesync::TimeSyncConfig::default()),
+                zero_clock(),
+            );
+            let side_a = router.add_side_packet("A", move |pkt: &Packet| -> TelemetryResult<()> {
+                seen_a_c.lock().unwrap().push(pkt.clone());
+                Ok(())
+            });
+            router.add_side_packet("B", move |pkt: &Packet| -> TelemetryResult<()> {
+                seen_b_c.lock().unwrap().push(pkt.clone());
+                Ok(())
+            });
+
+            let discovery_pkt =
+                build_discovery_announce("REMOTE_A", 0, &[DataEndpoint::TimeSync]).unwrap();
+            router.rx_from_side(&discovery_pkt, side_a).unwrap();
+
+            let request = crate::timesync::build_timesync_request(1, 123).unwrap();
+            router.tx(request).unwrap();
+
+            assert_eq!(seen_a.lock().unwrap().len(), 1);
+            assert!(seen_b.lock().unwrap().is_empty());
+            assert_eq!(
+                seen_a.lock().unwrap()[0].data_type(),
+                DataType::TimeSyncRequest
+            );
+        }
+
+        #[cfg(feature = "timesync")]
+        #[test]
+        fn discovery_advertises_local_timesync_source_ids() {
+            let seen: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_c = seen.clone();
+
+            let router = Router::new_with_clock(
+                RouterMode::Sink,
+                RouterConfig::default().with_timesync(crate::timesync::TimeSyncConfig {
+                    role: crate::timesync::TimeSyncRole::Source,
+                    ..Default::default()
+                }),
+                zero_clock(),
+            );
+            router.add_side_packet("NET", move |pkt: &Packet| -> TelemetryResult<()> {
+                seen_c.lock().unwrap().push(pkt.clone());
+                Ok(())
+            });
+
+            router.announce_discovery().unwrap();
+            router.process_tx_queue().unwrap();
+
+            let pkts = seen.lock().unwrap().clone();
+            let src_pkt = pkts
+                .iter()
+                .find(|pkt| pkt.data_type() == DataType::DiscoveryTimeSyncSources)
+                .unwrap();
+            let sources = crate::discovery::decode_discovery_timesync_sources(src_pkt).unwrap();
+            assert!(sources.contains(&crate::config::DEVICE_IDENTIFIER.to_string()));
+        }
+
+        #[cfg(all(feature = "timesync", feature = "discovery"))]
+        #[test]
+        fn timesync_requests_prefer_exact_discovered_source_route() {
+            let seen_a: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_b: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_a_c = seen_a.clone();
+            let seen_b_c = seen_b.clone();
+
+            let router = Router::new_with_clock(
+                RouterMode::Sink,
+                RouterConfig::default().with_timesync(crate::timesync::TimeSyncConfig::default()),
+                zero_clock(),
+            );
+            let side_a = router.add_side_packet("A", move |pkt: &Packet| -> TelemetryResult<()> {
+                seen_a_c.lock().unwrap().push(pkt.clone());
+                Ok(())
+            });
+            let side_b = router.add_side_packet("B", move |pkt: &Packet| -> TelemetryResult<()> {
+                seen_b_c.lock().unwrap().push(pkt.clone());
+                Ok(())
+            });
+
+            let generic_timesync =
+                build_discovery_announce("SIDE_A", 0, &[DataEndpoint::TimeSync]).unwrap();
+            router.rx_from_side(&generic_timesync, side_a).unwrap();
+            let exact_source =
+                build_discovery_timesync_sources("SIDE_B", 0, &["SRC_BEST"]).unwrap();
+            router.rx_from_side(&exact_source, side_b).unwrap();
+
+            let source_announce =
+                crate::timesync::build_timesync_announce_with_sender("SRC_BEST", 1, 1000).unwrap();
+            router.rx(&source_announce).unwrap();
+
+            let request = crate::timesync::build_timesync_request(1, 123).unwrap();
+            router.tx(request).unwrap();
+
+            assert!(seen_a.lock().unwrap().is_empty());
+            assert_eq!(seen_b.lock().unwrap().len(), 1);
+            assert_eq!(
+                seen_b.lock().unwrap()[0].data_type(),
+                DataType::TimeSyncRequest
+            );
+        }
+
+        #[cfg(feature = "timesync")]
+        #[test]
+        fn timesync_responses_return_only_to_requesting_side() {
+            let seen_a: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_b: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_a_c = seen_a.clone();
+            let seen_b_c = seen_b.clone();
+
+            let router = Router::new_with_clock(
+                RouterMode::Sink,
+                RouterConfig::default().with_timesync(crate::timesync::TimeSyncConfig {
+                    role: crate::timesync::TimeSyncRole::Source,
+                    ..Default::default()
+                }),
+                zero_clock(),
+            );
+            let side_a = router.add_side_packet("A", move |pkt: &Packet| -> TelemetryResult<()> {
+                seen_a_c.lock().unwrap().push(pkt.clone());
+                Ok(())
+            });
+            router.add_side_packet("B", move |pkt: &Packet| -> TelemetryResult<()> {
+                seen_b_c.lock().unwrap().push(pkt.clone());
+                Ok(())
+            });
+
+            let request = crate::timesync::build_timesync_request(7, 111).unwrap();
+            router.rx_from_side(&request, side_a).unwrap();
+            router.process_tx_queue().unwrap();
+
+            let got_a = seen_a.lock().unwrap().clone();
+            let got_b = seen_b.lock().unwrap().clone();
+            assert_eq!(
+                got_a
+                    .iter()
+                    .filter(|pkt| pkt.data_type() == DataType::TimeSyncResponse)
+                    .count(),
+                1
+            );
+            assert_eq!(
+                got_b
+                    .iter()
+                    .filter(|pkt| pkt.data_type() == DataType::TimeSyncResponse)
+                    .count(),
+                0
+            );
         }
     }
 

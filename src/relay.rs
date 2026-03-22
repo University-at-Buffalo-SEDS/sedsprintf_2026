@@ -14,8 +14,10 @@ use crate::{
     router::Clock,
     {TelemetryError, TelemetryResult, lock::RouterMutex},
 };
+use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 use alloc::collections::{BTreeMap, VecDeque};
+use alloc::string::String;
 use alloc::{sync::Arc, vec::Vec};
 
 /// Logical side index (CAN, UART, RADIO, etc.)
@@ -112,6 +114,7 @@ struct ReliableRxState {
 #[derive(Debug, Clone, Default)]
 struct DiscoverySideState {
     reachable: Vec<crate::DataEndpoint>,
+    reachable_timesync_sources: Vec<String>,
     last_seen_ms: u64,
 }
 
@@ -411,6 +414,10 @@ impl Relay {
                 return Ok(RemoteSidePlan::Flood);
             }
 
+            #[cfg(feature = "timesync")]
+            let preferred_timesync_source = self.preferred_timesync_route_source(data, ty)?;
+            #[cfg(not(feature = "timesync"))]
+            let preferred_timesync_source: Option<String> = None;
             let st = self.state.lock();
             let restrict_link_local = Self::endpoints_are_link_local_only(&eps);
             if st.discovery_routes.is_empty() {
@@ -432,8 +439,10 @@ impl Relay {
                 return Ok(RemoteSidePlan::Flood);
             }
             let now_ms = self.clock.now_ms();
+            let mut had_exact = false;
+            let mut exact_targets = Vec::new();
             let mut had_known = false;
-            let mut targets = Vec::new();
+            let mut generic_targets = Vec::new();
 
             for (&side, route) in st.discovery_routes.iter() {
                 if side == exclude
@@ -450,14 +459,23 @@ impl Relay {
                 {
                     continue;
                 }
+                if preferred_timesync_source.as_deref().is_some_and(|source| {
+                    route.reachable_timesync_sources.iter().any(|s| s == source)
+                }) {
+                    had_exact = true;
+                    exact_targets.push(side);
+                    continue;
+                }
                 if eps.iter().copied().any(|ep| route.reachable.contains(&ep)) {
                     had_known = true;
-                    targets.push(side);
+                    generic_targets.push(side);
                 }
             }
 
-            if had_known {
-                Ok(RemoteSidePlan::Target(targets))
+            if had_exact {
+                Ok(RemoteSidePlan::Target(exact_targets))
+            } else if had_known {
+                Ok(RemoteSidePlan::Target(generic_targets))
             } else if restrict_link_local {
                 let targets = st
                     .sides
@@ -521,6 +539,47 @@ impl Relay {
     }
 
     #[cfg(feature = "discovery")]
+    fn advertised_discovery_timesync_sources_for_link_locked(
+        &self,
+        st: &RelayInner,
+        now_ms: u64,
+    ) -> Vec<String> {
+        let mut sources = Vec::new();
+        for route in st.discovery_routes.values() {
+            if now_ms.saturating_sub(route.last_seen_ms) > DISCOVERY_ROUTE_TTL_MS {
+                continue;
+            }
+            sources.extend(route.reachable_timesync_sources.iter().cloned());
+        }
+        sources.sort_unstable();
+        sources.dedup();
+        sources
+    }
+
+    #[cfg(feature = "discovery")]
+    #[cfg(feature = "timesync")]
+    fn preferred_timesync_route_source(
+        &self,
+        data: &RelayItem,
+        ty: crate::DataType,
+    ) -> TelemetryResult<Option<String>> {
+        if !matches!(
+            ty,
+            crate::DataType::TimeSyncAnnounce | crate::DataType::TimeSyncResponse
+        ) {
+            return Ok(None);
+        }
+
+        let sender = match data {
+            RelayItem::Packet(pkt) => pkt.sender().to_owned(),
+            RelayItem::Serialized(bytes) => serialize::deserialize_packet(bytes.as_ref())?
+                .sender()
+                .to_owned(),
+        };
+        Ok(Some(sender))
+    }
+
+    #[cfg(feature = "discovery")]
     fn queue_discovery_announce(&self) -> TelemetryResult<()> {
         let now_ms = self.clock.now_ms();
         let per_side = {
@@ -535,27 +594,39 @@ impl Relay {
             st.sides
                 .iter()
                 .enumerate()
-                .filter_map(|(side_id, side)| {
+                .map(|(side_id, side)| {
                     let endpoints = self.advertised_discovery_endpoints_for_link_locked(
                         &st,
                         now_ms,
                         side.opts.link_local_enabled,
                     );
-                    if endpoints.is_empty() {
-                        None
-                    } else {
-                        Some((side_id, endpoints))
-                    }
+                    let timesync_sources =
+                        self.advertised_discovery_timesync_sources_for_link_locked(&st, now_ms);
+                    (side_id, endpoints, timesync_sources)
                 })
                 .collect::<Vec<_>>()
         };
         let mut st = self.state.lock();
-        for (dst, endpoints) in per_side {
-            let pkt = discovery::build_discovery_announce("RELAY", now_ms, endpoints.as_slice())?;
-            st.tx_queue.push_back(RelayTxItem {
-                dst,
-                data: RelayItem::Packet(Arc::new(pkt)),
-            })?;
+        for (dst, endpoints, timesync_sources) in per_side {
+            if !endpoints.is_empty() {
+                let pkt =
+                    discovery::build_discovery_announce("RELAY", now_ms, endpoints.as_slice())?;
+                st.tx_queue.push_back(RelayTxItem {
+                    dst,
+                    data: RelayItem::Packet(Arc::new(pkt)),
+                })?;
+            }
+            if !timesync_sources.is_empty() {
+                let pkt = discovery::build_discovery_timesync_sources(
+                    "RELAY",
+                    now_ms,
+                    timesync_sources.as_slice(),
+                )?;
+                st.tx_queue.push_back(RelayTxItem {
+                    dst,
+                    data: RelayItem::Packet(Arc::new(pkt)),
+                })?;
+            }
         }
         Ok(())
     }
@@ -577,6 +648,9 @@ impl Relay {
                         side.opts.link_local_enabled,
                     )
                     .is_empty()
+                    || !self
+                        .advertised_discovery_timesync_sources_for_link_locked(&st, now_ms)
+                        .is_empty()
             });
             if st.sides.is_empty() || !has_any {
                 return Ok(false);
@@ -610,19 +684,24 @@ impl Relay {
 
         let now_ms = self.clock.now_ms();
         let mut st = self.state.lock();
-        let reachable = discovery::decode_discovery_announce(&pkt)?;
-        let changed = st
-            .discovery_routes
-            .get(&src)
-            .map(|cur| cur.reachable != reachable)
-            .unwrap_or(true);
-        st.discovery_routes.insert(
-            src,
-            DiscoverySideState {
-                reachable,
-                last_seen_ms: now_ms,
-            },
-        );
+        let mut route = st.discovery_routes.get(&src).cloned().unwrap_or_default();
+        let changed = match pkt.data_type() {
+            crate::DataType::DiscoveryAnnounce => {
+                let reachable = discovery::decode_discovery_announce(&pkt)?;
+                let changed = route.reachable != reachable;
+                route.reachable = reachable;
+                changed
+            }
+            crate::DataType::DiscoveryTimeSyncSources => {
+                let sources = discovery::decode_discovery_timesync_sources(&pkt)?;
+                let changed = route.reachable_timesync_sources != sources;
+                route.reachable_timesync_sources = sources;
+                changed
+            }
+            _ => false,
+        };
+        route.last_seen_ms = now_ms;
+        st.discovery_routes.insert(src, route);
         if changed {
             Self::note_discovery_topology_change_locked(&mut st, now_ms);
         }
@@ -851,6 +930,7 @@ impl Relay {
                     side_id,
                     side_name: side.name,
                     reachable_endpoints: route.reachable.clone(),
+                    reachable_timesync_sources: route.reachable_timesync_sources.clone(),
                     last_seen_ms: route.last_seen_ms,
                     age_ms: now_ms.saturating_sub(route.last_seen_ms),
                 })
@@ -858,8 +938,11 @@ impl Relay {
             .collect();
         let advertised_endpoints =
             self.advertised_discovery_endpoints_for_link_locked(&st, now_ms, true);
+        let advertised_timesync_sources =
+            self.advertised_discovery_timesync_sources_for_link_locked(&st, now_ms);
         TopologySnapshot {
             advertised_endpoints,
+            advertised_timesync_sources,
             routes,
             current_announce_interval_ms: st.discovery_cadence.current_interval_ms,
             next_announce_ms: st.discovery_cadence.next_announce_ms,
