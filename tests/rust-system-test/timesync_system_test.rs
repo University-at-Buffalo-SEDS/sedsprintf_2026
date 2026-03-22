@@ -104,6 +104,30 @@ mod timesync_system_test {
     }
 
     #[test]
+    fn timesync_equal_priority_failover_uses_standby_without_reannounce() {
+        let mut tracker = TimeSyncTracker::new(TimeSyncConfig {
+            role: TimeSyncRole::Consumer,
+            priority: 50,
+            source_timeout_ms: 1_000,
+            ..Default::default()
+        });
+
+        let pkt_a = build_timesync_announce_with_sender("SRC_A", 10, 5_000).unwrap();
+        let pkt_b = build_timesync_announce_with_sender("SRC_B", 10, 5_500).unwrap();
+
+        tracker.handle_announce(&pkt_a, 5_000).unwrap();
+        tracker.handle_announce(&pkt_b, 5_500).unwrap();
+        assert_eq!(tracker.current_source().unwrap().sender, "SRC_A");
+
+        assert!(matches!(
+            tracker.refresh(6_050),
+            sedsprintf_rs::timesync::TimeSyncUpdate::SourceChanged
+        ));
+        assert_eq!(tracker.current_source().unwrap().sender, "SRC_B");
+        assert!(!tracker.should_announce(6_050));
+    }
+
+    #[test]
     fn router_internal_timesync_endpoint_updates_network_time() {
         let now = Arc::new(AtomicU64::new(1_000));
         let called = Arc::new(AtomicU64::new(0));

@@ -57,8 +57,10 @@ If a side is already reliable (e.g., TCP), disable reliability on that side to a
 With the `discovery` feature enabled, the router has a built-in internal control path:
 
 - `DISCOVERY` endpoint and `DISCOVERY_ANNOUNCE` type are built in.
+- When `timesync` is also enabled, `DISCOVERY_TIMESYNC_SOURCES` is also built in.
 - Discovery packets are handled internally, not through user endpoint handlers.
-- The router keeps soft-state reachability data per side: reachable endpoints + last-seen timestamp.
+- The router keeps soft-state reachability data per side:
+  reachable endpoints, reachable time source sender IDs, and last-seen timestamp.
 - Unknown or expired routes fall back to ordinary flood behavior.
 
 Discovery advertisements are adaptive:
@@ -95,6 +97,10 @@ With discovery enabled, forwarding also consults the learned side map:
 - If no side is known yet, the router falls back to flooding.
 - Link-local-only endpoints are only forwarded to sides marked `link_local_enabled: true`.
 - Reliable packets are sent to all known candidate sides for their endpoints.
+- For time sync traffic, exact discovered source IDs win over generic `TIME_SYNC` endpoint matches
+  when the router knows which source it currently wants to talk to.
+- Source-side `TIME_SYNC_RESPONSE` traffic is returned to the requesting ingress side rather than
+  broadcast.
 
 ## Transmit pipeline (log*, tx*)
 
@@ -103,7 +109,8 @@ With discovery enabled, forwarding also consults the learned side map:
 - Queue variants defer the work until `process_tx_queue()` or `process_all_queues()`.
 - `announce_discovery()` queues a discovery advertisement immediately.
 - `poll_discovery()` queues one only when the adaptive cadence says it is due.
-- `export_topology()` snapshots the current learned route map and announce cadence.
+- `export_topology()` snapshots the current learned route map and announce cadence, including
+  discovered time source IDs when available.
 
 ## Queue variants and processing
 
