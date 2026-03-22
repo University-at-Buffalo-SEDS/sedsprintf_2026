@@ -6,8 +6,8 @@ mod compression_memory_pool_test {
 
     use std::alloc::{GlobalAlloc, Layout, System};
     use std::ptr::null_mut;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     const HDR_WORDS: usize = 4;
     const HDR_RAW_OFF: usize = 0;
@@ -34,12 +34,8 @@ mod compression_memory_pool_test {
     fn update_peak(live: usize) {
         let mut cur = PEAK_BYTES.load(Ordering::Relaxed);
         while live > cur {
-            match PEAK_BYTES.compare_exchange_weak(
-                cur,
-                live,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
+            match PEAK_BYTES.compare_exchange_weak(cur, live, Ordering::Relaxed, Ordering::Relaxed)
+            {
                 Ok(_) => break,
                 Err(v) => cur = v,
             }
@@ -51,9 +47,7 @@ mod compression_memory_pool_test {
         loop {
             let live = LIVE_BYTES.load(Ordering::Relaxed);
             let next = live.saturating_add(bytes);
-            if ENABLE_LIMIT.load(Ordering::Relaxed)
-                && next > LIMIT_BYTES.load(Ordering::Relaxed)
-            {
+            if ENABLE_LIMIT.load(Ordering::Relaxed) && next > LIMIT_BYTES.load(Ordering::Relaxed) {
                 return false;
             }
             if LIVE_BYTES
@@ -158,7 +152,7 @@ mod compression_memory_pool_test {
             ts,
             Arc::<[u8]>::from(payload),
         )
-            .expect("packet build failed")
+        .expect("packet build failed")
     }
 
     #[test]

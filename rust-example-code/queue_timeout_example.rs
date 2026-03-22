@@ -20,7 +20,7 @@ fn main() -> TelemetryResult<()> {
         println!("[RX] {pkt}");
         Ok(())
     });
-    let router = Router::new(RouterMode::Sink, RouterConfig::new([handler]), clock);
+    let router = Router::new_with_clock(RouterMode::Sink, RouterConfig::new([handler]), clock);
     router.add_side_serialized("TX", |_bytes| Ok(()));
 
     for i in 0..5 {

@@ -1,15 +1,15 @@
 // tests/rust-system-test/single_threaded_test.rs
 #[cfg(test)]
 mod single_threaded_test {
+    use sedsprintf_rs::TelemetryResult;
     use sedsprintf_rs::config::{DataEndpoint, DataType};
     use sedsprintf_rs::packet::Packet;
     use sedsprintf_rs::relay::Relay;
     use sedsprintf_rs::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
-    use sedsprintf_rs::TelemetryResult;
 
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::mpsc::{self, Receiver, TryRecvError};
-    use std::sync::Arc;
 
     /// Clock that always returns 0
     fn zero_clock() -> Box<dyn Clock + Send + Sync> {
@@ -48,8 +48,7 @@ mod single_threaded_test {
 
     /// Build a packet with endpoints [SD_CARD, Radio], mirroring the C system.
     fn make_packet(ty: DataType, vals: &[f32], ts: u64) -> Packet {
-        Packet::from_f32_slice(ty, vals, &[DataEndpoint::SdCard, DataEndpoint::Radio], ts)
-            .unwrap()
+        Packet::from_f32_slice(ty, vals, &[DataEndpoint::SdCard, DataEndpoint::Radio], ts).unwrap()
     }
 
     /// Drain both buses once and run the relay once.
@@ -143,22 +142,20 @@ mod single_threaded_test {
 
         // Relay side for bus1: TX from relay -> bus1_rx
         let relay_bus1_tx = bus1_tx.clone();
-        let bus1_side_id = relay.add_side_serialized("bus1", move |bytes: &[u8]| -> TelemetryResult<()> {
-            // from = usize::MAX so we never skip this in bus1 delivery
-            relay_bus1_tx
-                .send((usize::MAX, bytes.to_vec()))
-                .unwrap();
-            Ok(())
-        });
+        let bus1_side_id =
+            relay.add_side_serialized("bus1", move |bytes: &[u8]| -> TelemetryResult<()> {
+                // from = usize::MAX so we never skip this in bus1 delivery
+                relay_bus1_tx.send((usize::MAX, bytes.to_vec())).unwrap();
+                Ok(())
+            });
 
         // Relay side for bus2: TX from relay -> bus2_rx
         let relay_bus2_tx = bus2_tx.clone();
-        let bus2_side_id = relay.add_side_serialized("bus2", move |bytes: &[u8]| -> TelemetryResult<()> {
-            relay_bus2_tx
-                .send((usize::MAX, bytes.to_vec()))
-                .unwrap();
-            Ok(())
-        });
+        let bus2_side_id =
+            relay.add_side_serialized("bus2", move |bytes: &[u8]| -> TelemetryResult<()> {
+                relay_bus2_tx.send((usize::MAX, bytes.to_vec())).unwrap();
+                Ok(())
+            });
 
         // ---------- 2) Build nodes (same topology as threaded test) ----------
         //
@@ -206,9 +203,9 @@ mod single_threaded_test {
             };
 
             let router = if handlers.is_empty() {
-                Router::new(RouterMode::Sink, RouterConfig::default(), clock)
+                Router::new_with_clock(RouterMode::Sink, RouterConfig::default(), clock)
             } else {
-                Router::new(RouterMode::Sink, RouterConfig::new(handlers), clock)
+                Router::new_with_clock(RouterMode::Sink, RouterConfig::new(handlers), clock)
             };
             router.add_side_serialized("bus", tx);
 
@@ -277,7 +274,7 @@ mod single_threaded_test {
                     &[DataEndpoint::SdCard, DataEndpoint::Radio],
                     (i + 40_000) as u64,
                 )
-                    .unwrap();
+                .unwrap();
                 node.router.tx(pkt2).unwrap();
             }
 

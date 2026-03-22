@@ -66,6 +66,23 @@ environments.
 
 ---
 
+## Version 3.4.0 highlights
+
+- Time sync is now router-managed: `TIME_SYNC` packets are consumed internally, routers maintain a
+  separate internal network clock, and packet timestamps prefer that clock when available.
+- Added merged partial network time support, so routers can combine date, time-of-day, and
+  subsecond precision from different sources.
+- Added local/master network time setter APIs across Rust, C, and Python for date-only, HMS,
+  millisecond, and nanosecond precision updates.
+- On `std` builds, routers now use an internal monotonic clock by default; explicit clock hooks
+  moved to `Router::new_with_clock(...)` and remain available for tests, simulation, and
+  `no_std`.
+- C and Python constructors now treat the router clock callback as optional on `std` builds, and
+  C system-test handling was hardened to prevent indefinite hangs on regressions.
+- Full changelog: [v3.3.0...v3.4.0](https://github.com/Rylan-Meilutis/sedsprintf_rs/compare/v3.3.0...v3.4.0)
+
+---
+
 ## Version 3.3.0 highlights
 
 - Added built-in discovery/routing control traffic for routers and relays, including learned endpoint reachability,
@@ -166,9 +183,14 @@ set(SEDSPRINTF_RS_ENV_MAX_QUEUE_SIZE "65536" CACHE STRING "" FORCE)
 # Use the provided CMake glue
 add_subdirectory(${CMAKE_SOURCE_DIR}/sedsprintf_rs sedsprintf_rs_build)
 
+# Optional: prefer static linking even on host builds
+# set(SEDSPRINTF_RS_PREFER_DYNAMIC OFF CACHE BOOL "" FORCE)
+
 # Link against the imported target
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE sedsprintf_rs::sedsprintf_rs)
 ```
+
+Host CMake builds now prefer the shared Rust library when supported. Embedded builds still use the static library.
 
 - Configure telemetry schema via `telemetry_config.json` (endpoints + message types). The Rust enum metadata is
   generated

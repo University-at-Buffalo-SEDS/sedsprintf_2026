@@ -1,15 +1,15 @@
 #[cfg(test)]
 mod mega_library_system_tests {
+    use sedsprintf_rs::TelemetryResult;
     use sedsprintf_rs::config::{DataEndpoint, DataType};
     use sedsprintf_rs::packet::Packet;
     use sedsprintf_rs::relay::Relay;
     use sedsprintf_rs::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
-    use sedsprintf_rs::TelemetryResult;
 
     use sedsprintf_rs::serialize::serialize_packet;
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::mpsc;
-    use std::sync::Arc;
     use std::thread;
     use std::time::{Duration, Instant};
 
@@ -52,22 +52,25 @@ mod mega_library_system_tests {
         let relay = Arc::new(Relay::new(zero_clock()));
 
         let r_a_tx = bus_a_tx.clone();
-        let relay_side_a = relay.add_side_serialized("bus_a", move |bytes: &[u8]| -> TelemetryResult<()> {
-            r_a_tx.send(("relay", bytes.to_vec())).unwrap();
-            Ok(())
-        });
+        let relay_side_a =
+            relay.add_side_serialized("bus_a", move |bytes: &[u8]| -> TelemetryResult<()> {
+                r_a_tx.send(("relay", bytes.to_vec())).unwrap();
+                Ok(())
+            });
 
         let r_b_tx = bus_b_tx.clone();
-        let relay_side_b = relay.add_side_serialized("bus_b", move |bytes: &[u8]| -> TelemetryResult<()> {
-            r_b_tx.send(("relay", bytes.to_vec())).unwrap();
-            Ok(())
-        });
+        let relay_side_b =
+            relay.add_side_serialized("bus_b", move |bytes: &[u8]| -> TelemetryResult<()> {
+                r_b_tx.send(("relay", bytes.to_vec())).unwrap();
+                Ok(())
+            });
 
         let r_c_tx = bus_c_tx.clone();
-        let relay_side_c = relay.add_side_serialized("bus_c", move |bytes: &[u8]| -> TelemetryResult<()> {
-            r_c_tx.send(("relay", bytes.to_vec())).unwrap();
-            Ok(())
-        });
+        let relay_side_c =
+            relay.add_side_serialized("bus_c", move |bytes: &[u8]| -> TelemetryResult<()> {
+                r_c_tx.send(("relay", bytes.to_vec())).unwrap();
+                Ok(())
+            });
 
         // -------------------------------
         // 3) Stop + stats
@@ -92,7 +95,8 @@ mod mega_library_system_tests {
                 mk_counter_handler(DataEndpoint::SdCard, a_sd_hits.clone()),
             ];
 
-            let router = Router::new(RouterMode::Sink, RouterConfig::new(handlers), zero_clock());
+            let router =
+                Router::new_with_clock(RouterMode::Sink, RouterConfig::new(handlers), zero_clock());
             router.add_side_serialized("bus_a", {
                 let bus = bus_a_tx.clone();
                 move |bytes: &[u8]| -> TelemetryResult<()> {
@@ -109,7 +113,8 @@ mod mega_library_system_tests {
                 mk_counter_handler(DataEndpoint::SdCard, b_sd_hits.clone()),
             ];
 
-            let router = Router::new(RouterMode::Sink, RouterConfig::new(handlers), zero_clock());
+            let router =
+                Router::new_with_clock(RouterMode::Sink, RouterConfig::new(handlers), zero_clock());
             router.add_side_serialized("bus_b", {
                 let bus = bus_b_tx.clone();
                 move |bytes: &[u8]| -> TelemetryResult<()> {
@@ -126,7 +131,8 @@ mod mega_library_system_tests {
                 mk_counter_handler(DataEndpoint::SdCard, c_sd_hits.clone()),
             ];
 
-            let router = Router::new(RouterMode::Sink, RouterConfig::new(handlers), zero_clock());
+            let router =
+                Router::new_with_clock(RouterMode::Sink, RouterConfig::new(handlers), zero_clock());
             router.add_side_serialized("bus_c", {
                 let bus = bus_c_tx.clone();
                 move |bytes: &[u8]| -> TelemetryResult<()> {
@@ -141,7 +147,8 @@ mod mega_library_system_tests {
         // 5) Hub router in RELAY mode (no local handlers)
         // -------------------------------
         let (hub_router, hub_side_a, hub_side_b, hub_side_c) = {
-            let router = Router::new(RouterMode::Relay, RouterConfig::default(), zero_clock());
+            let router =
+                Router::new_with_clock(RouterMode::Relay, RouterConfig::default(), zero_clock());
             let hub_side_a = router.add_side_serialized("bus_a", {
                 let bus = bus_a_tx.clone();
                 move |bytes: &[u8]| -> TelemetryResult<()> {
@@ -315,7 +322,7 @@ mod mega_library_system_tests {
                         &[DataEndpoint::SdCard, DataEndpoint::Radio],
                         200 + i as u64,
                     )
-                        .unwrap();
+                    .unwrap();
 
                     let wire = serialize_packet(&pkt);
                     r.tx_serialized_queue(wire).unwrap();
@@ -348,7 +355,7 @@ mod mega_library_system_tests {
                         &[DataEndpoint::SdCard, DataEndpoint::Radio],
                         3000 + i,
                     )
-                        .unwrap();
+                    .unwrap();
                     let wire_c = serialize_packet(&pkt_c);
                     hub.tx_serialized_queue(wire_c).unwrap();
 
@@ -422,11 +429,20 @@ mod mega_library_system_tests {
         let c_r = c_radio_hits.load(Ordering::SeqCst);
         let c_s = c_sd_hits.load(Ordering::SeqCst);
 
-        assert!(a_r >= min_per_node_per_endpoint, "node A radio too low: {a_r}");
+        assert!(
+            a_r >= min_per_node_per_endpoint,
+            "node A radio too low: {a_r}"
+        );
         assert!(a_s >= min_per_node_per_endpoint, "node A sd too low: {a_s}");
-        assert!(b_r >= min_per_node_per_endpoint, "node B radio too low: {b_r}");
+        assert!(
+            b_r >= min_per_node_per_endpoint,
+            "node B radio too low: {b_r}"
+        );
         assert!(b_s >= min_per_node_per_endpoint, "node B sd too low: {b_s}");
-        assert!(c_r >= min_per_node_per_endpoint, "node C radio too low: {c_r}");
+        assert!(
+            c_r >= min_per_node_per_endpoint,
+            "node C radio too low: {c_r}"
+        );
         assert!(c_s >= min_per_node_per_endpoint, "node C sd too low: {c_s}");
 
         // Link-specific handler provenance is no longer exposed (sides are internal).

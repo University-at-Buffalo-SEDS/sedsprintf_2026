@@ -2,16 +2,59 @@ mod c_system_test {
     use std::fs;
     use std::path::PathBuf;
     use std::process::Command;
+    use std::thread;
+    use std::time::{Duration, Instant};
 
     fn run_exe(root: &PathBuf, name: &str) {
         let exe = root.join("build").join(name);
-        let output = Command::new(&exe)
+        let mut child = Command::new(&exe)
             .current_dir(root)
-            .output()
+            .spawn()
             .unwrap_or_else(|e| panic!("Failed to run {name}: {e}"));
 
-        eprintln!("{} stdout:\n{}", name, String::from_utf8_lossy(&output.stdout));
-        eprintln!("{} stderr:\n{}", name, String::from_utf8_lossy(&output.stderr));
+        let timeout = Duration::from_secs(20);
+        let start = Instant::now();
+        let output = loop {
+            if let Some(_status) = child
+                .try_wait()
+                .unwrap_or_else(|e| panic!("Failed to wait for {name}: {e}"))
+            {
+                break child
+                    .wait_with_output()
+                    .unwrap_or_else(|e| panic!("Failed to collect {name} output: {e}"));
+            }
+
+            if start.elapsed() >= timeout {
+                let _ = child.kill();
+                let output = child
+                    .wait_with_output()
+                    .unwrap_or_else(|e| panic!("Failed to collect timed out {name} output: {e}"));
+                eprintln!(
+                    "{} stdout:\n{}",
+                    name,
+                    String::from_utf8_lossy(&output.stdout)
+                );
+                eprintln!(
+                    "{} stderr:\n{}",
+                    name,
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                panic!("{name} timed out after {:?}", timeout);
+            }
+
+            thread::sleep(Duration::from_millis(50));
+        };
+
+        eprintln!(
+            "{} stdout:\n{}",
+            name,
+            String::from_utf8_lossy(&output.stdout)
+        );
+        eprintln!(
+            "{} stderr:\n{}",
+            name,
+            String::from_utf8_lossy(&output.stderr)
+        );
 
         assert!(
             output.status.success(),
@@ -59,20 +102,19 @@ mod c_system_test {
         if cfg!(target_os = "macos") {
             cmake_config.env("MACOSX_DEPLOYMENT_TARGET", macos_deployment_target);
         }
-        let status = cmake_config
-            .status()
-            .expect("Failed to config cmake build");
+        let status = cmake_config.status().expect("Failed to config cmake build");
         assert!(status.success(), "CMake config failed");
 
         // Build the C project
         let mut cmake_build = Command::new("cmake");
-        cmake_build.arg("--build").arg(&build_dir).current_dir(&root);
+        cmake_build
+            .arg("--build")
+            .arg(&build_dir)
+            .current_dir(&root);
         if cfg!(target_os = "macos") {
             cmake_build.env("MACOSX_DEPLOYMENT_TARGET", macos_deployment_target);
         }
-        let status = cmake_build
-            .status()
-            .expect("Failed to invoke cmake build");
+        let status = cmake_build.status().expect("Failed to invoke cmake build");
         assert!(status.success(), "CMake build failed");
 
         run_exe(&root, "c_system_test");

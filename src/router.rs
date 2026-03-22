@@ -13,23 +13,33 @@ use crate::config::{
 };
 #[cfg(feature = "discovery")]
 use crate::discovery::{
-    self, DiscoveryCadenceState, TopologySideRoute, TopologySnapshot, DISCOVERY_ROUTE_TTL_MS,
+    self, DISCOVERY_ROUTE_TTL_MS, DiscoveryCadenceState, TopologySideRoute, TopologySnapshot,
 };
 use crate::packet::hash_bytes_u64;
 use crate::queue::{BoundedDeque, ByteCost};
 #[cfg(all(not(feature = "std"), target_os = "none"))]
 use crate::seds_error_msg;
-use crate::{
-    config::{
-        DataEndpoint, DataType, DEVICE_IDENTIFIER, MAX_HANDLER_RETRIES, RELIABLE_MAX_PENDING,
-        RELIABLE_MAX_RETRIES, RELIABLE_RETRANSMIT_MS,
-    }, get_needed_message_size, impl_letype_num, is_reliable_type,
-    lock::RouterMutex,
-    message_meta, packet::Packet, reliable_mode,
-    serialize,
-    EndpointsBroadcastMode, MessageElement, TelemetryError,
-    TelemetryResult,
+#[cfg(feature = "timesync")]
+use crate::timesync::{
+    INTERNAL_TIMESYNC_SOURCE_ID, LOCAL_TIMESYNC_DATE_SOURCE_ID, LOCAL_TIMESYNC_FULL_SOURCE_ID,
+    LOCAL_TIMESYNC_SUBSEC_SOURCE_ID, LOCAL_TIMESYNC_TOD_SOURCE_ID, NetworkClock,
+    NetworkTimeReading, PartialNetworkTime, TimeSyncConfig, TimeSyncTracker, advance_network_time,
+    compute_network_time_sample, decode_timesync_announce, decode_timesync_request,
+    decode_timesync_response,
 };
+use crate::{
+    EndpointsBroadcastMode, MessageElement, TelemetryError, TelemetryResult,
+    config::{
+        DEVICE_IDENTIFIER, DataEndpoint, DataType, MAX_HANDLER_RETRIES, RELIABLE_MAX_PENDING,
+        RELIABLE_MAX_RETRIES, RELIABLE_RETRANSMIT_MS,
+    },
+    get_needed_message_size, impl_letype_num, is_reliable_type,
+    lock::RouterMutex,
+    message_meta,
+    packet::Packet,
+    reliable_mode, serialize,
+};
+use alloc::string::String;
 use alloc::{
     borrow::ToOwned,
     boxed::Box,
@@ -45,6 +55,8 @@ use core::fmt::{Debug, Formatter};
 use core::mem::size_of;
 use core::ops::{Deref, DerefMut};
 use core::sync::atomic::{AtomicBool, Ordering};
+#[cfg(feature = "std")]
+use std::time::Instant;
 
 /// The mode the router is operating in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
@@ -297,6 +309,13 @@ impl EndpointHandler {
 pub trait Clock {
     /// Return the current time in milliseconds.
     fn now_ms(&self) -> u64;
+
+    /// Return the current time in nanoseconds.
+    ///
+    /// The default implementation derives this from [`Clock::now_ms`].
+    fn now_ns(&self) -> u64 {
+        self.now_ms().saturating_mul(1_000_000)
+    }
 }
 
 impl<T: Fn() -> u64> Clock for T {
@@ -306,12 +325,40 @@ impl<T: Fn() -> u64> Clock for T {
     }
 }
 
+#[cfg(feature = "std")]
+#[derive(Debug)]
+struct StdMonotonicClock {
+    start: Instant,
+}
+
+#[cfg(feature = "std")]
+impl Default for StdMonotonicClock {
+    fn default() -> Self {
+        Self {
+            start: Instant::now(),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl Clock for StdMonotonicClock {
+    fn now_ms(&self) -> u64 {
+        u64::try_from(self.start.elapsed().as_millis()).unwrap_or(u64::MAX)
+    }
+
+    fn now_ns(&self) -> u64 {
+        u64::try_from(self.start.elapsed().as_nanos()).unwrap_or(u64::MAX)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RouterConfig {
     /// Handlers for local endpoints.
     handlers: Arc<[EndpointHandler]>,
     /// Whether to enable reliable ordering/ACKs for reliable data types.
     reliable_enabled: bool,
+    #[cfg(feature = "timesync")]
+    timesync: Option<TimeSyncConfig>,
 }
 
 impl RouterConfig {
@@ -323,12 +370,20 @@ impl RouterConfig {
         Self {
             handlers: handlers.into(),
             reliable_enabled: true,
+            #[cfg(feature = "timesync")]
+            timesync: None,
         }
     }
 
     /// Enable or disable reliable delivery for this router instance.
     pub fn with_reliable_enabled(mut self, enabled: bool) -> Self {
         self.reliable_enabled = enabled;
+        self
+    }
+
+    #[cfg(feature = "timesync")]
+    pub fn with_timesync(mut self, cfg: TimeSyncConfig) -> Self {
+        self.timesync = Some(cfg);
         self
     }
 
@@ -342,6 +397,12 @@ impl RouterConfig {
     fn reliable_enabled(&self) -> bool {
         self.reliable_enabled
     }
+
+    #[cfg(feature = "timesync")]
+    #[inline]
+    fn timesync_config(&self) -> Option<TimeSyncConfig> {
+        self.timesync
+    }
 }
 
 impl Default for RouterConfig {
@@ -349,6 +410,8 @@ impl Default for RouterConfig {
         Self {
             handlers: Arc::from([]),
             reliable_enabled: true,
+            #[cfg(feature = "timesync")]
+            timesync: None,
         }
     }
 }
@@ -573,6 +636,43 @@ pub struct Router {
     state: RouterMutex<RouterInner>,
     isr_rx_queue: IsrRxQueue,
     clock: Box<dyn Clock + Send + Sync>,
+    #[cfg(feature = "timesync")]
+    timesync: RouterMutex<TimeSyncRuntime>,
+}
+
+#[cfg(feature = "timesync")]
+#[derive(Debug, Clone)]
+struct PendingTimeSyncRequest {
+    seq: u64,
+    t1_mono_ms: u64,
+    source: String,
+}
+
+#[cfg(feature = "timesync")]
+#[derive(Debug, Clone)]
+struct TimeSyncRuntime {
+    cfg: Option<TimeSyncConfig>,
+    tracker: Option<TimeSyncTracker>,
+    clock: NetworkClock,
+    next_seq: u64,
+    next_announce_mono_ms: u64,
+    next_request_mono_ms: u64,
+    pending_request: Option<PendingTimeSyncRequest>,
+}
+
+#[cfg(feature = "timesync")]
+impl TimeSyncRuntime {
+    fn new(cfg: Option<TimeSyncConfig>) -> Self {
+        Self {
+            tracker: cfg.map(TimeSyncTracker::new),
+            cfg,
+            clock: NetworkClock::default(),
+            next_seq: 1,
+            next_announce_mono_ms: 0,
+            next_request_mono_ms: 0,
+            pending_request: None,
+        }
+    }
 }
 
 enum RemoteSidePlan {
@@ -603,6 +703,25 @@ fn has_remote_endpoint(eps: &[DataEndpoint], cfg: &RouterConfig) -> bool {
 
 #[inline]
 fn force_remote_for_type(ty: DataType) -> bool {
+    #[cfg(feature = "timesync")]
+    if matches!(
+        ty,
+        DataType::TimeSyncAnnounce | DataType::TimeSyncRequest | DataType::TimeSyncResponse
+    ) {
+        return true;
+    }
+
+    #[cfg(feature = "discovery")]
+    if matches!(ty, DataType::DiscoveryAnnounce) {
+        return true;
+    }
+
+    let _ = ty;
+    false
+}
+
+#[inline]
+fn is_internal_control_type(ty: DataType) -> bool {
     #[cfg(feature = "timesync")]
     if matches!(
         ty,
@@ -804,10 +923,10 @@ impl Router {
                 }
                 if restrict_link_local
                     && st
-                    .sides
-                    .get(side)
-                    .map(|s| !s.opts.link_local_enabled)
-                    .unwrap_or(true)
+                        .sides
+                        .get(side)
+                        .map(|s| !s.opts.link_local_enabled)
+                        .unwrap_or(true)
                 {
                     continue;
                 }
@@ -862,9 +981,8 @@ impl Router {
     #[cfg(feature = "discovery")]
     fn prune_discovery_routes_locked(st: &mut RouterInner, now_ms: u64) -> bool {
         let before = st.discovery_routes.len();
-        st.discovery_routes.retain(|_, route| {
-            now_ms.saturating_sub(route.last_seen_ms) <= DISCOVERY_ROUTE_TTL_MS
-        });
+        st.discovery_routes
+            .retain(|_, route| now_ms.saturating_sub(route.last_seen_ms) <= DISCOVERY_ROUTE_TTL_MS);
         before != st.discovery_routes.len()
     }
 
@@ -885,7 +1003,10 @@ impl Router {
             }
             eps.extend(route.reachable.iter().copied());
         }
-        eps.retain(|ep| !discovery::is_discovery_endpoint(*ep) && (link_local_enabled || !ep.is_link_local_only()));
+        eps.retain(|ep| {
+            !discovery::is_discovery_endpoint(*ep)
+                && (link_local_enabled || !ep.is_link_local_only())
+        });
         eps.sort_unstable();
         eps.dedup();
         eps
@@ -921,7 +1042,8 @@ impl Router {
                 .collect::<Vec<_>>()
         };
         for (side_id, endpoints) in per_side {
-            let pkt = discovery::build_discovery_announce(self.sender, now_ms, endpoints.as_slice())?;
+            let pkt =
+                discovery::build_discovery_announce(self.sender, now_ms, endpoints.as_slice())?;
             self.tx_queue_item_with_flags(
                 RouterTxItem::ToSide {
                     dst: side_id,
@@ -944,7 +1066,11 @@ impl Router {
             }
             let has_any = st.sides.iter().any(|side| {
                 !self
-                    .advertised_discovery_endpoints_for_link_locked(&st, now_ms, side.opts.link_local_enabled)
+                    .advertised_discovery_endpoints_for_link_locked(
+                        &st,
+                        now_ms,
+                        side.opts.link_local_enabled,
+                    )
                     .is_empty()
             });
             if st.sides.is_empty() || !has_any {
@@ -960,7 +1086,11 @@ impl Router {
     }
 
     #[cfg(feature = "discovery")]
-    fn learn_discovery_packet(&self, pkt: &Packet, src: Option<RouterSideId>) -> TelemetryResult<bool> {
+    fn learn_discovery_packet(
+        &self,
+        pkt: &Packet,
+        src: Option<RouterSideId>,
+    ) -> TelemetryResult<bool> {
         if !discovery::is_discovery_type(pkt.data_type()) {
             return Ok(false);
         }
@@ -1068,7 +1198,8 @@ impl Router {
             return Ok(());
         };
 
-        let bytes = serialize::serialize_reliable_ack(self.sender, ty, self.clock.now_ms(), ack);
+        let bytes =
+            serialize::serialize_reliable_ack(self.sender, ty, self.packet_timestamp_ms(), ack);
         self.retry(MAX_HANDLER_RETRIES, || f(bytes.as_ref()))
             .map_err(|_| TelemetryError::Io("reliable ack send failed"))?;
         Ok(())
@@ -1325,8 +1456,530 @@ impl Router {
         Ok(())
     }
 
+    #[cfg(feature = "timesync")]
+    #[inline]
+    fn monotonic_now_ns(&self) -> u64 {
+        self.clock.now_ns()
+    }
+
+    #[cfg(feature = "timesync")]
+    #[inline]
+    fn monotonic_now_ms(&self) -> u64 {
+        self.clock.now_ms()
+    }
+
+    #[cfg(feature = "timesync")]
+    fn refresh_timesync_state(&self, now_mono_ms: u64) {
+        let mut st = self.timesync.lock();
+        st.clock.prune_expired(now_mono_ms);
+        if let Some(tracker) = st.tracker.as_mut() {
+            let update = tracker.refresh(now_mono_ms);
+            if matches!(update, crate::timesync::TimeSyncUpdate::SourceChanged)
+                && tracker.current_source().is_none()
+            {
+                st.clock.remove_source(INTERNAL_TIMESYNC_SOURCE_ID);
+                st.pending_request = None;
+            }
+        }
+    }
+
+    #[cfg(feature = "timesync")]
+    pub fn update_network_time_source(
+        &self,
+        source: &str,
+        priority: u64,
+        time: PartialNetworkTime,
+        ttl_ms: Option<u64>,
+    ) {
+        let now_ms = self.monotonic_now_ms();
+        let now_ns = self.monotonic_now_ns();
+        let mut st = self.timesync.lock();
+        st.clock
+            .update_source(source, priority, time, now_ms, now_ns, ttl_ms);
+    }
+
+    #[cfg(feature = "timesync")]
+    fn set_network_time_source_impl(
+        &self,
+        source: &str,
+        priority: u64,
+        time: PartialNetworkTime,
+        ttl_ms: Option<u64>,
+    ) {
+        let observed_mono_ms = self.monotonic_now_ms();
+        let observed_mono_ns = self.monotonic_now_ns();
+        let mut st = self.timesync.lock();
+        let commit_mono_ms = self.monotonic_now_ms();
+        let commit_mono_ns = self.monotonic_now_ns();
+        let adjusted = if let Some(base) = time.to_network_time() {
+            let elapsed_ns = commit_mono_ns.saturating_sub(observed_mono_ns);
+            advance_network_time(base, elapsed_ns)
+                .map(PartialNetworkTime::from)
+                .unwrap_or(time)
+        } else {
+            time
+        };
+        let adjusted_mono_ms =
+            observed_mono_ms.saturating_add(commit_mono_ms.saturating_sub(observed_mono_ms));
+        st.clock.update_source(
+            source,
+            priority,
+            adjusted,
+            commit_mono_ms.max(adjusted_mono_ms),
+            commit_mono_ns,
+            ttl_ms,
+        );
+    }
+
+    #[cfg(feature = "timesync")]
+    fn local_network_time_priority(&self) -> u64 {
+        let st = self.timesync.lock();
+        st.cfg.map(|cfg| cfg.priority).unwrap_or(0)
+    }
+
+    #[cfg(feature = "timesync")]
+    pub fn set_local_network_time(&self, time: PartialNetworkTime) {
+        let priority = self.local_network_time_priority();
+        if time.is_complete_date() && time.is_complete_time() {
+            self.set_network_time_source_impl(LOCAL_TIMESYNC_FULL_SOURCE_ID, priority, time, None);
+            let mut st = self.timesync.lock();
+            st.clock.remove_source(LOCAL_TIMESYNC_DATE_SOURCE_ID);
+            st.clock.remove_source(LOCAL_TIMESYNC_TOD_SOURCE_ID);
+            st.clock.remove_source(LOCAL_TIMESYNC_SUBSEC_SOURCE_ID);
+            return;
+        }
+
+        {
+            let mut st = self.timesync.lock();
+            st.clock.remove_source(LOCAL_TIMESYNC_FULL_SOURCE_ID);
+        }
+
+        if time.year.is_some() || time.month.is_some() || time.day.is_some() {
+            self.set_network_time_source_impl(
+                LOCAL_TIMESYNC_DATE_SOURCE_ID,
+                priority,
+                PartialNetworkTime {
+                    year: time.year,
+                    month: time.month,
+                    day: time.day,
+                    ..Default::default()
+                },
+                None,
+            );
+        }
+
+        if time.hour.is_some() || time.minute.is_some() || time.second.is_some() {
+            self.set_network_time_source_impl(
+                LOCAL_TIMESYNC_TOD_SOURCE_ID,
+                priority,
+                PartialNetworkTime {
+                    hour: time.hour,
+                    minute: time.minute,
+                    second: time.second,
+                    nanosecond: time.nanosecond,
+                    ..Default::default()
+                },
+                None,
+            );
+        }
+
+        if time.nanosecond.is_some() {
+            self.set_network_time_source_impl(
+                LOCAL_TIMESYNC_SUBSEC_SOURCE_ID,
+                priority,
+                PartialNetworkTime {
+                    nanosecond: time.nanosecond,
+                    ..Default::default()
+                },
+                None,
+            );
+        }
+    }
+
+    #[cfg(feature = "timesync")]
+    pub fn clear_local_network_time(&self) {
+        let mut st = self.timesync.lock();
+        st.clock.remove_source(LOCAL_TIMESYNC_FULL_SOURCE_ID);
+        st.clock.remove_source(LOCAL_TIMESYNC_DATE_SOURCE_ID);
+        st.clock.remove_source(LOCAL_TIMESYNC_TOD_SOURCE_ID);
+        st.clock.remove_source(LOCAL_TIMESYNC_SUBSEC_SOURCE_ID);
+    }
+
+    #[cfg(feature = "timesync")]
+    pub fn set_local_network_date(&self, year: i32, month: u8, day: u8) {
+        self.set_local_network_time(PartialNetworkTime {
+            year: Some(year),
+            month: Some(month),
+            day: Some(day),
+            ..Default::default()
+        });
+    }
+
+    #[cfg(feature = "timesync")]
+    pub fn set_local_network_time_hm(&self, hour: u8, minute: u8) {
+        self.set_local_network_time(PartialNetworkTime {
+            hour: Some(hour),
+            minute: Some(minute),
+            ..Default::default()
+        });
+    }
+
+    #[cfg(feature = "timesync")]
+    pub fn set_local_network_time_hms(&self, hour: u8, minute: u8, second: u8) {
+        self.set_local_network_time(PartialNetworkTime {
+            hour: Some(hour),
+            minute: Some(minute),
+            second: Some(second),
+            ..Default::default()
+        });
+    }
+
+    #[cfg(feature = "timesync")]
+    pub fn set_local_network_time_hms_millis(
+        &self,
+        hour: u8,
+        minute: u8,
+        second: u8,
+        millisecond: u16,
+    ) {
+        self.set_local_network_time(PartialNetworkTime {
+            hour: Some(hour),
+            minute: Some(minute),
+            second: Some(second),
+            nanosecond: Some((millisecond as u32).saturating_mul(1_000_000)),
+            ..Default::default()
+        });
+    }
+
+    #[cfg(feature = "timesync")]
+    pub fn set_local_network_time_hms_nanos(
+        &self,
+        hour: u8,
+        minute: u8,
+        second: u8,
+        nanosecond: u32,
+    ) {
+        self.set_local_network_time(PartialNetworkTime {
+            hour: Some(hour),
+            minute: Some(minute),
+            second: Some(second),
+            nanosecond: Some(nanosecond),
+            ..Default::default()
+        });
+    }
+
+    #[cfg(feature = "timesync")]
+    pub fn set_local_network_datetime(
+        &self,
+        year: i32,
+        month: u8,
+        day: u8,
+        hour: u8,
+        minute: u8,
+        second: u8,
+    ) {
+        self.set_local_network_time(PartialNetworkTime {
+            year: Some(year),
+            month: Some(month),
+            day: Some(day),
+            hour: Some(hour),
+            minute: Some(minute),
+            second: Some(second),
+            ..Default::default()
+        });
+    }
+
+    #[cfg(feature = "timesync")]
+    pub fn set_local_network_datetime_millis(
+        &self,
+        year: i32,
+        month: u8,
+        day: u8,
+        hour: u8,
+        minute: u8,
+        second: u8,
+        millisecond: u16,
+    ) {
+        self.set_local_network_time(PartialNetworkTime {
+            year: Some(year),
+            month: Some(month),
+            day: Some(day),
+            hour: Some(hour),
+            minute: Some(minute),
+            second: Some(second),
+            nanosecond: Some((millisecond as u32).saturating_mul(1_000_000)),
+            ..Default::default()
+        });
+    }
+
+    #[cfg(feature = "timesync")]
+    pub fn set_local_network_datetime_nanos(
+        &self,
+        year: i32,
+        month: u8,
+        day: u8,
+        hour: u8,
+        minute: u8,
+        second: u8,
+        nanosecond: u32,
+    ) {
+        self.set_local_network_time(PartialNetworkTime {
+            year: Some(year),
+            month: Some(month),
+            day: Some(day),
+            hour: Some(hour),
+            minute: Some(minute),
+            second: Some(second),
+            nanosecond: Some(nanosecond),
+            ..Default::default()
+        });
+    }
+
+    #[cfg(feature = "timesync")]
+    pub fn clear_network_time_source(&self, source: &str) {
+        let mut st = self.timesync.lock();
+        st.clock.remove_source(source);
+    }
+
+    #[cfg(feature = "timesync")]
+    pub fn set_timesync_config(&self, cfg: Option<TimeSyncConfig>) {
+        let mut st = self.timesync.lock();
+        st.cfg = cfg;
+        st.tracker = cfg.map(TimeSyncTracker::new);
+        st.next_seq = 1;
+        st.next_announce_mono_ms = 0;
+        st.next_request_mono_ms = 0;
+        st.pending_request = None;
+        st.clock.remove_source(INTERNAL_TIMESYNC_SOURCE_ID);
+        st.clock.remove_source(LOCAL_TIMESYNC_FULL_SOURCE_ID);
+        st.clock.remove_source(LOCAL_TIMESYNC_DATE_SOURCE_ID);
+        st.clock.remove_source(LOCAL_TIMESYNC_TOD_SOURCE_ID);
+        st.clock.remove_source(LOCAL_TIMESYNC_SUBSEC_SOURCE_ID);
+    }
+
+    #[cfg(feature = "timesync")]
+    pub fn network_time(&self) -> Option<NetworkTimeReading> {
+        let now_ms = self.monotonic_now_ms();
+        let now_ns = self.monotonic_now_ns();
+        self.refresh_timesync_state(now_ms);
+        let st = self.timesync.lock();
+        st.clock.current_time(now_ns)
+    }
+
+    #[cfg(feature = "timesync")]
+    pub fn network_time_ms(&self) -> Option<u64> {
+        self.network_time().and_then(|t| t.unix_time_ms)
+    }
+
+    #[cfg(feature = "timesync")]
+    fn packet_timestamp_ms(&self) -> u64 {
+        self.network_time_ms()
+            .unwrap_or_else(|| self.monotonic_now_ms())
+    }
+
+    #[cfg(not(feature = "timesync"))]
+    fn packet_timestamp_ms(&self) -> u64 {
+        self.clock.now_ms()
+    }
+
+    #[cfg(feature = "timesync")]
+    fn queue_internal_timesync_announce(&self, cfg: TimeSyncConfig) -> TelemetryResult<()> {
+        let time_ms = self.packet_timestamp_ms();
+        self.log_queue_ts(
+            DataType::TimeSyncAnnounce,
+            time_ms,
+            &[cfg.priority, time_ms],
+        )
+    }
+
+    #[cfg(feature = "timesync")]
+    fn queue_internal_timesync_request(&self, seq: u64, t1_mono_ms: u64) -> TelemetryResult<()> {
+        let pkt_ts = self.packet_timestamp_ms();
+        self.log_queue_ts(DataType::TimeSyncRequest, pkt_ts, &[seq, t1_mono_ms])
+    }
+
+    #[cfg(feature = "timesync")]
+    fn queue_internal_timesync_response(
+        &self,
+        seq: u64,
+        t1_mono_ms: u64,
+        t2_network_ms: u64,
+        t3_network_ms: u64,
+    ) -> TelemetryResult<()> {
+        let pkt_ts = self.packet_timestamp_ms();
+        self.log_queue_ts(
+            DataType::TimeSyncResponse,
+            pkt_ts,
+            &[seq, t1_mono_ms, t2_network_ms, t3_network_ms],
+        )
+    }
+
+    #[cfg(feature = "timesync")]
+    pub fn poll_timesync(&self) -> TelemetryResult<bool> {
+        let now_ms = self.monotonic_now_ms();
+        let mut queued_any = false;
+        let mut announce_cfg = None;
+        let mut request = None;
+
+        {
+            let mut st = self.timesync.lock();
+            st.clock.prune_expired(now_ms);
+            let Some(cfg) = st.cfg else {
+                return Ok(false);
+            };
+
+            if let Some(tracker) = st.tracker.as_mut() {
+                let source_changed = matches!(
+                    tracker.refresh(now_ms),
+                    crate::timesync::TimeSyncUpdate::SourceChanged
+                );
+                let current_source = tracker.current_source().map(|s| s.sender.clone());
+                let should_announce = tracker.should_announce(now_ms);
+                if source_changed && current_source.is_none() {
+                    st.clock.remove_source(INTERNAL_TIMESYNC_SOURCE_ID);
+                    st.pending_request = None;
+                }
+
+                if should_announce && now_ms >= st.next_announce_mono_ms {
+                    announce_cfg = Some(cfg);
+                    st.next_announce_mono_ms = now_ms.saturating_add(cfg.announce_interval_ms);
+                }
+
+                if let Some(source) = current_source
+                    && now_ms >= st.next_request_mono_ms
+                    && st.pending_request.is_none()
+                {
+                    let seq = st.next_seq;
+                    let next = st.next_seq.wrapping_add(1);
+                    st.next_seq = if next == 0 { 1 } else { next };
+                    st.next_request_mono_ms = now_ms.saturating_add(cfg.request_interval_ms);
+                    st.pending_request = Some(PendingTimeSyncRequest {
+                        seq,
+                        t1_mono_ms: now_ms,
+                        source,
+                    });
+                    request = Some((seq, now_ms));
+                }
+            }
+        }
+
+        if let Some(cfg) = announce_cfg {
+            self.queue_internal_timesync_announce(cfg)?;
+            queued_any = true;
+        }
+        if let Some((seq, t1_mono_ms)) = request {
+            self.queue_internal_timesync_request(seq, t1_mono_ms)?;
+            queued_any = true;
+        }
+
+        Ok(queued_any)
+    }
+
+    #[cfg(feature = "timesync")]
+    fn handle_internal_timesync_packet(
+        &self,
+        pkt: &Packet,
+        src: Option<RouterSideId>,
+        called_from_queue: bool,
+    ) -> TelemetryResult<bool> {
+        let Some(cfg) = self.cfg.timesync_config() else {
+            if self.mode == RouterMode::Relay {
+                self.relay_send(RouterItem::Packet(pkt.clone()), src, called_from_queue)?;
+            }
+            return Ok(true);
+        };
+
+        let now_mono_ms = self.monotonic_now_ms();
+        let now_mono_ns = self.monotonic_now_ns();
+        let mut response = None;
+        let mut poll_after = false;
+
+        {
+            let mut st = self.timesync.lock();
+            st.clock.prune_expired(now_mono_ms);
+            let Some(tracker) = st.tracker.as_mut() else {
+                return Ok(true);
+            };
+
+            match pkt.data_type() {
+                DataType::TimeSyncAnnounce => {
+                    let ann = decode_timesync_announce(pkt)?;
+                    let _ = tracker.handle_announce(pkt, now_mono_ms)?;
+                    st.clock.update_source(
+                        INTERNAL_TIMESYNC_SOURCE_ID,
+                        ann.priority,
+                        PartialNetworkTime::from_unix_ms(ann.time_ms),
+                        now_mono_ms,
+                        now_mono_ns,
+                        Some(cfg.source_timeout_ms),
+                    );
+                    poll_after = true;
+                }
+                DataType::TimeSyncRequest => {
+                    if tracker.should_serve(now_mono_ms) {
+                        let req = decode_timesync_request(pkt)?;
+                        let t2 = self.packet_timestamp_ms();
+                        let t3 = self.packet_timestamp_ms();
+                        response = Some((req.seq, req.t1_ms, t2, t3));
+                    }
+                }
+                DataType::TimeSyncResponse => {
+                    let resp = decode_timesync_response(pkt)?;
+                    let current_priority = { tracker.current_source().map(|s| s.priority) };
+                    let pending = st.pending_request.clone();
+                    if let Some(pending) = pending
+                        && pending.seq == resp.seq
+                        && pending.source == pkt.sender()
+                    {
+                        let (estimate_ms, _delay_ms) = compute_network_time_sample(
+                            pending.t1_mono_ms,
+                            resp.t2_ms,
+                            resp.t3_ms,
+                            now_mono_ms,
+                        );
+                        st.clock.update_source(
+                            INTERNAL_TIMESYNC_SOURCE_ID,
+                            current_priority.unwrap_or(cfg.priority),
+                            PartialNetworkTime::from_unix_ms(estimate_ms),
+                            now_mono_ms,
+                            now_mono_ns,
+                            Some(cfg.source_timeout_ms),
+                        );
+                        st.pending_request = None;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if let Some((seq, t1, t2, t3)) = response {
+            self.queue_internal_timesync_response(seq, t1, t2, t3)?;
+        }
+        if poll_after {
+            let _ = self.poll_timesync()?;
+        }
+
+        if self.mode == RouterMode::Relay {
+            self.relay_send(RouterItem::Packet(pkt.clone()), src, called_from_queue)?;
+        }
+
+        Ok(true)
+    }
+
+    /// Create a new Router with an internal monotonic clock.
+    #[cfg(feature = "std")]
+    pub fn new(mode: RouterMode, cfg: RouterConfig) -> Self {
+        Self::new_with_clock(mode, cfg, Box::new(StdMonotonicClock::default()))
+    }
+
     /// Create a new Router with the specified mode, router configuration, and clock.
-    pub fn new(mode: RouterMode, cfg: RouterConfig, clock: Box<dyn Clock + Send + Sync>) -> Self {
+    pub fn new_with_clock(
+        mode: RouterMode,
+        cfg: RouterConfig,
+        clock: Box<dyn Clock + Send + Sync>,
+    ) -> Self {
+        #[cfg(feature = "timesync")]
+        let timesync_cfg = cfg.timesync_config();
         Self {
             sender: DEVICE_IDENTIFIER,
             mode,
@@ -1357,6 +2010,8 @@ impl Router {
             }),
             isr_rx_queue: IsrRxQueue::new(MAX_QUEUE_SIZE, STARTING_QUEUE_SIZE, QUEUE_GROW_STEP),
             clock,
+            #[cfg(feature = "timesync")]
+            timesync: RouterMutex::new(TimeSyncRuntime::new(timesync_cfg)),
         }
     }
 
@@ -1558,7 +2213,7 @@ impl Router {
             DataType::TelemetryError,
             &recipients,
             self.sender,
-            self.clock.now_ms(),
+            self.packet_timestamp_ms(),
             payload,
         )?;
 
@@ -1608,6 +2263,8 @@ impl Router {
     /// Process packets in the transmit queue for up to `timeout_ms` milliseconds.
     /// If `timeout_ms == 0`, drains the queue fully.
     pub fn process_tx_queue_with_timeout(&self, timeout_ms: u32) -> TelemetryResult<()> {
+        #[cfg(feature = "timesync")]
+        let _ = self.poll_timesync()?;
         let start = self.clock.now_ms();
         loop {
             self.process_reliable_timeouts()?;
@@ -1633,13 +2290,14 @@ impl Router {
     /// Process packets in the receive queue for up to `timeout_ms` milliseconds.
     /// If `timeout_ms == 0`, drains the queue fully.
     pub fn process_rx_queue_with_timeout(&self, timeout_ms: u32) -> TelemetryResult<()> {
+        #[cfg(feature = "timesync")]
+        let _ = self.poll_timesync()?;
         let start = self.clock.now_ms();
         loop {
-            let item_opt = self.isr_rx_queue.pop_front().unwrap_or(None)
-                .or_else(|| {
-                    let mut st = self.state.lock();
-                    st.received_queue.pop_front()
-                });
+            let item_opt = self.isr_rx_queue.pop_front().unwrap_or(None).or_else(|| {
+                let mut st = self.state.lock();
+                st.received_queue.pop_front()
+            });
             let Some(item) = item_opt else { break };
             self.process_rx_queue_item(item)?;
             if timeout_ms != 0 && self.clock.now_ms().wrapping_sub(start) >= timeout_ms as u64 {
@@ -1652,6 +2310,8 @@ impl Router {
     /// Process both transmit and receive queues for up to `timeout_ms` milliseconds.
     /// If `timeout_ms == 0`, drains both queues fully.
     pub fn process_all_queues_with_timeout(&self, timeout_ms: u32) -> TelemetryResult<()> {
+        #[cfg(feature = "timesync")]
+        let _ = self.poll_timesync()?;
         let drain_fully = timeout_ms == 0;
         let start = if drain_fully { 0 } else { self.clock.now_ms() };
 
@@ -1672,11 +2332,10 @@ impl Router {
             }
 
             // Then RX
-            if let Some(item) = self.isr_rx_queue.pop_front().unwrap_or(None)
-                .or_else(|| {
-                    let mut st = self.state.lock();
-                    st.received_queue.pop_front()
-                }) {
+            if let Some(item) = self.isr_rx_queue.pop_front().unwrap_or(None).or_else(|| {
+                let mut st = self.state.lock();
+                st.received_queue.pop_front()
+            }) {
                 self.process_rx_queue_item(item)?;
                 did_any = true;
             }
@@ -1770,11 +2429,7 @@ impl Router {
 
     /// Enqueue a packet for RX processing with explicit source side.
     #[inline]
-    pub fn rx_queue_from_side(
-        &self,
-        pkt: Packet,
-        side: RouterSideId,
-    ) -> TelemetryResult<()> {
+    pub fn rx_queue_from_side(&self, pkt: Packet, side: RouterSideId) -> TelemetryResult<()> {
         pkt.validate()?;
         let mut st = self.state.lock();
         st.received_queue.push_back(RouterRxItem {
@@ -1789,11 +2444,7 @@ impl Router {
     /// Returns `TelemetryError::Io("rx queue busy")` if another context is
     /// currently mutating the ISR RX queue.
     #[inline]
-    pub fn rx_queue_from_side_isr(
-        &self,
-        pkt: Packet,
-        side: RouterSideId,
-    ) -> TelemetryResult<()> {
+    pub fn rx_queue_from_side_isr(&self, pkt: Packet, side: RouterSideId) -> TelemetryResult<()> {
         pkt.validate()?;
         self.isr_rx_queue.push_back(RouterRxItem {
             src: Some(side),
@@ -2118,9 +2769,24 @@ impl Router {
             RouterItem::Packet(pkt) => {
                 pkt.validate()?;
 
+                #[cfg(feature = "timesync")]
+                if matches!(
+                    pkt.data_type(),
+                    DataType::TimeSyncAnnounce
+                        | DataType::TimeSyncRequest
+                        | DataType::TimeSyncResponse
+                ) {
+                    self.handle_internal_timesync_packet(pkt, item.src, called_from_queue)?;
+                    return Ok(());
+                }
+
                 if self.learn_discovery_packet(pkt, item.src)? {
                     if self.mode == RouterMode::Relay {
-                        self.relay_send(RouterItem::Packet(pkt.to_owned()), item.src, called_from_queue)?;
+                        self.relay_send(
+                            RouterItem::Packet(pkt.to_owned()),
+                            item.src,
+                            called_from_queue,
+                        )?;
                     }
                     return Ok(());
                 }
@@ -2191,6 +2857,19 @@ impl Router {
 
             RouterItem::Serialized(bytes) => {
                 let env = serialize::peek_envelope(bytes.as_ref())?;
+
+                #[cfg(feature = "timesync")]
+                if matches!(
+                    env.ty,
+                    DataType::TimeSyncAnnounce
+                        | DataType::TimeSyncRequest
+                        | DataType::TimeSyncResponse
+                ) {
+                    let pkt = serialize::deserialize_packet(bytes.as_ref())?;
+                    pkt.validate()?;
+                    self.handle_internal_timesync_packet(&pkt, item.src, called_from_queue)?;
+                    return Ok(());
+                }
 
                 #[cfg(feature = "discovery")]
                 if discovery::is_discovery_type(env.ty) {
@@ -2281,6 +2960,9 @@ impl Router {
         match item {
             RouterItem::Packet(pkt) => {
                 pkt.validate()?;
+                if is_internal_control_type(pkt.data_type()) {
+                    return Ok(());
+                }
 
                 let mut eps: Vec<DataEndpoint> = pkt.endpoints().to_vec();
                 eps.sort_unstable();
@@ -2327,6 +3009,9 @@ impl Router {
             }
             RouterItem::Serialized(bytes) => {
                 let env = serialize::peek_envelope(bytes.as_ref())?;
+                if is_internal_control_type(env.ty) {
+                    return Ok(());
+                }
 
                 let any_packet_needed = env
                     .endpoints
@@ -2401,11 +3086,24 @@ impl Router {
                         return Ok(());
                     }
                     #[cfg(feature = "discovery")]
-                    if !is_discovery {
+                    if !is_discovery
+                        && !matches!(&data, RouterItem::Packet(pkt) if is_internal_control_type(pkt.data_type()))
+                        && !matches!(&data, RouterItem::Serialized(bytes)
+                            if serialize::peek_envelope(bytes.as_ref())
+                                .map(|env| is_internal_control_type(env.ty))
+                                .unwrap_or(false))
+                    {
                         self.dispatch_local_for_item(&data)?;
                     }
                     #[cfg(not(feature = "discovery"))]
-                    self.dispatch_local_for_item(&data)?;
+                    if !matches!(&data, RouterItem::Packet(pkt) if is_internal_control_type(pkt.data_type()))
+                        && !matches!(&data, RouterItem::Serialized(bytes)
+                            if serialize::peek_envelope(bytes.as_ref())
+                                .map(|env| is_internal_control_type(env.ty))
+                                .unwrap_or(false))
+                    {
+                        self.dispatch_local_for_item(&data)?;
+                    }
                 }
 
                 let send_remote = match &data {
@@ -2422,8 +3120,7 @@ impl Router {
                         let mut eps: Vec<DataEndpoint> = env.endpoints.iter().copied().collect();
                         eps.sort_unstable();
                         eps.dedup();
-                        has_remote_endpoint(&eps, &self.cfg)
-                            || force_remote_for_type(env.ty)
+                        has_remote_endpoint(&eps, &self.cfg) || force_remote_for_type(env.ty)
                     }
                 };
 
@@ -2479,7 +3176,14 @@ impl Router {
                     if self.is_duplicate_pkt(&data)? {
                         return Ok(());
                     }
-                    self.dispatch_local_for_item(&data)?;
+                    let suppress_local = matches!(&data, RouterItem::Packet(pkt) if is_internal_control_type(pkt.data_type()))
+                        || matches!(&data, RouterItem::Serialized(bytes)
+                            if serialize::peek_envelope(bytes.as_ref())
+                                .map(|env| is_internal_control_type(env.ty))
+                                .unwrap_or(false));
+                    if !suppress_local {
+                        self.dispatch_local_for_item(&data)?;
+                    }
                 }
                 if let Err(e) = self.send_reliable_to_side(dst, data.clone()) {
                     match &data {
@@ -2581,7 +3285,7 @@ impl Router {
     /// Build a packet then send immediately.
     #[inline]
     pub fn log<T: LeBytes>(&self, ty: DataType, data: &[T]) -> TelemetryResult<()> {
-        log_raw(self.sender, ty, data, self.clock.now_ms(), |pkt| {
+        log_raw(self.sender, ty, data, self.packet_timestamp_ms(), |pkt| {
             self.tx_item(RouterTxItem::Broadcast(RouterItem::Packet(pkt)))
         })
     }
@@ -2589,7 +3293,7 @@ impl Router {
     /// Build a packet and queue it for later TX.
     #[inline]
     pub fn log_queue<T: LeBytes>(&self, ty: DataType, data: &[T]) -> TelemetryResult<()> {
-        log_raw(self.sender, ty, data, self.clock.now_ms(), |pkt| {
+        log_raw(self.sender, ty, data, self.packet_timestamp_ms(), |pkt| {
             self.tx_queue_item(RouterTxItem::Broadcast(RouterItem::Packet(pkt)))
         })
     }

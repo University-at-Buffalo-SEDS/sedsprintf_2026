@@ -1,14 +1,14 @@
 #[cfg(test)]
 mod threaded_system_tests {
+    use sedsprintf_rs::TelemetryResult;
     use sedsprintf_rs::config::{DataEndpoint, DataType};
     use sedsprintf_rs::packet::Packet;
     use sedsprintf_rs::relay::Relay;
     use sedsprintf_rs::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
-    use sedsprintf_rs::TelemetryResult;
 
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::mpsc;
-    use std::sync::Arc;
     use std::thread;
     use std::time::{Duration, Instant};
 
@@ -51,8 +51,7 @@ mod threaded_system_tests {
     /// Build a packet with endpoints [SD_CARD, Radio], mirroring the C
     /// system’s idea that every message goes to both "radio" and "SD".
     fn make_packet(ty: DataType, vals: &[f32], ts: u64) -> Packet {
-        Packet::from_f32_slice(ty, vals, &[DataEndpoint::SdCard, DataEndpoint::Radio], ts)
-            .unwrap()
+        Packet::from_f32_slice(ty, vals, &[DataEndpoint::SdCard, DataEndpoint::Radio], ts).unwrap()
     }
 
     /// Threaded system test that mirrors `main.c` but now uses the Rust
@@ -71,18 +70,20 @@ mod threaded_system_tests {
 
         // Frames sent out of relay on "bus1" side get injected into bus1_rx
         let relay_bus1_tx = bus1_tx.clone();
-        let bus1_side_id = relay.add_side_serialized("bus1", move |bytes: &[u8]| -> TelemetryResult<()> {
-            // from = usize::MAX so we don't accidentally "skip" any node
-            relay_bus1_tx.send((usize::MAX, bytes.to_vec())).unwrap();
-            Ok(())
-        });
+        let bus1_side_id =
+            relay.add_side_serialized("bus1", move |bytes: &[u8]| -> TelemetryResult<()> {
+                // from = usize::MAX so we don't accidentally "skip" any node
+                relay_bus1_tx.send((usize::MAX, bytes.to_vec())).unwrap();
+                Ok(())
+            });
 
         // Frames sent out of relay on "bus2" side get injected into bus2_rx
         let relay_bus2_tx = bus2_tx.clone();
-        let bus2_side_id = relay.add_side_serialized("bus2", move |bytes: &[u8]| -> TelemetryResult<()> {
-            relay_bus2_tx.send((usize::MAX, bytes.to_vec())).unwrap();
-            Ok(())
-        });
+        let bus2_side_id =
+            relay.add_side_serialized("bus2", move |bytes: &[u8]| -> TelemetryResult<()> {
+                relay_bus2_tx.send((usize::MAX, bytes.to_vec())).unwrap();
+                Ok(())
+            });
 
         // ------------- 2) Build nodes -------------
         let stop_flag = Arc::new(AtomicBool::new(false));
@@ -131,9 +132,9 @@ mod threaded_system_tests {
             };
 
             let router = if handlers.is_empty() {
-                Router::new(RouterMode::Sink, RouterConfig::default(), clock)
+                Router::new_with_clock(RouterMode::Sink, RouterConfig::default(), clock)
             } else {
-                Router::new(RouterMode::Sink, RouterConfig::new(handlers), clock)
+                Router::new_with_clock(RouterMode::Sink, RouterConfig::new(handlers), clock)
             };
             router.add_side_serialized("bus", tx);
 
@@ -328,7 +329,7 @@ mod threaded_system_tests {
                     &[DataEndpoint::SdCard, DataEndpoint::Radio],
                     i + 300,
                 )
-                    .unwrap();
+                .unwrap();
                 power_router.tx(pkt2).unwrap();
                 thread::sleep(Duration::from_millis(5));
             }

@@ -34,10 +34,6 @@ EP = seds.DataEndpoint
 RM = seds.RouterMode
 
 
-def now_ms():
-    return 0
-
-
 def tx(bytes_buf):
     # send bytes to transport
     pass
@@ -51,11 +47,14 @@ handlers = [
     (int(EP.SD_CARD), on_packet, None),
 ]
 
-router = seds.Router(now_ms=now_ms, handlers=handlers, mode=RM.Sink)
+router = seds.Router(handlers=handlers, mode=RM.Sink)
 router.add_side_serialized("RADIO", tx)
 router.log_f32(ty=DT.GPS_DATA, values=[1.0, 2.0, 3.0])
 router.process_all_queues()
 ```
+
+If you need a custom monotonic source for tests or simulation, pass `now_ms=...`. Otherwise the
+router uses its internal monotonic clock on `std` builds.
 
 See python-example/main.py
 ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/python-example/main.py) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/python-example/main.py))
@@ -63,6 +62,11 @@ for a more complete multi-process example.
 Time sync is demonstrated in python-example/timesync_example.py
 ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/python-example/timesync_example.py) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/python-example/timesync_example.py)).
 See [Time-Sync](Time-Sync) for the time sync packet flow and roles.
+
+With `timesync` enabled, `Router` keeps an internal network clock. `TIME_SYNC` packets are
+handled internally, `network_time()` / `network_time_ms()` expose the merged current time, and
+source/master nodes can set partial or complete local time with `set_local_network_time(...)`,
+`set_local_network_date(...)`, and the `set_local_network_*` datetime helpers.
 
 ## Logging API
 

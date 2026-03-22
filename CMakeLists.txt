@@ -36,6 +36,7 @@ set(SEDSPRINTF_RS_SCHEMA_PATH "" CACHE STRING
 # Detect embedded build
 # ============================================================
 option(SEDSPRINTF_EMBEDDED_BUILD "Build sedsprintf_rs for embedded" OFF)
+option(SEDSPRINTF_RS_PREFER_DYNAMIC "Prefer dynamic linking for host builds when supported" ON)
 
 # Auto-detect embedded if user hasn't forced it
 if (NOT SEDSPRINTF_EMBEDDED_BUILD)
@@ -70,12 +71,42 @@ if (SEDSPRINTF_EMBEDDED_BUILD)
     set(RELEASE_PROFILE_DIR "release-embedded")
 endif ()
 
-if (RUST_TRIPLE STREQUAL "")
-    set(RS_LIB_DBG "${RUST_DIR}/target/debug/libsedsprintf_rs.a")
-    set(RS_LIB_REL "${RUST_DIR}/target/release/libsedsprintf_rs.a")
+if (WIN32)
+    set(RS_SHARED_LIB_NAME "sedsprintf_rs.dll")
 else ()
-    set(RS_LIB_DBG "${RUST_DIR}/target/${RUST_TRIPLE}/debug/libsedsprintf_rs.a")
-    set(RS_LIB_REL "${RUST_DIR}/target/${RUST_TRIPLE}/${RELEASE_PROFILE_DIR}/libsedsprintf_rs.a")
+    set(RS_SHARED_LIB_NAME "${CMAKE_SHARED_LIBRARY_PREFIX}sedsprintf_rs${CMAKE_SHARED_LIBRARY_SUFFIX}")
+endif ()
+
+if (RUST_TRIPLE STREQUAL "")
+    set(RS_STATIC_LIB_DBG "${RUST_DIR}/target/debug/libsedsprintf_rs.a")
+    set(RS_STATIC_LIB_REL "${RUST_DIR}/target/release/libsedsprintf_rs.a")
+    set(RS_SHARED_LIB_DBG "${RUST_DIR}/target/debug/${RS_SHARED_LIB_NAME}")
+    set(RS_SHARED_LIB_REL "${RUST_DIR}/target/release/${RS_SHARED_LIB_NAME}")
+else ()
+    set(RS_STATIC_LIB_DBG "${RUST_DIR}/target/${RUST_TRIPLE}/debug/libsedsprintf_rs.a")
+    set(RS_STATIC_LIB_REL "${RUST_DIR}/target/${RUST_TRIPLE}/${RELEASE_PROFILE_DIR}/libsedsprintf_rs.a")
+    set(RS_SHARED_LIB_DBG "${RUST_DIR}/target/${RUST_TRIPLE}/debug/${RS_SHARED_LIB_NAME}")
+    set(RS_SHARED_LIB_REL "${RUST_DIR}/target/${RUST_TRIPLE}/${RELEASE_PROFILE_DIR}/${RS_SHARED_LIB_NAME}")
+endif ()
+
+set(SEDSPRINTF_RS_DYNAMIC_SUPPORTED ON)
+if (SEDSPRINTF_EMBEDDED_BUILD OR WIN32)
+    set(SEDSPRINTF_RS_DYNAMIC_SUPPORTED OFF)
+endif ()
+
+set(SEDSPRINTF_RS_LINK_DYNAMIC OFF)
+if (SEDSPRINTF_RS_PREFER_DYNAMIC AND SEDSPRINTF_RS_DYNAMIC_SUPPORTED)
+    set(SEDSPRINTF_RS_LINK_DYNAMIC ON)
+endif ()
+
+if (SEDSPRINTF_RS_LINK_DYNAMIC)
+    set(RS_LIB_DBG "${RS_SHARED_LIB_DBG}")
+    set(RS_LIB_REL "${RS_SHARED_LIB_REL}")
+    set(RS_IMPORTED_KIND SHARED)
+else ()
+    set(RS_LIB_DBG "${RS_STATIC_LIB_DBG}")
+    set(RS_LIB_REL "${RS_STATIC_LIB_REL}")
+    set(RS_IMPORTED_KIND STATIC)
 endif ()
 
 set(RS_INCLUDE "${RUST_DIR}/C-Headers")
@@ -205,7 +236,7 @@ add_custom_target(sedsprintf_rs_build
 # ============================================================
 # Import library for C/C++
 # ============================================================
-add_library(sedsprintf_rs STATIC IMPORTED GLOBAL)
+add_library(sedsprintf_rs ${RS_IMPORTED_KIND} IMPORTED GLOBAL)
 set_target_properties(sedsprintf_rs PROPERTIES
     IMPORTED_LOCATION_DEBUG "${RS_LIB_DBG}"
     IMPORTED_LOCATION_RELEASE "${RS_LIB_REL}"
@@ -233,9 +264,19 @@ add_library(sedsprintf_rs::sedsprintf_rs ALIAS sedsprintf_rs)
 
 set(SEDSPRINTF_RS_LIB_DEBUG "${RS_LIB_DBG}" PARENT_SCOPE)
 set(SEDSPRINTF_RS_LIB_RELEASE "${RS_LIB_REL}" PARENT_SCOPE)
+set(SEDSPRINTF_RS_STATIC_LIB_DEBUG "${RS_STATIC_LIB_DBG}" PARENT_SCOPE)
+set(SEDSPRINTF_RS_STATIC_LIB_RELEASE "${RS_STATIC_LIB_REL}" PARENT_SCOPE)
+set(SEDSPRINTF_RS_SHARED_LIB_DEBUG "${RS_SHARED_LIB_DBG}" PARENT_SCOPE)
+set(SEDSPRINTF_RS_SHARED_LIB_RELEASE "${RS_SHARED_LIB_REL}" PARENT_SCOPE)
 set(SEDSPRINTF_RS_INCLUDE_DIR "${RS_INCLUDE}" PARENT_SCOPE)
 
 message(STATUS "sedsprintf_rs include dir: ${RS_INCLUDE}")
 message(STATUS "sedsprintf_rs debug lib:  ${RS_LIB_DBG}")
 message(STATUS "sedsprintf_rs release lib:${RS_LIB_REL}")
+if (SEDSPRINTF_RS_LINK_DYNAMIC)
+    set(_SEDSPRINTF_RS_LINK_MODE "dynamic")
+else ()
+    set(_SEDSPRINTF_RS_LINK_MODE "static")
+endif ()
+message(STATUS "sedsprintf_rs link mode: ${_SEDSPRINTF_RS_LINK_MODE}")
 message(STATUS "sedsprintf_rs build args: ${RS_ARGS_STR}")

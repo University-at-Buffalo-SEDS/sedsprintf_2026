@@ -12,24 +12,12 @@ static void pump_nodes(SimNode **nodes, size_t count, unsigned rounds)
         {
             if (nodes[n] && nodes[n]->r)
             {
-                (void)seds_router_process_tx_queue_with_timeout(nodes[n]->r, 0);
-                (void)seds_router_process_rx_queue_with_timeout(nodes[n]->r, 0);
+                (void)seds_router_process_tx_queue_with_timeout(nodes[n]->r, 5);
+                (void)seds_router_process_rx_queue_with_timeout(nodes[n]->r, 5);
             }
         }
         usleep(1000);
     }
-}
-
-static void send_announce(SimNode *src, uint64_t priority)
-{
-    const uint64_t ann[2] = {priority, node_now_since_bus_ms(src)};
-    assert(node_log(src, SEDS_DT_TIME_SYNC_ANNOUNCE, ann, 2, sizeof(uint64_t)) == SEDS_OK);
-}
-
-static void send_request(SimNode *src, uint64_t seq)
-{
-    const uint64_t req[2] = {seq, node_now_since_bus_ms(src)};
-    assert(node_log(src, SEDS_DT_TIME_SYNC_REQUEST, req, 2, sizeof(uint64_t)) == SEDS_OK);
 }
 
 static void scenario_grandmaster_and_consumers(void)
@@ -43,20 +31,14 @@ static void scenario_grandmaster_and_consumers(void)
     assert(node_init(&c2, &bus, "C2", 0, 0, 0) == SEDS_OK);
 
     SimNode *nodes[] = {&gm, &c1, &c2};
+    pump_nodes(nodes, 3, 300);
 
-    send_announce(&gm, 1);
-    send_announce(&gm, 1);
-    pump_nodes(nodes, 3, 40);
-
-    send_request(&c1, 1001);
-    send_request(&c2, 1002);
-    pump_nodes(nodes, 3, 60);
-
-    assert(gm.ts_request_hits >= 2);
-    assert(c1.ts_announce_hits >= 1);
-    assert(c2.ts_announce_hits >= 1);
-    assert(c1.ts_response_hits >= 1);
-    assert(c2.ts_response_hits >= 1);
+    uint64_t c1_network_ms = 0;
+    uint64_t c2_network_ms = 0;
+    assert(seds_router_get_network_time_ms(c1.r, &c1_network_ms) == SEDS_OK);
+    assert(seds_router_get_network_time_ms(c2.r, &c2_network_ms) == SEDS_OK);
+    assert(c1_network_ms > 0);
+    assert(c2_network_ms > 0);
 
     node_free(&c2);
     node_free(&c1);
@@ -75,27 +57,21 @@ static void scenario_failover_primary_to_backup(void)
     assert(node_init(&consumer, &bus, "CONSUMER", 0, 0, 0) == SEDS_OK);
 
     SimNode *nodes[] = {&primary, &backup, &consumer};
+    pump_nodes(nodes, 3, 200);
 
-    send_announce(&primary, 1);
-    pump_nodes(nodes, 3, 30);
-
-    send_request(&consumer, 2001);
-    pump_nodes(nodes, 3, 60);
-
-    const unsigned consumer_resp_before = consumer.ts_response_hits;
-    assert(consumer_resp_before >= 1);
+    uint64_t before_failover = 0;
+    assert(seds_router_get_network_time_ms(consumer.r, &before_failover) == SEDS_OK);
+    assert(before_failover > 0);
 
     node_free(&primary);
     backup.is_time_source = 1;
+    assert(seds_router_configure_timesync(backup.r, true, 1u, 2u, 5000u, 100u, 100u) == SEDS_OK);
 
-    const unsigned backup_req_before = backup.ts_request_hits;
+    pump_nodes(nodes, 3, 300);
 
-    send_announce(&backup, 2);
-    send_request(&consumer, 2002);
-    pump_nodes(nodes, 3, 80);
-
-    assert(backup.ts_request_hits > backup_req_before);
-    assert(consumer.ts_response_hits > consumer_resp_before);
+    uint64_t after_failover = 0;
+    assert(seds_router_get_network_time_ms(consumer.r, &after_failover) == SEDS_OK);
+    assert(after_failover >= before_failover);
 
     node_free(&consumer);
     node_free(&backup);

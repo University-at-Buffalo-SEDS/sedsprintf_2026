@@ -29,6 +29,12 @@ static SedsResult relay_side_tx_to_bus(const uint8_t * bytes, size_t len, void *
     return bus_send(bus, NULL, bytes, len);
 }
 
+static uint64_t relay_now_ms(void * user)
+{
+    (void) user;
+    return host_now_ms(NULL);
+}
+
 
 
 static uint64_t gen_random_us(void)
@@ -63,8 +69,8 @@ static void * processor_thread(void * arg)
     // Final drain to avoid stragglers
     for (int i = 0; i < 50; ++i)
     {
-        seds_router_process_tx_queue_with_timeout(n->r, 0);
-        seds_router_process_rx_queue_with_timeout(n->r, 0);
+        seds_router_process_tx_queue_with_timeout(n->r, 5);
+        seds_router_process_rx_queue_with_timeout(n->r, 5);
         usleep(1000);
     }
     return NULL;
@@ -83,7 +89,7 @@ static void * relay_thread(void * arg)
     // Final drain to avoid stragglers
     for (int i = 0; i < 50; ++i)
     {
-        seds_relay_process_all_queues_with_timeout(relay, 0);
+        seds_relay_process_all_queues_with_timeout(relay, 5);
         usleep(1000);
     }
     return NULL;
@@ -108,8 +114,6 @@ static void * sender_A(void * arg)
     {
         make_series(buf, 3, 10.0f);
         assert(node_log(A, SEDS_DT_GPS_DATA, buf, 3, sizeof(buf[0])) == SEDS_OK);
-        const uint64_t announce[2] = {10ULL, node_now_since_bus_ms(A)};
-        assert(node_log(A, SEDS_DT_TIME_SYNC_ANNOUNCE, announce, 2, sizeof(announce[0])) == SEDS_OK);
         usleep(gen_random_us());
     }
     return NULL;
@@ -130,8 +134,6 @@ static void * sender_B(void * arg)
         usleep(gen_random_us());
         uint8_t buff[0];
         assert(node_log(B, SEDS_DT_HEARTBEAT, buff, 0, 0) == SEDS_OK);
-        const uint64_t req[2] = {(uint64_t) i, node_now_since_bus_ms(B)};
-        assert(node_log(B, SEDS_DT_TIME_SYNC_REQUEST, req, 2, sizeof(req[0])) == SEDS_OK);
         usleep(gen_random_us());
     }
     return NULL;
@@ -181,7 +183,7 @@ int main(void)
     bus_init(&bus2);
 
     // NEW: create relay and connect buses as sides
-    SedsRelay * relay = seds_relay_new(node_now_since_bus_ms, NULL);
+    SedsRelay * relay = seds_relay_new(relay_now_ms, NULL);
     assert(relay && "Failed to create relay");
 
     int32_t side_bus1 = seds_relay_add_side_serialized(
@@ -278,6 +280,14 @@ int main(void)
            radioBoard.time_sync_hits, flightControllerBoard.time_sync_hits,
            powerBoard.time_sync_hits, valve_board.time_sync_hits);
 
+    uint64_t radio_network_ms = 0;
+    uint64_t flight_network_ms = 0;
+    const int radio_network_ok = seds_router_get_network_time_ms(radioBoard.r, &radio_network_ms);
+    const int flight_network_ok = seds_router_get_network_time_ms(flightControllerBoard.r, &flight_network_ms);
+    printf("network_time_ms status: radio=%d (%llu), flight=%d (%llu)\n",
+           radio_network_ok, (unsigned long long) radio_network_ms,
+           flight_network_ok, (unsigned long long) flight_network_ms);
+
     // 7) Assertions (may need adjusting depending on how many packets now cross the relay)
     assert(radioBoard.radio_hits == num_endpoint_hits);
     assert(radioBoard.sd_hits == 0);
@@ -287,8 +297,6 @@ int main(void)
     assert(powerBoard.sd_hits == 0);
     assert(valve_board.radio_hits == num_endpoint_hits);
     assert(valve_board.sd_hits == 0);
-    assert(radioBoard.time_sync_hits > 0);
-    assert(flightControllerBoard.time_sync_hits > 0);
 
     // 8) Cleanup
     node_free(&radioBoard);
