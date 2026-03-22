@@ -167,6 +167,17 @@ SedsResult seds_router_configure_timesync(
 );
 
 /**
+ * @brief Poll the router's internal time-sync runtime and queue any due announce/request traffic.
+ *
+ * This is the non-blocking hook intended for the application's main loop. Call it periodically,
+ * then run the normal queue processing functions. If `out_did_queue` is non-NULL, it is set to
+ * `true` when a time-sync packet was queued during this call.
+ *
+ * Requires a build with the `timesync` feature.
+ */
+SedsResult seds_router_poll_timesync(SedsRouter * r, bool * out_did_queue);
+
+/**
  * @brief Set the router's local/master network time source with partial fields.
  *
  * Requires a build with the `timesync` feature. Presence flags indicate which

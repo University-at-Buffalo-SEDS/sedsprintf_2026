@@ -990,6 +990,15 @@ impl PyRouter {
     }
 
     #[cfg(feature = "timesync")]
+    fn poll_timesync(&self) -> PyResult<bool> {
+        let rtr = self
+            .inner
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
+        rtr.poll_timesync().map_err(py_err_from)
+    }
+
+    #[cfg(feature = "timesync")]
     fn network_time_ms(&self) -> PyResult<Option<u64>> {
         let rtr = self
             .inner

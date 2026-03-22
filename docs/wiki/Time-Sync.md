@@ -105,6 +105,10 @@ For most applications using router-managed timesync, you do not need to manually
 these packets. The router can announce, request, respond, and maintain the internal network clock
 itself once time sync is configured.
 
+Drive that runtime by calling `poll_timesync()` periodically from your main loop, then processing
+the router's normal TX/RX queues. The poll is non-blocking: it only queues an announce or request
+when the configured interval says work is due.
+
 ## Master / local clock injection
 
 In addition to packet-driven sync, a source/master can set its local network time directly.
