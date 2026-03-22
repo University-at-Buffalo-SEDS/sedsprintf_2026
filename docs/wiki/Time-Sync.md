@@ -33,6 +33,9 @@ All payload fields are `u64` values in little-endian order. Timestamps are in mi
 - `TimeSyncRequest`: `[seq, t1_ms]`
 - `TimeSyncResponse`: `[seq, t1_ms, t2_ms, t3_ms]`
 
+With the `discovery` feature enabled, discovery also adds a built-in
+`DISCOVERY_TIMESYNC_SOURCES` control packet that advertises concrete time source sender IDs.
+
 `t4_ms` is captured locally when the response is received; it is not part of the packet payload.
 
 ## Internal router behavior
@@ -43,6 +46,10 @@ The router handles the built-in time sync packet types internally:
 - `TimeSyncRequest` may cause the router to queue an internal response when it is acting as a
   source.
 - `TimeSyncResponse` updates the consumer-side estimate using the local monotonic receive time.
+- When discovery is enabled, outbound `TIME_SYNC` traffic prefers exact discovered source paths
+  over generic `TIME_SYNC` endpoint reachability.
+- Internally generated `TimeSyncResponse` packets are returned to the requesting ingress side
+  instead of being broadcast to every side.
 
 Applications can read the resulting network time through:
 
@@ -59,7 +66,10 @@ Applications can read the resulting network time through:
 - `Auto`: announces only when no active source is present.
 
 Sources are chosen by priority (lower is better). Ties are broken by sender ID (lexicographic).
-If no announce is seen within `source_timeout_ms`, the source is considered inactive.
+The tracker keeps the active source set, so if the current winner becomes inactive and another
+source with the same or worse priority is still active, failover can happen immediately without
+waiting for a fresh announce. If no announce is seen within `source_timeout_ms`, a source is
+considered inactive.
 
 The internal clock also supports merging partial absolute sources:
 
@@ -68,6 +78,19 @@ The internal clock also supports merging partial absolute sources:
 - subsecond precision from another source
 
 When a complete date+time base exists, the router advances it forward using the monotonic clock.
+
+## Discovery integration
+
+With both `timesync` and `discovery` enabled:
+
+- discovery advertisements include `TIME_SYNC` endpoint reachability
+- routers and relays also advertise reachable time source sender IDs
+- `export_topology()` includes both reachable endpoints and reachable time source IDs per side
+- a consumer can route requests toward the exact side that leads to its selected source instead of
+  sending requests to every side that merely exposes `TIME_SYNC`
+
+If no exact source route is known yet, routing still falls back to ordinary endpoint-based
+discovery or flooding.
 
 ## Typical flow
 

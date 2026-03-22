@@ -382,7 +382,8 @@ fn civil_from_days(mut z: i64) -> (i32, u32, u32) {
 pub struct TimeSyncTracker {
     cfg: TimeSyncConfig,
     local_id: &'static str,
-    source: Option<TimeSyncSource>,
+    sources: BTreeMap<String, TimeSyncSource>,
+    current_source: Option<String>,
 }
 
 impl TimeSyncTracker {
@@ -390,7 +391,8 @@ impl TimeSyncTracker {
         Self {
             cfg,
             local_id: DEVICE_IDENTIFIER,
-            source: None,
+            sources: BTreeMap::new(),
+            current_source: None,
         }
     }
 
@@ -399,18 +401,15 @@ impl TimeSyncTracker {
     }
 
     pub fn current_source(&self) -> Option<&TimeSyncSource> {
-        self.source.as_ref()
+        self.current_source
+            .as_ref()
+            .and_then(|sender| self.sources.get(sender))
     }
 
     pub fn refresh(&mut self, now_ms: u64) -> TimeSyncUpdate {
-        if self.is_source_active(now_ms) {
-            return TimeSyncUpdate::NoChange;
-        }
-        if self.source.take().is_some() {
-            TimeSyncUpdate::SourceChanged
-        } else {
-            TimeSyncUpdate::NoChange
-        }
+        self.sources
+            .retain(|_, src| Self::source_is_active(src, now_ms, self.cfg.source_timeout_ms));
+        self.reselect_source(now_ms)
     }
 
     pub fn should_announce(&self, now_ms: u64) -> bool {
@@ -441,38 +440,40 @@ impl TimeSyncTracker {
             last_announce_ms: recv_ms,
             last_time_ms: ann.time_ms,
         };
-
-        if let Some(cur) = &mut self.source
-            && incoming.sender == cur.sender
-        {
-            cur.priority = incoming.priority;
-            cur.last_announce_ms = incoming.last_announce_ms;
-            cur.last_time_ms = incoming.last_time_ms;
-            return Ok(TimeSyncUpdate::NoChange);
-        }
-
-        let replace = match &self.source {
-            None => true,
-            Some(cur) => {
-                !self.is_source_active(recv_ms)
-                    || incoming.priority < cur.priority
-                    || (incoming.priority == cur.priority && incoming.sender < cur.sender)
-            }
-        };
-
-        if replace {
-            self.source = Some(incoming);
-            Ok(TimeSyncUpdate::SourceChanged)
-        } else {
-            Ok(TimeSyncUpdate::NoChange)
-        }
+        self.sources.insert(incoming.sender.clone(), incoming);
+        Ok(self.reselect_source(recv_ms))
     }
 
     pub fn is_source_active(&self, now_ms: u64) -> bool {
-        self.source
-            .as_ref()
-            .map(|s| now_ms.saturating_sub(s.last_announce_ms) <= self.cfg.source_timeout_ms)
+        self.current_source()
+            .map(|s| Self::source_is_active(s, now_ms, self.cfg.source_timeout_ms))
             .unwrap_or(false)
+    }
+
+    fn source_is_active(src: &TimeSyncSource, now_ms: u64, timeout_ms: u64) -> bool {
+        now_ms.saturating_sub(src.last_announce_ms) <= timeout_ms
+    }
+
+    fn best_active_source_id(&self, now_ms: u64) -> Option<String> {
+        self.sources
+            .values()
+            .filter(|src| Self::source_is_active(src, now_ms, self.cfg.source_timeout_ms))
+            .min_by(|a, b| {
+                a.priority
+                    .cmp(&b.priority)
+                    .then_with(|| a.sender.cmp(&b.sender))
+            })
+            .map(|src| src.sender.clone())
+    }
+
+    fn reselect_source(&mut self, now_ms: u64) -> TimeSyncUpdate {
+        let prev = self.current_source.clone();
+        self.current_source = self.best_active_source_id(now_ms);
+        if self.current_source == prev {
+            TimeSyncUpdate::NoChange
+        } else {
+            TimeSyncUpdate::SourceChanged
+        }
     }
 }
 

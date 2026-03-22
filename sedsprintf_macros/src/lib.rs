@@ -443,7 +443,10 @@ fn is_timesync_type(ty: &JsonType) -> bool {
 fn is_discovery_type(ty: &JsonType) -> bool {
     matches!(
         (ty.rust.as_str(), ty.name.as_str()),
-        ("DiscoveryAnnounce", _) | (_, "DISCOVERY_ANNOUNCE")
+        ("DiscoveryAnnounce", _)
+            | (_, "DISCOVERY_ANNOUNCE")
+            | ("DiscoveryTimeSyncSources", _)
+            | (_, "DISCOVERY_TIMESYNC_SOURCES")
     )
 }
 
@@ -836,11 +839,15 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
             syn::Ident::new("DiscoveryAnnounce", Span::call_site()),
             "Endpoint discovery advertisement (dynamic list of endpoint IDs).".to_string(),
         ));
+        ty_entries.push((
+            syn::Ident::new("DiscoveryTimeSyncSources", Span::call_site()),
+            "Time sync source discovery advertisement (dynamic list of sender IDs).".to_string(),
+        ));
     }
 
     let max_ty_value = cfg.types.len() as u32
         + if timesync_enabled { 3 } else { 0 }
-        + if discovery_enabled { 1 } else { 0 };
+        + if discovery_enabled { 2 } else { 0 };
 
     let ty_variants = ty_entries
         .iter()
@@ -953,6 +960,12 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
             DataType::DiscoveryAnnounce => MessageMeta {
                 name: "DISCOVERY_ANNOUNCE",
                 element: MessageElement::Dynamic(MessageDataType::UInt32, MessageClass::Data),
+                endpoints: &[DataEndpoint::Discovery],
+                reliable: crate::ReliableMode::None,
+            },
+            DataType::DiscoveryTimeSyncSources => MessageMeta {
+                name: "DISCOVERY_TIMESYNC_SOURCES",
+                element: MessageElement::Dynamic(MessageDataType::UInt8, MessageClass::Data),
                 endpoints: &[DataEndpoint::Discovery],
                 reliable: crate::ReliableMode::None,
             },
