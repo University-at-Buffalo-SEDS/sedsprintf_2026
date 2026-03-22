@@ -310,6 +310,20 @@ SedsResult node_init(SimNode * n, SimBus * bus, const char * name, int radio, in
 
         return SEDS_ERR;
     }
+    if (seds_router_configure_timesync(
+            n->r,
+            true,
+            n->is_time_source ? 1u : 0u,
+            n->is_time_source ? 1u : 100u,
+            5000u,
+            100u,
+            100u) != SEDS_OK)
+    {
+        fprintf(stderr, "[%s] Failed to configure router time sync\n", n->name);
+        seds_router_free(n->r);
+        n->r = NULL;
+        return SEDS_ERR;
+    }
     int32_t side_id = seds_router_add_side_serialized(n->r, "BUS", 3, node_tx_send, n, true);
     if (side_id < 0)
     {

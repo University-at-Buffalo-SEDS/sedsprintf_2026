@@ -19,7 +19,7 @@ fn main() -> TelemetryResult<()> {
         Ok(())
     });
     let cfg = RouterConfig::new([handler]);
-    let router = Router::new(RouterMode::Sink, cfg, clock);
+    let router = Router::new_with_clock(RouterMode::Sink, cfg, clock);
     router.add_side_serialized("RADIO", |_bytes| Ok(()));
 
     // GpsData is marked reliable in the default schema.

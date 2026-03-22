@@ -42,8 +42,8 @@ extern crate std;
 use std::io::Error;
 
 use crate::config::{
-    get_endpoint_meta, get_message_meta, DataEndpoint, DataType, STATIC_HEX_LENGTH,
-    STATIC_STRING_LENGTH,
+    DataEndpoint, DataType, STATIC_HEX_LENGTH, STATIC_STRING_LENGTH, get_endpoint_meta,
+    get_message_meta,
 };
 use crate::macros::{ReprI32Enum, ReprU32Enum};
 use alloc::string::ToString;
@@ -169,16 +169,16 @@ mod embedded_alloc {
 
 mod c_api;
 pub mod config;
+#[cfg(feature = "discovery")]
+pub mod discovery;
 mod lock;
 mod macros;
+pub mod packet;
 mod queue;
 pub mod relay;
 pub mod router;
 pub mod serialize;
 mod small_payload;
-pub mod packet;
-#[cfg(feature = "discovery")]
-pub mod discovery;
 #[cfg(feature = "timesync")]
 pub mod timesync;
 // ============================================================================

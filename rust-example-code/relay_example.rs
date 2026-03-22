@@ -19,7 +19,7 @@ fn main() -> TelemetryResult<()> {
         println!("[NODE] {pkt}");
         Ok(())
     });
-    let node = Router::new(RouterMode::Sink, RouterConfig::new([handler]), clock);
+    let node = Router::new_with_clock(RouterMode::Sink, RouterConfig::new([handler]), clock);
     node.add_side_serialized("RADIO", |_bytes| Ok(()));
 
     let relay = Relay::new(Box::new(|| now_ms()));

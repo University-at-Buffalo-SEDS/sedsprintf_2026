@@ -1,12 +1,12 @@
 #[cfg(test)]
 mod reliable_drop_tests {
+    use sedsprintf_rs::TelemetryResult;
     use sedsprintf_rs::config::{DataEndpoint, DataType, RELIABLE_RETRANSMIT_MS};
     use sedsprintf_rs::packet::Packet;
     use sedsprintf_rs::router::{
         Clock, EndpointHandler, Router, RouterConfig, RouterMode, RouterSideOptions,
     };
     use sedsprintf_rs::serialize;
-    use sedsprintf_rs::TelemetryResult;
 
     use std::collections::VecDeque;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -42,12 +42,12 @@ mod reliable_drop_tests {
             Ok(())
         });
 
-        let router_a = Router::new(
+        let router_a = Router::new_with_clock(
             RouterMode::Sink,
             RouterConfig::default(),
             shared_clock(now.clone()),
         );
-        let router_b = Router::new(
+        let router_b = Router::new_with_clock(
             RouterMode::Sink,
             RouterConfig::new(vec![handler]),
             shared_clock(now.clone()),
@@ -96,7 +96,7 @@ mod reliable_drop_tests {
                 &[DataEndpoint::Radio],
                 i as u64,
             )
-                .expect("failed to build packet");
+            .expect("failed to build packet");
             router_a.tx(pkt).expect("tx failed");
         }
 
@@ -181,7 +181,7 @@ mod reliable_drop_tests {
             Ok(())
         });
 
-        let router = Router::new(
+        let router = Router::new_with_clock(
             RouterMode::Sink,
             RouterConfig::new(vec![handler]),
             shared_clock(now.clone()),
@@ -202,14 +202,14 @@ mod reliable_drop_tests {
             &[DataEndpoint::Radio],
             1,
         )
-            .expect("failed to build packet");
+        .expect("failed to build packet");
         let pkt2 = Packet::from_f32_slice(
             DataType::GpsData,
             &[2.0_f32, 0.0, 0.0],
             &[DataEndpoint::Radio],
             2,
         )
-            .expect("failed to build packet");
+        .expect("failed to build packet");
 
         let seq1 = serialize::serialize_packet_with_reliable(
             &pkt1,

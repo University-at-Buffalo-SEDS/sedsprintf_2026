@@ -23,8 +23,8 @@ fn main() -> TelemetryResult<()> {
         Ok(())
     });
 
-    let node_a = Router::new(RouterMode::Sink, RouterConfig::new([handler_a]), clock_a);
-    let node_b = Router::new(RouterMode::Sink, RouterConfig::new([handler_b]), clock_b);
+    let node_a = Router::new_with_clock(RouterMode::Sink, RouterConfig::new([handler_a]), clock_a);
+    let node_b = Router::new_with_clock(RouterMode::Sink, RouterConfig::new([handler_b]), clock_b);
 
     // Simple in-process "link": tx from A feeds rx on B.
     let link = move |bytes: &[u8]| -> TelemetryResult<()> {

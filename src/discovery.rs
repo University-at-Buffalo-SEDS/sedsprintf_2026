@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use crate::router::encode_slice_le;
 use crate::{
-    packet::Packet, try_enum_from_u32, DataEndpoint, DataType, TelemetryError, TelemetryResult,
+    DataEndpoint, DataType, TelemetryError, TelemetryResult, packet::Packet, try_enum_from_u32,
 };
 
 pub const DISCOVERY_ROUTE_TTL_MS: u64 = 30_000;
@@ -32,8 +32,10 @@ impl DiscoveryCadenceState {
 
     pub fn on_announce_sent(&mut self, now_ms: u64) {
         self.next_announce_ms = now_ms.saturating_add(self.current_interval_ms);
-        self.current_interval_ms =
-            core::cmp::min(self.current_interval_ms.saturating_mul(2), DISCOVERY_SLOW_INTERVAL_MS);
+        self.current_interval_ms = core::cmp::min(
+            self.current_interval_ms.saturating_mul(2),
+            DISCOVERY_SLOW_INTERVAL_MS,
+        );
     }
 
     pub fn due(&self, now_ms: u64) -> bool {
@@ -98,7 +100,8 @@ pub fn decode_discovery_payload(payload: &[u8]) -> TelemetryResult<Vec<DataEndpo
     let mut endpoints = Vec::with_capacity(payload.len() / 4);
     for chunk in payload.chunks_exact(4) {
         let raw = u32::from_le_bytes(chunk.try_into().expect("4-byte chunk"));
-        let ep = try_enum_from_u32(raw).ok_or(TelemetryError::Deserialize("bad discovery endpoint"))?;
+        let ep =
+            try_enum_from_u32(raw).ok_or(TelemetryError::Deserialize("bad discovery endpoint"))?;
         if is_discovery_endpoint(ep) {
             continue;
         }

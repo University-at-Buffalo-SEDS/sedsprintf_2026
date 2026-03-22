@@ -228,17 +228,18 @@ fn resolve_schema_path(crate_dir: &Path, config_rs_path: &Path) -> PathBuf {
             panic!("{SCHEMA_PATH_ENV} is set but empty");
         }
         let p = PathBuf::from(val);
-        return if p.is_absolute() { p } else { crate_dir.join(p) };
+        return if p.is_absolute() {
+            p
+        } else {
+            crate_dir.join(p)
+        };
     }
 
     if env::var_os("CARGO_CFG_TEST").is_some() {
         let test_path = crate_dir.join(TEST_SCHEMA_FILE);
         if test_path.exists() {
             // Ensure proc-macro expansion sees the test schema too.
-            println!(
-                "cargo:rustc-env={SCHEMA_PATH_ENV}={}",
-                test_path.display()
-            );
+            println!("cargo:rustc-env={SCHEMA_PATH_ENV}={}", test_path.display());
             println!("cargo:rerun-if-changed={}", test_path.display());
             return test_path;
         }
@@ -263,7 +264,10 @@ fn resolve_optional_overlay_path(crate_dir: &Path) -> Option<PathBuf> {
     if env::var_os("CARGO_CFG_TEST").is_some() {
         let test_ipc_path = crate_dir.join(TEST_IPC_SCHEMA_FILE);
         if test_ipc_path.exists() {
-            println!("cargo:rustc-env={IPC_SCHEMA_PATH_ENV}={}", test_ipc_path.display());
+            println!(
+                "cargo:rustc-env={IPC_SCHEMA_PATH_ENV}={}",
+                test_ipc_path.display()
+            );
             println!("cargo:rerun-if-changed={}", test_ipc_path.display());
             return Some(test_ipc_path);
         }
@@ -294,8 +298,10 @@ fn normalize_base_schema(base: &mut TelemetryConfig) {
 
 fn merge_ipc_overlay(base: &mut TelemetryConfig, overlay: TelemetryConfig, overlay_path: &Path) {
     let mut overlay = overlay;
-    let mut endpoint_rust: HashSet<&str> = base.endpoints.iter().map(|ep| ep.rust.as_str()).collect();
-    let mut endpoint_name: HashSet<&str> = base.endpoints.iter().map(|ep| ep.name.as_str()).collect();
+    let mut endpoint_rust: HashSet<&str> =
+        base.endpoints.iter().map(|ep| ep.rust.as_str()).collect();
+    let mut endpoint_name: HashSet<&str> =
+        base.endpoints.iter().map(|ep| ep.name.as_str()).collect();
     let mut type_rust: HashSet<&str> = base.types.iter().map(|ty| ty.rust.as_str()).collect();
     let mut type_name: HashSet<&str> = base.types.iter().map(|ty| ty.name.as_str()).collect();
 
@@ -701,10 +707,7 @@ fn render_c_enum_datatype(cfg: &TelemetryConfig) -> String {
     }
 
     lines.push("  /* Built-in TelemetryError */".to_string());
-    lines.push(format!(
-        "  SEDS_DT_TELEMETRY_ERROR = {},",
-        cfg.types.len()
-    ));
+    lines.push(format!("  SEDS_DT_TELEMETRY_ERROR = {},", cfg.types.len()));
 
     lines.push("} SedsDataType;".to_string());
     lines.join("\n")

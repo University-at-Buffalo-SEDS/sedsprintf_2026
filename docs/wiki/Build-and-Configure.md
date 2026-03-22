@@ -55,8 +55,9 @@ Compression notes:
   (for `zstd-sys`, e.g. `arm-none-eabi-gcc` or `CC_<target>` override).
 
 When `timesync` is enabled, the build adds the `TIME_SYNC` endpoint and
-`TIME_SYNC_*` packet types directly in code (like `TelemetryError`).
-See [Time-Sync](Time-Sync) for roles, packet fields, and flow.
+`TIME_SYNC_*` packet types directly in code (like `TelemetryError`), plus the router-managed
+internal network clock and FFI accessors for current network time. See [Time-Sync](Time-Sync)
+for roles, packet fields, internal clock behavior, and master-side setter APIs.
 
 Python builds via `maturin` in this repo enable `timesync` by default (see
 pyproject.toml ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/pyproject.toml) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/pyproject.toml)) ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/pyproject.toml ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/pyproject.toml) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/pyproject.toml ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/pyproject.toml))))))).

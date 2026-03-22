@@ -3,14 +3,16 @@ use crate::config::{
     RELIABLE_RETRANSMIT_MS, STARTING_QUEUE_SIZE, STARTING_RECENT_RX_IDS,
 };
 #[cfg(feature = "discovery")]
-use crate::discovery::{self, DiscoveryCadenceState, TopologySideRoute, TopologySnapshot, DISCOVERY_ROUTE_TTL_MS};
-use crate::packet::{hash_bytes_u64, Packet};
+use crate::discovery::{
+    self, DISCOVERY_ROUTE_TTL_MS, DiscoveryCadenceState, TopologySideRoute, TopologySnapshot,
+};
+use crate::packet::{Packet, hash_bytes_u64};
 use crate::queue::{BoundedDeque, ByteCost};
 use crate::serialize;
 use crate::{is_reliable_type, reliable_mode};
 use crate::{
     router::Clock,
-    {lock::RouterMutex, TelemetryError, TelemetryResult},
+    {TelemetryError, TelemetryResult, lock::RouterMutex},
 };
 use alloc::boxed::Box;
 use alloc::collections::{BTreeMap, VecDeque};
@@ -36,7 +38,6 @@ pub struct RelaySideOptions {
     pub reliable_enabled: bool,
     pub link_local_enabled: bool,
 }
-
 
 /// One side of the relay – a name + TX handler.
 #[derive(Clone)]
@@ -442,10 +443,10 @@ impl Relay {
                 }
                 if restrict_link_local
                     && st
-                    .sides
-                    .get(side)
-                    .map(|s| !s.opts.link_local_enabled)
-                    .unwrap_or(true)
+                        .sides
+                        .get(side)
+                        .map(|s| !s.opts.link_local_enabled)
+                        .unwrap_or(true)
                 {
                     continue;
                 }
@@ -491,9 +492,8 @@ impl Relay {
     #[cfg(feature = "discovery")]
     fn prune_discovery_routes_locked(st: &mut RelayInner, now_ms: u64) -> bool {
         let before = st.discovery_routes.len();
-        st.discovery_routes.retain(|_, route| {
-            now_ms.saturating_sub(route.last_seen_ms) <= DISCOVERY_ROUTE_TTL_MS
-        });
+        st.discovery_routes
+            .retain(|_, route| now_ms.saturating_sub(route.last_seen_ms) <= DISCOVERY_ROUTE_TTL_MS);
         before != st.discovery_routes.len()
     }
 
@@ -511,7 +511,10 @@ impl Relay {
             }
             eps.extend(route.reachable.iter().copied());
         }
-        eps.retain(|ep| !discovery::is_discovery_endpoint(*ep) && (link_local_enabled || !ep.is_link_local_only()));
+        eps.retain(|ep| {
+            !discovery::is_discovery_endpoint(*ep)
+                && (link_local_enabled || !ep.is_link_local_only())
+        });
         eps.sort_unstable();
         eps.dedup();
         eps
@@ -568,7 +571,11 @@ impl Relay {
             }
             let has_any = st.sides.iter().any(|side| {
                 !self
-                    .advertised_discovery_endpoints_for_link_locked(&st, now_ms, side.opts.link_local_enabled)
+                    .advertised_discovery_endpoints_for_link_locked(
+                        &st,
+                        now_ms,
+                        side.opts.link_local_enabled,
+                    )
                     .is_empty()
             });
             if st.sides.is_empty() || !has_any {
@@ -936,7 +943,9 @@ impl Relay {
                         && handler_is_serialized
                         && let Ok(frame) = serialize::peek_frame_info_unchecked(bytes.as_ref())
                     {
-                        if is_reliable_type(frame.envelope.ty) && let Some(hdr) = frame.reliable {
+                        if is_reliable_type(frame.envelope.ty)
+                            && let Some(hdr) = frame.reliable
+                        {
                             if (hdr.flags & serialize::RELIABLE_FLAG_ACK_ONLY) != 0 {
                                 return Ok(());
                             }

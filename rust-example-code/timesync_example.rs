@@ -30,7 +30,7 @@ fn main() -> TelemetryResult<()> {
         EndpointHandler::new_packet_handler(DataEndpoint::TimeSync, print_pkt),
     ];
 
-    let router = Router::new(RouterMode::Sink, RouterConfig::new(handlers), clock);
+    let router = Router::new_with_clock(RouterMode::Sink, RouterConfig::new(handlers), clock);
     router.add_side_serialized("TX", |_bytes| Ok(()));
 
     // ---- Log all standard schema types ----

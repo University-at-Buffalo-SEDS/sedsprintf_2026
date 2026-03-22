@@ -32,15 +32,19 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList, PyModule, PyTuple};
 use std::sync::{Arc as SArc, Mutex, OnceLock};
 
+#[cfg(feature = "timesync")]
+use crate::timesync::TimeSyncConfig;
 use crate::{
-    config::{DataEndpoint, DataType}, get_message_name, get_needed_message_size, message_meta, packet::Packet,
+    MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE, MessageElement, TelemetryError, TelemetryResult,
+    config::{DataEndpoint, DataType},
+    get_message_name, get_needed_message_size, message_meta,
+    packet::Packet,
     relay::{Relay, RelaySideOptions},
-    router::{Clock, EndpointHandler, LeBytes, Router, RouterConfig, RouterMode, RouterSideOptions}, serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet}, try_enum_from_u32,
-    MessageElement,
-    TelemetryError,
-    TelemetryResult,
-    MAX_VALUE_DATA_ENDPOINT,
-    MAX_VALUE_DATA_TYPE,
+    router::{
+        Clock, EndpointHandler, LeBytes, Router, RouterConfig, RouterMode, RouterSideOptions,
+    },
+    serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet},
+    try_enum_from_u32,
 };
 
 static GLOBAL_ROUTER_SINGLETON: OnceLock<SArc<Mutex<Router>>> = OnceLock::new();
@@ -354,19 +358,18 @@ impl PyRouter {
                     let cb_for_closure = cb.clone_ref(py);
                     keep_ser.push(cb);
 
-                    let eh =
-                        EndpointHandler::new_serialized_handler(endpoint, move |bytes| {
-                            Python::attach(|py| {
-                                let arg = PyBytes::new(py, bytes).into_any();
-                                match cb_for_closure.call1(py, (arg,)) {
-                                    Ok(_cb) => Ok(()),
-                                    Err(err) => {
-                                        err.restore(py);
-                                        Err(TelemetryError::Io("serialized handler error"))
-                                    }
+                    let eh = EndpointHandler::new_serialized_handler(endpoint, move |bytes| {
+                        Python::attach(|py| {
+                            let arg = PyBytes::new(py, bytes).into_any();
+                            match cb_for_closure.call1(py, (arg,)) {
+                                Ok(_cb) => Ok(()),
+                                Err(err) => {
+                                    err.restore(py);
+                                    Err(TelemetryError::Io("serialized handler error"))
                                 }
-                            })
-                        });
+                            }
+                        })
+                    });
 
                     handlers_vec.push(eh);
                 }
@@ -374,12 +377,13 @@ impl PyRouter {
         }
 
         // Build clock callback
-        let clock = PyClock {
-            cb: now_keep.as_ref().map(|p| p.clone_ref(py)),
-        };
-
         // Build router
-        let cfg = RouterConfig::new(handlers_vec);
+        let cfg = {
+            let cfg = RouterConfig::new(handlers_vec);
+            #[cfg(feature = "timesync")]
+            let cfg = cfg.with_timesync(TimeSyncConfig::default());
+            cfg
+        };
 
         let mode = match mode {
             0 => RouterMode::Sink,
@@ -388,7 +392,17 @@ impl PyRouter {
                 return Err(PyValueError::new_err("mode must be 0 (Sink) or 1 (Relay)"));
             }
         };
-        let router = Router::new(mode, cfg, Box::new(clock));
+        let router = if let Some(cb) = now_keep.as_ref() {
+            Router::new_with_clock(
+                mode,
+                cfg,
+                Box::new(PyClock {
+                    cb: Some(cb.clone_ref(py)),
+                }),
+            )
+        } else {
+            Router::new(mode, cfg)
+        };
         let arc = SArc::new(Mutex::new(router));
 
         GLOBAL_ROUTER_SINGLETON
@@ -469,29 +483,30 @@ impl PyRouter {
                     let cb_for_closure = cb.clone_ref(py);
                     keep_ser.push(cb);
 
-                    let eh =
-                        EndpointHandler::new_serialized_handler(endpoint, move |bytes| {
-                            Python::attach(|py| {
-                                let arg = PyBytes::new(py, bytes).into_any();
-                                match cb_for_closure.call1(py, (arg,)) {
-                                    Ok(_cb) => Ok(()),
-                                    Err(err) => {
-                                        err.restore(py);
-                                        Err(TelemetryError::Io("serialized handler error"))
-                                    }
+                    let eh = EndpointHandler::new_serialized_handler(endpoint, move |bytes| {
+                        Python::attach(|py| {
+                            let arg = PyBytes::new(py, bytes).into_any();
+                            match cb_for_closure.call1(py, (arg,)) {
+                                Ok(_cb) => Ok(()),
+                                Err(err) => {
+                                    err.restore(py);
+                                    Err(TelemetryError::Io("serialized handler error"))
                                 }
-                            })
-                        });
+                            }
+                        })
+                    });
 
                     handlers_vec.push(eh);
                 }
             }
         }
 
-        let clock = PyClock {
-            cb: now_keep.as_ref().map(|p| p.clone_ref(py)),
+        let cfg = {
+            let cfg = RouterConfig::new(handlers_vec);
+            #[cfg(feature = "timesync")]
+            let cfg = cfg.with_timesync(TimeSyncConfig::default());
+            cfg
         };
-        let cfg = RouterConfig::new(handlers_vec);
 
         let mode = match mode {
             0 => RouterMode::Sink,
@@ -501,7 +516,17 @@ impl PyRouter {
             }
         };
 
-        let router = Router::new(mode, cfg, Box::new(clock));
+        let router = if let Some(cb) = now_keep.as_ref() {
+            Router::new_with_clock(
+                mode,
+                cfg,
+                Box::new(PyClock {
+                    cb: Some(cb.clone_ref(py)),
+                }),
+            )
+        } else {
+            Router::new(mode, cfg)
+        };
 
         Ok(Self {
             inner: SArc::new(Mutex::new(router)),
@@ -539,18 +564,22 @@ impl PyRouter {
             link_local_enabled: false,
         };
 
-        let id = rtr.add_side_serialized_with_options(name_static, move |bytes| {
-            Python::attach(|py| {
-                let arg = PyBytes::new(py, bytes);
-                match cb_for_closure.call1(py, (&arg,)) {
-                    Ok(_) => Ok(()),
-                    Err(err) => {
-                        err.restore(py);
-                        Err(TelemetryError::Io("router side tx error"))
+        let id = rtr.add_side_serialized_with_options(
+            name_static,
+            move |bytes| {
+                Python::attach(|py| {
+                    let arg = PyBytes::new(py, bytes);
+                    match cb_for_closure.call1(py, (&arg,)) {
+                        Ok(_) => Ok(()),
+                        Err(err) => {
+                            err.restore(py);
+                            Err(TelemetryError::Io("router side tx error"))
+                        }
                     }
-                }
-            })
-        }, opts);
+                })
+            },
+            opts,
+        );
 
         Ok(id as u32)
     }
@@ -579,20 +608,24 @@ impl PyRouter {
             link_local_enabled: false,
         };
 
-        let id = rtr.add_side_packet_with_options(name_static, move |pkt: &Packet| {
-            Python::attach(|py| {
-                let py_pkt = PyPacket { inner: pkt.clone() };
-                let any = Py::new(py, py_pkt)
-                    .map_err(|_| TelemetryError::Io("router packet wrapper"))?;
-                match cb_for_closure.call1(py, (&any,)) {
-                    Ok(_) => Ok(()),
-                    Err(err) => {
-                        err.restore(py);
-                        Err(TelemetryError::Io("router packet tx error"))
+        let id = rtr.add_side_packet_with_options(
+            name_static,
+            move |pkt: &Packet| {
+                Python::attach(|py| {
+                    let py_pkt = PyPacket { inner: pkt.clone() };
+                    let any = Py::new(py, py_pkt)
+                        .map_err(|_| TelemetryError::Io("router packet wrapper"))?;
+                    match cb_for_closure.call1(py, (&any,)) {
+                        Ok(_) => Ok(()),
+                        Err(err) => {
+                            err.restore(py);
+                            Err(TelemetryError::Io("router packet tx error"))
+                        }
                     }
-                }
-            })
-        }, opts);
+                })
+            },
+            opts,
+        );
 
         Ok(id as u32)
     }
@@ -956,6 +989,207 @@ impl PyRouter {
         }
     }
 
+    #[cfg(feature = "timesync")]
+    fn network_time_ms(&self) -> PyResult<Option<u64>> {
+        let rtr = self
+            .inner
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
+        Ok(rtr.network_time_ms())
+    }
+
+    #[cfg(feature = "timesync")]
+    fn network_time(&self, py: Python<'_>) -> PyResult<Option<Py<PyDict>>> {
+        let rtr = self
+            .inner
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
+        let Some(reading) = rtr.network_time() else {
+            return Ok(None);
+        };
+
+        let out = PyDict::new(py);
+        if let Some(v) = reading.unix_time_ms {
+            out.set_item("unix_time_ms", v)?;
+        }
+        if let Some(v) = reading.time.year {
+            out.set_item("year", v)?;
+        }
+        if let Some(v) = reading.time.month {
+            out.set_item("month", v)?;
+        }
+        if let Some(v) = reading.time.day {
+            out.set_item("day", v)?;
+        }
+        if let Some(v) = reading.time.hour {
+            out.set_item("hour", v)?;
+        }
+        if let Some(v) = reading.time.minute {
+            out.set_item("minute", v)?;
+        }
+        if let Some(v) = reading.time.second {
+            out.set_item("second", v)?;
+        }
+        if let Some(v) = reading.time.nanosecond {
+            out.set_item("nanosecond", v)?;
+        }
+        Ok(Some(out.unbind()))
+    }
+
+    #[cfg(feature = "timesync")]
+    #[pyo3(signature = (
+        year=None,
+        month=None,
+        day=None,
+        hour=None,
+        minute=None,
+        second=None,
+        nanosecond=None
+    ))]
+    fn set_local_network_time(
+        &self,
+        year: Option<i32>,
+        month: Option<u8>,
+        day: Option<u8>,
+        hour: Option<u8>,
+        minute: Option<u8>,
+        second: Option<u8>,
+        nanosecond: Option<u32>,
+    ) -> PyResult<()> {
+        let rtr = self
+            .inner
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
+        rtr.set_local_network_time(crate::timesync::PartialNetworkTime {
+            year,
+            month,
+            day,
+            hour,
+            minute,
+            second,
+            nanosecond,
+        });
+        Ok(())
+    }
+
+    #[cfg(feature = "timesync")]
+    fn set_local_network_date(&self, year: i32, month: u8, day: u8) -> PyResult<()> {
+        let rtr = self
+            .inner
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
+        rtr.set_local_network_date(year, month, day);
+        Ok(())
+    }
+
+    #[cfg(feature = "timesync")]
+    fn set_local_network_time_hm(&self, hour: u8, minute: u8) -> PyResult<()> {
+        let rtr = self
+            .inner
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
+        rtr.set_local_network_time_hm(hour, minute);
+        Ok(())
+    }
+
+    #[cfg(feature = "timesync")]
+    fn set_local_network_time_hms(&self, hour: u8, minute: u8, second: u8) -> PyResult<()> {
+        let rtr = self
+            .inner
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
+        rtr.set_local_network_time_hms(hour, minute, second);
+        Ok(())
+    }
+
+    #[cfg(feature = "timesync")]
+    fn set_local_network_time_hms_millis(
+        &self,
+        hour: u8,
+        minute: u8,
+        second: u8,
+        millisecond: u16,
+    ) -> PyResult<()> {
+        let rtr = self
+            .inner
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
+        rtr.set_local_network_time_hms_millis(hour, minute, second, millisecond);
+        Ok(())
+    }
+
+    #[cfg(feature = "timesync")]
+    fn set_local_network_time_hms_nanos(
+        &self,
+        hour: u8,
+        minute: u8,
+        second: u8,
+        nanosecond: u32,
+    ) -> PyResult<()> {
+        let rtr = self
+            .inner
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
+        rtr.set_local_network_time_hms_nanos(hour, minute, second, nanosecond);
+        Ok(())
+    }
+
+    #[cfg(feature = "timesync")]
+    fn set_local_network_datetime(
+        &self,
+        year: i32,
+        month: u8,
+        day: u8,
+        hour: u8,
+        minute: u8,
+        second: u8,
+    ) -> PyResult<()> {
+        let rtr = self
+            .inner
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
+        rtr.set_local_network_datetime(year, month, day, hour, minute, second);
+        Ok(())
+    }
+
+    #[cfg(feature = "timesync")]
+    fn set_local_network_datetime_millis(
+        &self,
+        year: i32,
+        month: u8,
+        day: u8,
+        hour: u8,
+        minute: u8,
+        second: u8,
+        millisecond: u16,
+    ) -> PyResult<()> {
+        let rtr = self
+            .inner
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
+        rtr.set_local_network_datetime_millis(year, month, day, hour, minute, second, millisecond);
+        Ok(())
+    }
+
+    #[cfg(feature = "timesync")]
+    fn set_local_network_datetime_nanos(
+        &self,
+        year: i32,
+        month: u8,
+        day: u8,
+        hour: u8,
+        minute: u8,
+        second: u8,
+        nanosecond: u32,
+    ) -> PyResult<()> {
+        let rtr = self
+            .inner
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
+        rtr.set_local_network_datetime_nanos(year, month, day, hour, minute, second, nanosecond);
+        Ok(())
+    }
+
     // ------------------------------------------------------------------------
     //  Queue processing / clearing
     // ------------------------------------------------------------------------
@@ -1086,18 +1320,22 @@ impl PyRelay {
             link_local_enabled: false,
         };
 
-        let id = self.inner.add_side_serialized_with_options(name_static, move |bytes| {
-            Python::attach(|py| {
-                let arg = PyBytes::new(py, bytes);
-                match cb_for_closure.call1(py, (&arg,)) {
-                    Ok(_) => Ok(()),
-                    Err(err) => {
-                        err.restore(py);
-                        Err(TelemetryError::Io("relay tx error"))
+        let id = self.inner.add_side_serialized_with_options(
+            name_static,
+            move |bytes| {
+                Python::attach(|py| {
+                    let arg = PyBytes::new(py, bytes);
+                    match cb_for_closure.call1(py, (&arg,)) {
+                        Ok(_) => Ok(()),
+                        Err(err) => {
+                            err.restore(py);
+                            Err(TelemetryError::Io("relay tx error"))
+                        }
                     }
-                }
-            })
-        }, opts);
+                })
+            },
+            opts,
+        );
 
         Ok(id as u32)
     }
@@ -1121,9 +1359,9 @@ impl PyRelay {
             link_local_enabled: false,
         };
 
-        let id = self
-            .inner
-            .add_side_packet_with_options(name_static, move |pkt: &Packet| {
+        let id = self.inner.add_side_packet_with_options(
+            name_static,
+            move |pkt: &Packet| {
                 Python::attach(|py| {
                     let py_pkt = PyPacket { inner: pkt.clone() };
                     let any = Py::new(py, py_pkt)
@@ -1136,7 +1374,9 @@ impl PyRelay {
                         }
                     }
                 })
-            }, opts);
+            },
+            opts,
+        );
 
         Ok(id as u32)
     }
@@ -1270,8 +1510,7 @@ pub fn make_packet(
 
     let payload_arc = AArc::<[u8]>::from(buf);
 
-    let pkt =
-        Packet::new(ty, &eps, sender, timestamp_ms, payload_arc).map_err(py_err_from)?;
+    let pkt = Packet::new(ty, &eps, sender, timestamp_ms, payload_arc).map_err(py_err_from)?;
 
     Ok(Py::new(py, PyPacket { inner: pkt })?.into_any())
 }
