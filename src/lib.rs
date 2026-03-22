@@ -6,7 +6,7 @@
 // Therefore, if you are trying to optimize
 // this routine, and it fails (it most surely will),
 // please increase this counter as a warning for the next person:
-// total hours wasted on this project = 260
+// total hours wasted on this project = 825
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(unused_doc_comments)]
@@ -42,8 +42,8 @@ extern crate std;
 use std::io::Error;
 
 use crate::config::{
-    get_endpoint_meta, get_message_meta, DataEndpoint, DataType, STATIC_HEX_LENGTH,
-    STATIC_STRING_LENGTH,
+    DataEndpoint, DataType, STATIC_HEX_LENGTH, STATIC_STRING_LENGTH, get_endpoint_meta,
+    get_message_meta,
 };
 use crate::macros::{ReprI32Enum, ReprU32Enum};
 use alloc::string::ToString;
@@ -169,16 +169,16 @@ mod embedded_alloc {
 
 mod c_api;
 pub mod config;
+#[cfg(feature = "discovery")]
+pub mod discovery;
 mod lock;
 mod macros;
+pub mod packet;
 mod queue;
 pub mod relay;
 pub mod router;
 pub mod serialize;
 mod small_payload;
-pub mod packet;
-#[cfg(feature = "discovery")]
-pub mod discovery;
 #[cfg(feature = "timesync")]
 pub mod timesync;
 // ============================================================================

@@ -5,11 +5,10 @@ mod mega_library_system_tests {
     use sedsprintf_rs_2026::relay::Relay;
     use sedsprintf_rs_2026::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
     use sedsprintf_rs_2026::TelemetryResult;
-
     use sedsprintf_rs_2026::serialize::serialize_packet;
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::mpsc;
-    use std::sync::Arc;
     use std::thread;
     use std::time::{Duration, Instant};
 
@@ -95,7 +94,8 @@ mod mega_library_system_tests {
                 mk_counter_handler(DataEndpoint::SdCard, a_sd_hits.clone()),
             ];
 
-            let router = Router::new(RouterMode::Sink, RouterConfig::new(handlers), zero_clock());
+            let router =
+                Router::new_with_clock(RouterMode::Sink, RouterConfig::new(handlers), zero_clock());
             router.add_side_serialized("bus_a", {
                 let bus = bus_a_tx.clone();
                 move |bytes: &[u8]| -> TelemetryResult<()> {
@@ -112,7 +112,8 @@ mod mega_library_system_tests {
                 mk_counter_handler(DataEndpoint::SdCard, b_sd_hits.clone()),
             ];
 
-            let router = Router::new(RouterMode::Sink, RouterConfig::new(handlers), zero_clock());
+            let router =
+                Router::new_with_clock(RouterMode::Sink, RouterConfig::new(handlers), zero_clock());
             router.add_side_serialized("bus_b", {
                 let bus = bus_b_tx.clone();
                 move |bytes: &[u8]| -> TelemetryResult<()> {
@@ -129,7 +130,8 @@ mod mega_library_system_tests {
                 mk_counter_handler(DataEndpoint::SdCard, c_sd_hits.clone()),
             ];
 
-            let router = Router::new(RouterMode::Sink, RouterConfig::new(handlers), zero_clock());
+            let router =
+                Router::new_with_clock(RouterMode::Sink, RouterConfig::new(handlers), zero_clock());
             router.add_side_serialized("bus_c", {
                 let bus = bus_c_tx.clone();
                 move |bytes: &[u8]| -> TelemetryResult<()> {
@@ -144,7 +146,8 @@ mod mega_library_system_tests {
         // 5) Hub router in RELAY mode (no local handlers)
         // -------------------------------
         let (hub_router, hub_side_a, hub_side_b, hub_side_c) = {
-            let router = Router::new(RouterMode::Relay, RouterConfig::default(), zero_clock());
+            let router =
+                Router::new_with_clock(RouterMode::Relay, RouterConfig::default(), zero_clock());
             let hub_side_a = router.add_side_serialized("bus_a", {
                 let bus = bus_a_tx.clone();
                 move |bytes: &[u8]| -> TelemetryResult<()> {

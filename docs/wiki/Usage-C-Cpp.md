@@ -69,7 +69,7 @@ int main(void)
 
     SedsRouter *r = seds_router_new(
         Seds_RM_Sink,
-        now_ms,
+        NULL,
         NULL,
         locals,
         sizeof(locals) / sizeof(locals[0])
@@ -85,11 +85,20 @@ int main(void)
 }
 ```
 
+On `std` builds, passing `NULL` for `now_ms_cb` makes the router use its own internal monotonic
+clock. On `no_std` builds, provide a monotonic clock callback.
+
 See c-example-code/
 ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/tree/main/c-example-code) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/tree/main/c-example-code))
 for a more complete example. Time sync is demonstrated in c-example-code/src/timesync_example.c
 ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/c-example-code/src/timesync_example.c) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/c-example-code/src/timesync_example.c)).
 See [Time-Sync](Time-Sync) for the time sync packet flow and roles.
+
+With `timesync` enabled, the router owns an internal network clock and handles `TIME_SYNC`
+packets internally. Use `seds_router_get_network_time_ms` / `seds_router_get_network_time` to
+read the current synthesized network time. Source/master nodes can seed that clock directly with
+the `seds_router_set_local_network_*` functions for date-only, time-only, millisecond, or
+nanosecond precision inputs.
 
 ## Sending and receiving
 

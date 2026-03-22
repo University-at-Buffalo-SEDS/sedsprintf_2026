@@ -6,9 +6,9 @@ mod threaded_system_tests {
     use sedsprintf_rs_2026::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
     use sedsprintf_rs_2026::TelemetryResult;
 
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::mpsc;
-    use std::sync::Arc;
     use std::thread;
     use std::time::{Duration, Instant};
 
@@ -132,9 +132,9 @@ mod threaded_system_tests {
             };
 
             let router = if handlers.is_empty() {
-                Router::new(RouterMode::Sink, RouterConfig::default(), clock)
+                Router::new_with_clock(RouterMode::Sink, RouterConfig::default(), clock)
             } else {
-                Router::new(RouterMode::Sink, RouterConfig::new(handlers), clock)
+                Router::new_with_clock(RouterMode::Sink, RouterConfig::new(handlers), clock)
             };
             router.add_side_serialized("bus", tx);
 

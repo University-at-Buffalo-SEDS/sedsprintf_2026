@@ -41,6 +41,26 @@ typedef struct SedsPacketView
     size_t payload_len;
 } SedsPacketView;
 
+typedef struct SedsNetworkTime
+{
+    bool has_unix_time_ms;
+    uint64_t unix_time_ms;
+    bool has_year;
+    int32_t year;
+    bool has_month;
+    uint8_t month;
+    bool has_day;
+    uint8_t day;
+    bool has_hour;
+    uint8_t hour;
+    bool has_minute;
+    uint8_t minute;
+    bool has_second;
+    uint8_t second;
+    bool has_nanosecond;
+    uint32_t nanosecond;
+} SedsNetworkTime;
+
 typedef enum SedsElemKind
 {
     SEDS_EK_UNSIGNED = 0,
@@ -99,6 +119,9 @@ SedsResult seds_error_to_string(int32_t error_code, char * buf, size_t buf_len);
 /**
  * @brief Create a router instance.
  *
+ * `now_ms_cb` is optional. On `std` builds, passing `NULL` makes the router use its own internal
+ * monotonic clock. On `no_std` builds, provide a monotonic clock callback.
+ *
  * @return Non-NULL handle on success; NULL on failure.
  */
 SedsRouter * seds_router_new(
@@ -111,6 +134,130 @@ SedsRouter * seds_router_new(
 
 /** @brief Destroy a router created by seds_router_new(). */
 void seds_router_free(SedsRouter * r);
+
+/**
+ * @brief Read the router's current internally-synthesized network time in Unix milliseconds.
+ *
+ * Requires a build with the `timesync` feature and an available network time estimate.
+ */
+SedsResult seds_router_get_network_time_ms(SedsRouter * r, uint64_t * out_ms);
+
+/**
+ * @brief Read the router's current internally-synthesized network time components.
+ *
+ * Requires a build with the `timesync` feature. Presence flags indicate which
+ * components are currently known.
+ */
+SedsResult seds_router_get_network_time(SedsRouter * r, SedsNetworkTime * out);
+
+/**
+ * @brief Configure the router's internal time-sync runtime.
+ *
+ * `role`: 0=Consumer, 1=Source, 2=Auto.
+ * Requires a build with the `timesync` feature.
+ */
+SedsResult seds_router_configure_timesync(
+    SedsRouter * r,
+    bool enabled,
+    uint32_t role,
+    uint64_t priority,
+    uint64_t source_timeout_ms,
+    uint64_t announce_interval_ms,
+    uint64_t request_interval_ms
+);
+
+/**
+ * @brief Set the router's local/master network time source with partial fields.
+ *
+ * Requires a build with the `timesync` feature. Presence flags indicate which
+ * components are being updated. Complete date+time values are anchored at the
+ * commit point so brief context switches during the call do not stale the clock.
+ */
+SedsResult seds_router_set_local_network_time(
+    SedsRouter * r,
+    bool has_year,
+    int32_t year,
+    bool has_month,
+    uint8_t month,
+    bool has_day,
+    uint8_t day,
+    bool has_hour,
+    uint8_t hour,
+    bool has_minute,
+    uint8_t minute,
+    bool has_second,
+    uint8_t second,
+    bool has_nanosecond,
+    uint32_t nanosecond
+);
+
+SedsResult seds_router_set_local_network_date(
+    SedsRouter * r,
+    int32_t year,
+    uint8_t month,
+    uint8_t day
+);
+
+SedsResult seds_router_set_local_network_time_hm(
+    SedsRouter * r,
+    uint8_t hour,
+    uint8_t minute
+);
+
+SedsResult seds_router_set_local_network_time_hms(
+    SedsRouter * r,
+    uint8_t hour,
+    uint8_t minute,
+    uint8_t second
+);
+
+SedsResult seds_router_set_local_network_time_hms_millis(
+    SedsRouter * r,
+    uint8_t hour,
+    uint8_t minute,
+    uint8_t second,
+    uint16_t millisecond
+);
+
+SedsResult seds_router_set_local_network_time_hms_nanos(
+    SedsRouter * r,
+    uint8_t hour,
+    uint8_t minute,
+    uint8_t second,
+    uint32_t nanosecond
+);
+
+SedsResult seds_router_set_local_network_datetime(
+    SedsRouter * r,
+    int32_t year,
+    uint8_t month,
+    uint8_t day,
+    uint8_t hour,
+    uint8_t minute,
+    uint8_t second
+);
+
+SedsResult seds_router_set_local_network_datetime_millis(
+    SedsRouter * r,
+    int32_t year,
+    uint8_t month,
+    uint8_t day,
+    uint8_t hour,
+    uint8_t minute,
+    uint8_t second,
+    uint16_t millisecond
+);
+
+SedsResult seds_router_set_local_network_datetime_nanos(
+    SedsRouter * r,
+    int32_t year,
+    uint8_t month,
+    uint8_t day,
+    uint8_t hour,
+    uint8_t minute,
+    uint8_t second,
+    uint32_t nanosecond
+);
 
 /* ==============================
    Router side registration

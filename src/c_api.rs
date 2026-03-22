@@ -11,16 +11,18 @@
 //! Router sides are registered explicitly (like the Relay), and RX can specify
 //! an ingress side for relay-style behavior.
 
+#[cfg(feature = "timesync")]
+use crate::timesync::{NetworkTimeReading, PartialNetworkTime, TimeSyncConfig};
 use crate::{
-    config::DataEndpoint, do_vec_log_typed, get_needed_message_size, message_meta, packet::Packet,
+    DataType, MessageElement, TelemetryError, TelemetryErrorCode, TelemetryResult,
+    config::DataEndpoint,
+    do_vec_log_typed, get_needed_message_size, message_meta,
+    packet::Packet,
     router::{Clock, LeBytes, RouterSideOptions},
-    router::{EndpointHandler, Router, RouterConfig}, serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet}, DataType,
-    MessageElement,
-    TelemetryError,
-    TelemetryErrorCode,
-    TelemetryResult,
+    router::{EndpointHandler, Router, RouterConfig},
+    serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet},
 };
-use crate::{get_data_type, MessageDataType::NoData};
+use crate::{MessageDataType::NoData, get_data_type};
 use alloc::{boxed::Box, string::String, sync::Arc, vec, vec::Vec};
 use core::{ffi::c_char, ffi::c_void, mem::size_of, ptr, slice, str::from_utf8};
 
@@ -44,7 +46,6 @@ enum SedsResult {
     SedsErr = 1,
 }
 
-
 /// Opaque owned packet for C. Keeps Rust allocations alive across calls.
 #[repr(C)]
 pub struct SedsOwnedPacket {
@@ -67,6 +68,27 @@ pub struct SedsOwnedHeader {
 #[repr(C)]
 pub struct SedsRelay {
     inner: Arc<Relay>,
+}
+
+#[cfg(feature = "timesync")]
+#[repr(C)]
+pub struct SedsNetworkTime {
+    pub has_unix_time_ms: bool,
+    pub unix_time_ms: u64,
+    pub has_year: bool,
+    pub year: i32,
+    pub has_month: bool,
+    pub month: u8,
+    pub has_day: bool,
+    pub day: u8,
+    pub has_hour: bool,
+    pub hour: u8,
+    pub has_minute: bool,
+    pub minute: u8,
+    pub has_second: bool,
+    pub second: u8,
+    pub has_nanosecond: bool,
+    pub nanosecond: u32,
 }
 
 // ============================================================================
@@ -114,6 +136,28 @@ fn opt_ts(ts_ptr: *const u64) -> Option<u64> {
     }
 }
 
+#[cfg(feature = "timesync")]
+fn write_network_time(out: *mut SedsNetworkTime, reading: NetworkTimeReading) {
+    unsafe {
+        (*out).has_unix_time_ms = reading.unix_time_ms.is_some();
+        (*out).unix_time_ms = reading.unix_time_ms.unwrap_or(0);
+        (*out).has_year = reading.time.year.is_some();
+        (*out).year = reading.time.year.unwrap_or(0);
+        (*out).has_month = reading.time.month.is_some();
+        (*out).month = reading.time.month.unwrap_or(0);
+        (*out).has_day = reading.time.day.is_some();
+        (*out).day = reading.time.day.unwrap_or(0);
+        (*out).has_hour = reading.time.hour.is_some();
+        (*out).hour = reading.time.hour.unwrap_or(0);
+        (*out).has_minute = reading.time.minute.is_some();
+        (*out).minute = reading.time.minute.unwrap_or(0);
+        (*out).has_second = reading.time.second.is_some();
+        (*out).second = reading.time.second.unwrap_or(0);
+        (*out).has_nanosecond = reading.time.nanosecond.is_some();
+        (*out).nanosecond = reading.time.nanosecond.unwrap_or(0);
+    }
+}
+
 /// Convert a C-side `u32` type tag into a Rust `DataType`.
 #[inline]
 fn dtype_from_u32(x: u32) -> TelemetryResult<DataType> {
@@ -158,7 +202,7 @@ type CEndpointHandler = Option<extern "C" fn(pkt: *const SedsPacketView, user: *
 
 /// Endpoint handler callback (serialized bytes) (legacy).
 type CSerializedHandler =
-Option<extern "C" fn(bytes: *const u8, len: usize, user: *mut c_void) -> i32>;
+    Option<extern "C" fn(bytes: *const u8, len: usize, user: *mut c_void) -> i32>;
 
 /// C-facing endpoint descriptor (legacy, must match C header).
 #[repr(C)]
@@ -445,34 +489,57 @@ pub extern "C" fn seds_router_new(
 
             // If a SERIALIZED handler is provided, register it
             if let Some(cb_fn) = desc.serialized_handler {
-                let eh = EndpointHandler::new_serialized_handler(endpoint, move |bytes: &[u8]| {
-                    let code = cb_fn(bytes.as_ptr(), bytes.len(), user_addr as *mut c_void);
-                    if code == status_from_result_code(SedsResult::SedsOk) {
-                        Ok(())
-                    } else {
-                        Err(TelemetryError::Io("handler error"))
-                    }
-                });
+                let eh =
+                    EndpointHandler::new_serialized_handler(endpoint, move |bytes: &[u8]| {
+                        let code = cb_fn(bytes.as_ptr(), bytes.len(), user_addr as *mut c_void);
+                        if code == status_from_result_code(SedsResult::SedsOk) {
+                            Ok(())
+                        } else {
+                            Err(TelemetryError::Io("handler error"))
+                        }
+                    });
 
                 v.push(eh);
             }
         }
     }
 
-    let clock = FfiClock {
-        cb: now_ms_cb,
-        user_addr: user as usize,
+    let cfg = {
+        let cfg = RouterConfig::new(v);
+        #[cfg(feature = "timesync")]
+        let cfg = cfg.with_timesync(TimeSyncConfig::default());
+        cfg
     };
-
-    let box_clock = Box::new(clock);
-    let cfg = RouterConfig::new(v);
     let mode = match mode {
         0 => crate::router::RouterMode::Sink,
         1 => crate::router::RouterMode::Relay,
         _ => return ptr::null_mut(),
     };
 
-    let router = Router::new(mode, cfg, box_clock);
+    #[cfg(feature = "std")]
+    let router = if now_ms_cb.is_some() {
+        Router::new_with_clock(
+            mode,
+            cfg,
+            Box::new(FfiClock {
+                cb: now_ms_cb,
+                user_addr: user as usize,
+            }),
+        )
+    } else {
+        Router::new(mode, cfg)
+    };
+
+    #[cfg(not(feature = "std"))]
+    let router = Router::new_with_clock(
+        mode,
+        cfg,
+        Box::new(FfiClock {
+            cb: now_ms_cb,
+            user_addr: user as usize,
+        }),
+    );
+
     Box::into_raw(Box::new(SedsRouter {
         inner: Arc::from(router),
     }))
@@ -486,6 +553,249 @@ pub extern "C" fn seds_router_free(r: *mut SedsRouter) {
     unsafe {
         drop(Box::from_raw(r));
     }
+}
+
+#[cfg(feature = "timesync")]
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_get_network_time_ms(r: *mut SedsRouter, out_ms: *mut u64) -> i32 {
+    if r.is_null() || out_ms.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let router = unsafe { &(*r).inner };
+    let Some(ms) = router.network_time_ms() else {
+        return status_from_err(TelemetryError::Io("network time unavailable"));
+    };
+    unsafe { *out_ms = ms };
+    status_from_result_code(SedsResult::SedsOk)
+}
+
+#[cfg(feature = "timesync")]
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_get_network_time(
+    r: *mut SedsRouter,
+    out: *mut SedsNetworkTime,
+) -> i32 {
+    if r.is_null() || out.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let router = unsafe { &(*r).inner };
+    let Some(reading) = router.network_time() else {
+        return status_from_err(TelemetryError::Io("network time unavailable"));
+    };
+    write_network_time(out, reading);
+    status_from_result_code(SedsResult::SedsOk)
+}
+
+#[cfg(feature = "timesync")]
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_configure_timesync(
+    r: *mut SedsRouter,
+    enabled: bool,
+    role: u32,
+    priority: u64,
+    source_timeout_ms: u64,
+    announce_interval_ms: u64,
+    request_interval_ms: u64,
+) -> i32 {
+    if r.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let router = unsafe { &(*r).inner };
+    if !enabled {
+        router.set_timesync_config(None);
+        return status_from_result_code(SedsResult::SedsOk);
+    }
+
+    let role = match role {
+        0 => crate::timesync::TimeSyncRole::Consumer,
+        1 => crate::timesync::TimeSyncRole::Source,
+        2 => crate::timesync::TimeSyncRole::Auto,
+        _ => return status_from_err(TelemetryError::BadArg),
+    };
+
+    router.set_timesync_config(Some(TimeSyncConfig {
+        role,
+        priority,
+        source_timeout_ms,
+        announce_interval_ms,
+        request_interval_ms,
+    }));
+    status_from_result_code(SedsResult::SedsOk)
+}
+
+#[cfg(feature = "timesync")]
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_set_local_network_time(
+    r: *mut SedsRouter,
+    has_year: bool,
+    year: i32,
+    has_month: bool,
+    month: u8,
+    has_day: bool,
+    day: u8,
+    has_hour: bool,
+    hour: u8,
+    has_minute: bool,
+    minute: u8,
+    has_second: bool,
+    second: u8,
+    has_nanosecond: bool,
+    nanosecond: u32,
+) -> i32 {
+    if r.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let router = unsafe { &(*r).inner };
+    router.set_local_network_time(PartialNetworkTime {
+        year: has_year.then_some(year),
+        month: has_month.then_some(month),
+        day: has_day.then_some(day),
+        hour: has_hour.then_some(hour),
+        minute: has_minute.then_some(minute),
+        second: has_second.then_some(second),
+        nanosecond: has_nanosecond.then_some(nanosecond),
+    });
+    status_from_result_code(SedsResult::SedsOk)
+}
+
+#[cfg(feature = "timesync")]
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_set_local_network_date(
+    r: *mut SedsRouter,
+    year: i32,
+    month: u8,
+    day: u8,
+) -> i32 {
+    if r.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let router = unsafe { &(*r).inner };
+    router.set_local_network_date(year, month, day);
+    status_from_result_code(SedsResult::SedsOk)
+}
+
+#[cfg(feature = "timesync")]
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_set_local_network_time_hm(
+    r: *mut SedsRouter,
+    hour: u8,
+    minute: u8,
+) -> i32 {
+    if r.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let router = unsafe { &(*r).inner };
+    router.set_local_network_time_hm(hour, minute);
+    status_from_result_code(SedsResult::SedsOk)
+}
+
+#[cfg(feature = "timesync")]
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_set_local_network_time_hms(
+    r: *mut SedsRouter,
+    hour: u8,
+    minute: u8,
+    second: u8,
+) -> i32 {
+    if r.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let router = unsafe { &(*r).inner };
+    router.set_local_network_time_hms(hour, minute, second);
+    status_from_result_code(SedsResult::SedsOk)
+}
+
+#[cfg(feature = "timesync")]
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_set_local_network_time_hms_millis(
+    r: *mut SedsRouter,
+    hour: u8,
+    minute: u8,
+    second: u8,
+    millisecond: u16,
+) -> i32 {
+    if r.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let router = unsafe { &(*r).inner };
+    router.set_local_network_time_hms_millis(hour, minute, second, millisecond);
+    status_from_result_code(SedsResult::SedsOk)
+}
+
+#[cfg(feature = "timesync")]
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_set_local_network_time_hms_nanos(
+    r: *mut SedsRouter,
+    hour: u8,
+    minute: u8,
+    second: u8,
+    nanosecond: u32,
+) -> i32 {
+    if r.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let router = unsafe { &(*r).inner };
+    router.set_local_network_time_hms_nanos(hour, minute, second, nanosecond);
+    status_from_result_code(SedsResult::SedsOk)
+}
+
+#[cfg(feature = "timesync")]
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_set_local_network_datetime(
+    r: *mut SedsRouter,
+    year: i32,
+    month: u8,
+    day: u8,
+    hour: u8,
+    minute: u8,
+    second: u8,
+) -> i32 {
+    if r.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let router = unsafe { &(*r).inner };
+    router.set_local_network_datetime(year, month, day, hour, minute, second);
+    status_from_result_code(SedsResult::SedsOk)
+}
+
+#[cfg(feature = "timesync")]
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_set_local_network_datetime_millis(
+    r: *mut SedsRouter,
+    year: i32,
+    month: u8,
+    day: u8,
+    hour: u8,
+    minute: u8,
+    second: u8,
+    millisecond: u16,
+) -> i32 {
+    if r.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let router = unsafe { &(*r).inner };
+    router.set_local_network_datetime_millis(year, month, day, hour, minute, second, millisecond);
+    status_from_result_code(SedsResult::SedsOk)
+}
+
+#[cfg(feature = "timesync")]
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_set_local_network_datetime_nanos(
+    r: *mut SedsRouter,
+    year: i32,
+    month: u8,
+    day: u8,
+    hour: u8,
+    minute: u8,
+    second: u8,
+    nanosecond: u32,
+) -> i32 {
+    if r.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let router = unsafe { &(*r).inner };
+    router.set_local_network_datetime_nanos(year, month, day, hour, minute, second, nanosecond);
+    status_from_result_code(SedsResult::SedsOk)
 }
 
 // ============================================================================

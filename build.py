@@ -116,13 +116,22 @@ def _fmt_bytes(n: int) -> str:
     return f"{x:.2f} {units[u]}"
 
 
+def shared_lib_name() -> str:
+    if sys.platform == "darwin":
+        return "libsedsprintf_rs.dylib"
+    if os.name == "nt":
+        return "sedsprintf_rs.dll"
+    return "libsedsprintf_rs.so"
+
+
 def print_artifact_sizes(repo_root: Path, *, target: str, profile: str) -> None:
     out_dir = repo_root / "target" / target / profile if target else repo_root / "target" / profile
     staticlib = out_dir / "libsedsprintf_rs.a"
+    sharedlib = out_dir / shared_lib_name()
     rlib = out_dir / "libsedsprintf_rs.rlib"
 
     printed = False
-    for p, label in ((staticlib, "staticlib"), (rlib, "rlib")):
+    for p, label in ((staticlib, "staticlib"), (sharedlib, "sharedlib"), (rlib, "rlib")):
         if p.exists():
             sz = p.stat().st_size
             print(f"info: {label} size: {_fmt_bytes(sz)} ({p})")
@@ -134,17 +143,20 @@ def print_artifact_sizes(repo_root: Path, *, target: str, profile: str) -> None:
 def collect_artifact_sizes(repo_root: Path, *, target: str, profile: str) -> dict[str, int]:
     out_dir = repo_root / "target" / target / profile if target else repo_root / "target" / profile
     staticlib = out_dir / "libsedsprintf_rs.a"
+    sharedlib = out_dir / shared_lib_name()
     rlib = out_dir / "libsedsprintf_rs.rlib"
     out: dict[str, int] = {}
     if staticlib.exists():
         out["staticlib"] = staticlib.stat().st_size
+    if sharedlib.exists():
+        out["sharedlib"] = sharedlib.stat().st_size
     if rlib.exists():
         out["rlib"] = rlib.stat().st_size
     return out
 
 
 def print_artifact_size_delta(before: dict[str, int], after: dict[str, int]) -> None:
-    labels = ("staticlib", "rlib")
+    labels = ("staticlib", "sharedlib", "rlib")
     any_delta = False
     for label in labels:
         b = before.get(label)
@@ -234,6 +246,20 @@ def output_hint_for_cmd(
         return "Installed into the active Python environment."
 
     return None
+
+
+def cargo_lib_build_cmd(
+        *,
+        build_mode: list[str],
+        build_args: list[str],
+        build_shared: bool,
+) -> list[str]:
+    cmd = ["cargo", "rustc", "--lib", *build_mode, *build_args]
+    crate_types = ["rlib", "staticlib"]
+    if build_shared:
+        crate_types.append("cdylib")
+    cmd.extend(["--crate-type", ",".join(crate_types)])
+    return cmd
 
 
 def run_cmd(
@@ -832,6 +858,7 @@ def main(argv: list[str]) -> None:
     build_args: list[str] = []
     embedded_profile = False
     feature_suffix = ",timesync" if build_timesync else ""
+    build_shared = not build_embedded and not build_python
 
     if build_embedded:
         if not target:
@@ -867,7 +894,7 @@ def main(argv: list[str]) -> None:
         before_sizes = collect_artifact_sizes(repo_root, target=target, profile=profile_name)
 
         run_cmd(
-            ["cargo", "build", *build_mode, *build_args],
+            cargo_lib_build_cmd(build_mode=build_mode, build_args=build_args, build_shared=False),
             env=env,
             repo_root=repo_root,
             title="cargo build (embedded)",
@@ -927,7 +954,7 @@ def main(argv: list[str]) -> None:
         build_args.extend(["--features", "timesync"])
 
     run_cmd(
-        ["cargo", "build", *build_mode, *build_args],
+        cargo_lib_build_cmd(build_mode=build_mode, build_args=build_args, build_shared=build_shared),
         env=env,
         repo_root=repo_root,
         title="cargo build",

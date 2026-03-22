@@ -7,9 +7,9 @@ mod single_threaded_test {
     use sedsprintf_rs_2026::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
     use sedsprintf_rs_2026::TelemetryResult;
 
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::mpsc::{self, Receiver, TryRecvError};
-    use std::sync::Arc;
 
     /// Clock that always returns 0
     fn zero_clock() -> Box<dyn Clock + Send + Sync> {
@@ -203,9 +203,9 @@ mod single_threaded_test {
             };
 
             let router = if handlers.is_empty() {
-                Router::new(RouterMode::Sink, RouterConfig::default(), clock)
+                Router::new_with_clock(RouterMode::Sink, RouterConfig::default(), clock)
             } else {
-                Router::new(RouterMode::Sink, RouterConfig::new(handlers), clock)
+                Router::new_with_clock(RouterMode::Sink, RouterConfig::new(handlers), clock)
             };
             router.add_side_serialized("bus", tx);
 

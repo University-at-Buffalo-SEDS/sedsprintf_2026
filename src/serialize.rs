@@ -10,9 +10,10 @@
 //! the header fields used by `peek_envelope`.
 
 use crate::{
-    get_message_name, is_reliable_type, packet::Packet, try_enum_from_u32,
-    DataEndpoint, TelemetryError, TelemetryResult,
-    {config::DataType, MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE},
+    DataEndpoint, TelemetryError, TelemetryResult, get_message_name, is_reliable_type,
+    packet::Packet,
+    try_enum_from_u32,
+    {MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE, config::DataType},
 };
 
 use crate::packet::hash_bytes_u64;
@@ -404,7 +405,11 @@ fn serialize_packet_inner(pkt: &Packet, reliable: Option<ReliableHeader>) -> Arc
     let (payload_compressed, payload_wire) = payload_compression::compress_if_beneficial(payload);
 
     // Heuristic capacity: fixed prelude + bitmap + sender_wire + reliable + payload_wire.
-    let reliable_len = if reliable.is_some() { RELIABLE_HEADER_BYTES } else { 0 };
+    let reliable_len = if reliable.is_some() {
+        RELIABLE_HEADER_BYTES
+    } else {
+        0
+    };
     let mut out = Vec::with_capacity(
         16 + EP_BITMAP_BYTES + sender_wire.len() + reliable_len + payload_wire.len() + CRC32_BYTES,
     );
@@ -836,11 +841,11 @@ pub fn header_size_bytes(pkt: &Packet) -> usize {
         + uleb128_size(pkt.timestamp())
         + uleb128_size(sender_bytes.len() as u64)
         + if sender_compressed {
-        // extra varint for sender_wire_len when compressed
-        uleb128_size(sender_wire.len() as u64)
-    } else {
-        0
-    }
+            // extra varint for sender_wire_len when compressed
+            uleb128_size(sender_wire.len() as u64)
+        } else {
+            0
+        }
 }
 
 /// Compute the total wire size (header + bitmap + sender + payload) in bytes.

@@ -7,7 +7,10 @@
 //!   - [`get_endpoint_meta`]
 //!   - [`get_message_meta`]
 
-use crate::{parse_f64, parse_strings, parse_usize, EndpointMeta, EndpointsBroadcastMode, MessageClass, MessageDataType, MessageElement, MessageMeta};
+use crate::{
+    EndpointMeta, EndpointsBroadcastMode, MessageClass, MessageDataType, MessageElement,
+    MessageMeta, parse_f64, parse_strings, parse_usize,
+};
 use sedsprintf_macros::{define_stack_payload, define_telemetry_schema};
 use strum_macros::EnumCount;
 
@@ -94,11 +97,9 @@ pub const STRING_PRECISION: usize = match option_env!("STRING_PRECISION") {
     None => 8, // 12 is expensive; tune as needed
 };
 
-
 /// Maximum payload size (in bytes) that is allowed to be allocated on the
 /// stack before the implementation switches to heap allocation.
 define_stack_payload!(env = "MAX_STACK_PAYLOAD", default = 64);
-
 
 /// Maximum number of times a handler is retried before giving up and
 /// surfacing a [`TelemetryError::HandlerError`](crate::TelemetryError::HandlerError).
@@ -125,12 +126,14 @@ pub const RELIABLE_MAX_PENDING: usize = match option_env!("RELIABLE_MAX_PENDING"
     None => 16,
 };
 
-
-
 // Schema path can be overridden at build time via SEDSPRINTF_RS_SCHEMA_PATH.
 // Board-local IPC/link-local additions can be merged via SEDSPRINTF_RS_IPC_SCHEMA_PATH.
 #[cfg(all(feature = "timesync", feature = "discovery"))]
-define_telemetry_schema!(path = "telemetry_config.json", timesync = true, discovery = true);
+define_telemetry_schema!(
+    path = "telemetry_config.json",
+    timesync = true,
+    discovery = true
+);
 #[cfg(all(feature = "timesync", not(feature = "discovery")))]
 define_telemetry_schema!(path = "telemetry_config.json", timesync = true);
 #[cfg(all(not(feature = "timesync"), feature = "discovery"))]

@@ -32,10 +32,6 @@ Common patterns:
 use sedsprintf_rs::router::{EndpointHandler, Router, RouterConfig, RouterMode};
 use sedsprintf_rs::{DataEndpoint, DataType, TelemetryResult};
 
-fn now_ms() -> u64 {
-    0
-}
-
 fn main() -> TelemetryResult<()> {
     let handler = EndpointHandler::new_packet_handler(
         DataEndpoint::SdCard,
@@ -53,7 +49,7 @@ fn main() -> TelemetryResult<()> {
         Ok(())
     };
 
-    let router = Router::new(RouterMode::Sink, cfg, Box::new(now_ms));
+    let router = Router::new(RouterMode::Sink, cfg);
     router.add_side_serialized("RADIO", tx);
 
     router.log(DataType::GpsData, &[1.0_f32, 2.0, 3.0])?;
@@ -62,6 +58,9 @@ fn main() -> TelemetryResult<()> {
     Ok(())
 }
 ```
+
+On `std` builds, `Router::new(...)` uses an internal monotonic clock. If you need a custom
+monotonic source for tests, simulation, or `no_std`, use `Router::new_with_clock(...)`.
 
 ## Reliable delivery (opt-in)
 
@@ -72,7 +71,7 @@ ordered delivery and retransmits on **serialized sides**. ACK frames are sent ba
 ingress side automatically via the side's serialized TX handler.
 
 ```rust
-let router = Router::new(RouterMode::Sink, cfg, Box::new(now_ms));
+let router = Router::new(RouterMode::Sink, cfg);
 router.add_side_serialized_with_options(
     "RADIO",
     tx,
@@ -101,7 +100,7 @@ configure the router config:
 
 ```rust
 let cfg = RouterConfig::new([handler]).with_reliable_enabled(false);
-let router = Router::new(RouterMode::Sink, cfg, Box::new(now_ms));
+let router = Router::new(RouterMode::Sink, cfg);
 router.add_side_serialized("RADIO", tx);
 ```
 
@@ -129,27 +128,39 @@ Routers use **named sides** (UART/CAN/RADIO/etc.) instead of LinkId. Register si
 
 ## Time sync (feature: timesync)
 
-When the `timesync` feature is enabled, the schema adds time sync packets and the crate exposes
-helpers in `sedsprintf_rs::timesync`. See rust-example-code/timesync_example.rs
+When the `timesync` feature is enabled, the schema adds time sync packets and the router maintains
+an internal network clock separate from its monotonic timing source.
+`TIME_SYNC` packets are handled internally and do not dispatch to normal local endpoint handlers.
+See rust-example-code/timesync_example.rs
 ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/rust-example-code/timesync_example.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rust-example-code/timesync_example.rs))
 for a full example.
 For protocol details and role selection, see [Time-Sync](Time-Sync).
 
 ```rust
-use sedsprintf_rs::timesync::{
-    TimeSyncConfig, TimeSyncRole, TimeSyncTracker, compute_offset_delay, send_timesync_request,
-};
+use sedsprintf_rs::router::{Router, RouterConfig, RouterMode};
+use sedsprintf_rs::timesync::{PartialNetworkTime, TimeSyncConfig, TimeSyncRole};
 
-let cfg = TimeSyncConfig {
-    role: TimeSyncRole::Consumer,
+let router = Router::new(
+    RouterMode::Sink,
+    RouterConfig::default().with_timesync(TimeSyncConfig {
+        role: TimeSyncRole::Source,
+        ..Default::default()
+    }),
+);
+
+router.set_local_network_datetime_millis(2026, 3, 21, 12, 34, 56, 250);
+router.set_local_network_time(PartialNetworkTime {
+    second: Some(57),
+    nanosecond: Some(125_000_000),
     ..Default::default()
-};
-let mut tracker = TimeSyncTracker::new(cfg);
-// Use send_timesync_request(...) and compute_offset_delay(...) in your app logic.
+});
+
+let now = router.network_time_ms();
 ```
 
 `TIME_SYNC` is a built-in endpoint with broadcast mode set to `Always`, so time sync packets
-forward across sides even when a local handler is registered.
+forward across sides even though the handling is internal. Packet timestamps use the internal
+network clock when one is available.
 applications just call the plain RX APIs. Use side-aware RX only when you need to override
 ingress explicitly (custom relays, multi-link bridges, etc.).
 

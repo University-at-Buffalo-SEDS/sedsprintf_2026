@@ -1,5 +1,38 @@
 # Changelogs
 
+## Version 3.4.0 highlights
+
+- Router-managed time sync and network clock:
+    - Time sync is now handled internally by the router instead of through normal local `TIME_SYNC`
+      endpoint handlers.
+    - Routers maintain an internal non-monotonic network clock separate from their monotonic timing
+      source.
+    - Packet timestamps now prefer the internal network clock when one is available.
+- Partial time-source merging and master clock injection:
+    - The internal network clock can merge partial sources, such as date from one source and
+      time-of-day or subsecond precision from another.
+    - Added master/local time setter APIs for complete or partial network time, including
+      date-only, hour/minute, hour/minute/second, millisecond, and nanosecond variants.
+    - Local time setters are anchored at commit time so short context switches during updates do
+      not leave complete absolute times stale.
+- Constructor and FFI clock model updates:
+    - On `std` builds, `Router::new(...)` now uses an internal monotonic clock by default.
+    - Added `Router::new_with_clock(...)` for tests, simulation, and `no_std` / embedded clock
+      injection.
+    - C and Python router constructors now treat the monotonic clock callback as optional on
+      `std` builds and fall back to the internal router clock when it is omitted.
+- C system-test and harness improvements:
+    - Fixed a relay timing issue in the C system-test path that could cause shutdown to stall.
+    - Updated C time-sync tests to follow the internal router-managed time-sync model.
+    - Added bounded timeout handling in the Rust C-test harness so future regressions fail fast
+      instead of hanging indefinitely.
+- Documentation refresh:
+    - Updated Rust, C, and Python usage docs to reflect the new router constructor model.
+    - Expanded time-sync documentation to cover the internal network clock, merged partial
+      sources, current network time accessors, and master-side setter APIs.
+- Full
+  changelog: [v3.3.0...v3.4.0](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/-/compare/v3.3.0...v3.4.0)
+
 ## Version 3.3.0 highlights
 
 - Discovery/routing control plane:
