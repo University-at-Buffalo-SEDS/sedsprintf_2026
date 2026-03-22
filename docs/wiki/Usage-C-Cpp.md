@@ -99,6 +99,9 @@ packets internally. Use `seds_router_get_network_time_ms` / `seds_router_get_net
 read the current synthesized network time. Source/master nodes can seed that clock directly with
 the `seds_router_set_local_network_*` functions for date-only, time-only, millisecond, or
 nanosecond precision inputs.
+Call `seds_router_poll_timesync(...)` from your main loop to let the router queue any due
+announce/request traffic, then process the normal router queues. The call is non-blocking and only
+queues work when the configured interval is due.
 
 ## Sending and receiving
 

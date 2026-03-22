@@ -67,6 +67,9 @@ With `timesync` enabled, `Router` keeps an internal network clock. `TIME_SYNC` p
 handled internally, `network_time()` / `network_time_ms()` expose the merged current time, and
 source/master nodes can set partial or complete local time with `set_local_network_time(...)`,
 `set_local_network_date(...)`, and the `set_local_network_*` datetime helpers.
+Call `router.poll_timesync()` from your main loop to let the router queue any due announce/request
+traffic, then run the normal queue processing methods. The call is non-blocking and returns
+whether it queued a time-sync packet during that poll.
 
 ## Logging API
 
