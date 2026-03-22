@@ -66,6 +66,23 @@ environments.
 
 ---
 
+## Version 3.4.0 highlights
+
+- Time sync is now router-managed: `TIME_SYNC` packets are consumed internally, routers maintain a
+  separate internal network clock, and packet timestamps prefer that clock when available.
+- Added merged partial network time support, so routers can combine date, time-of-day, and
+  subsecond precision from different sources.
+- Added local/master network time setter APIs across Rust, C, and Python for date-only, HMS,
+  millisecond, and nanosecond precision updates.
+- On `std` builds, routers now use an internal monotonic clock by default; explicit clock hooks
+  moved to `Router::new_with_clock(...)` and remain available for tests, simulation, and
+  `no_std`.
+- C and Python constructors now treat the router clock callback as optional on `std` builds, and
+  C system-test handling was hardened to prevent indefinite hangs on regressions.
+- Full changelog: [v3.3.0...v3.4.0](https://github.com/Rylan-Meilutis/sedsprintf_rs/compare/v3.3.0...v3.4.0)
+
+---
+
 ## Version 3.3.0 highlights
 
 - Added built-in discovery/routing control traffic for routers and relays, including learned endpoint reachability,
