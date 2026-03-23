@@ -401,6 +401,22 @@
       "endpoints": [
         "GroundStation"
       ]
+    },
+    {
+      "rust": "GpsSateliteNumber",
+      "name": "GPS_SATELITE_NUMBER",
+      "doc": "(1 x U8) The number of satelites the gps sees in the sky.",
+      "reliable": false,
+      "reliable_mode": "None",
+      "class": "Data",
+      "element": {
+        "kind": "Static",
+        "data_type": "UInt8",
+        "count": 1
+      },
+      "endpoints": [
+        "GroundStation"
+      ]
     }
   ]
 }
