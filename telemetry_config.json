@@ -403,8 +403,8 @@
       ]
     },
     {
-      "rust": "GpsSateliteNumber",
-      "name": "GPS_SATELITE_NUMBER",
+      "rust": "GpsSatelliteNumber",
+      "name": "GPS_SATELLITE_NUMBER",
       "doc": "(1 x U8) The number of satelites the gps sees in the sky.",
       "reliable": false,
       "reliable_mode": "None",
