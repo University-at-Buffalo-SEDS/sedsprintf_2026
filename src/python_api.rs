@@ -1465,6 +1465,7 @@ impl PyRelay {
 // ============================================================================
 
 #[pyfunction]
+/// Deserializes wire bytes into a `PyPacket` instance.
 pub fn deserialize_packet_py(py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let bytes: &[u8] = data.extract()?;
     let pkt = deserialize_packet(bytes).map_err(py_err_from)?;
@@ -1475,6 +1476,7 @@ pub fn deserialize_packet_py(py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResul
 }
 
 #[pyfunction]
+/// Peeks the packet envelope from wire bytes and returns a Python dictionary summary.
 pub fn peek_header_py(py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let bytes: &[u8] = data.extract()?;
     let env = peek_envelope(bytes).map_err(py_err_from)?;
@@ -1495,6 +1497,7 @@ pub fn peek_header_py(py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResult<Py<Py
 
 #[pyfunction]
 #[pyo3(signature = (ty, sender, endpoints, timestamp_ms, payload))]
+/// Builds a `PyPacket` from explicit packet fields supplied by Python.
 pub fn make_packet(
     py: Python<'_>,
     ty: u32,
@@ -1532,6 +1535,7 @@ pub fn make_packet(
 // ============================================================================
 
 #[pymodule]
+/// Initializes the `sedsprintf_rs` Python extension module.
 pub fn sedsprintf_rs(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyRouter>()?;
     m.add_class::<PyPacket>()?;

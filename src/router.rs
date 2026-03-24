@@ -383,6 +383,7 @@ impl RouterConfig {
     }
 
     #[cfg(feature = "timesync")]
+    /// Enables and configures built-in time synchronization for this router.
     pub fn with_timesync(mut self, cfg: TimeSyncConfig) -> Self {
         self.timesync = Some(cfg);
         self
@@ -1620,6 +1621,7 @@ impl Router {
     }
 
     #[cfg(feature = "timesync")]
+    /// Inserts or updates a named network-time source with an optional expiration TTL.
     pub fn update_network_time_source(
         &self,
         source: &str,
@@ -1680,6 +1682,7 @@ impl Router {
     }
 
     #[cfg(feature = "timesync")]
+    /// Sets the local node's network time using any combination of date, time, and sub-second fields.
     pub fn set_local_network_time(&self, time: PartialNetworkTime) {
         let priority = self.local_network_time_priority();
         if time.is_complete_date() && time.is_complete_time() {
@@ -1739,6 +1742,7 @@ impl Router {
     }
 
     #[cfg(feature = "timesync")]
+    /// Removes all locally supplied network-time fragments from the assembled clock.
     pub fn clear_local_network_time(&self) {
         let mut st = self.timesync.lock();
         st.clock.remove_source(LOCAL_TIMESYNC_FULL_SOURCE_ID);
@@ -1748,6 +1752,7 @@ impl Router {
     }
 
     #[cfg(feature = "timesync")]
+    /// Sets only the local calendar date portion of network time.
     pub fn set_local_network_date(&self, year: i32, month: u8, day: u8) {
         self.set_local_network_time(PartialNetworkTime {
             year: Some(year),
@@ -1758,6 +1763,7 @@ impl Router {
     }
 
     #[cfg(feature = "timesync")]
+    /// Sets the local time of day to hour and minute precision.
     pub fn set_local_network_time_hm(&self, hour: u8, minute: u8) {
         self.set_local_network_time(PartialNetworkTime {
             hour: Some(hour),
@@ -1767,6 +1773,7 @@ impl Router {
     }
 
     #[cfg(feature = "timesync")]
+    /// Sets the local time of day to second precision.
     pub fn set_local_network_time_hms(&self, hour: u8, minute: u8, second: u8) {
         self.set_local_network_time(PartialNetworkTime {
             hour: Some(hour),
@@ -1777,6 +1784,7 @@ impl Router {
     }
 
     #[cfg(feature = "timesync")]
+    /// Sets the local time of day with millisecond precision.
     pub fn set_local_network_time_hms_millis(
         &self,
         hour: u8,
@@ -1794,6 +1802,7 @@ impl Router {
     }
 
     #[cfg(feature = "timesync")]
+    /// Sets the local time of day with nanosecond precision.
     pub fn set_local_network_time_hms_nanos(
         &self,
         hour: u8,
@@ -1811,6 +1820,7 @@ impl Router {
     }
 
     #[cfg(feature = "timesync")]
+    /// Sets a complete local date and time with second precision.
     pub fn set_local_network_datetime(
         &self,
         year: i32,
@@ -1833,6 +1843,7 @@ impl Router {
 
     #[cfg(feature = "timesync")]
     #[allow(clippy::too_many_arguments)]
+    /// Sets a complete local date and time with millisecond precision.
     pub fn set_local_network_datetime_millis(
         &self,
         year: i32,
@@ -1856,6 +1867,7 @@ impl Router {
 
     #[cfg(feature = "timesync")]
     #[allow(clippy::too_many_arguments)]
+    /// Sets a complete local date and time with nanosecond precision.
     pub fn set_local_network_datetime_nanos(
         &self,
         year: i32,
@@ -1878,12 +1890,14 @@ impl Router {
     }
 
     #[cfg(feature = "timesync")]
+    /// Removes a previously registered named network-time source.
     pub fn clear_network_time_source(&self, source: &str) {
         let mut st = self.timesync.lock();
         st.clock.remove_source(source);
     }
 
     #[cfg(feature = "timesync")]
+    /// Replaces the active time sync configuration and resets runtime state derived from it.
     pub fn set_timesync_config(&self, cfg: Option<TimeSyncConfig>) {
         let mut st = self.timesync.lock();
         let stale_remote_sources: Vec<String> = st.remote_sources.keys().cloned().collect();
@@ -1909,6 +1923,7 @@ impl Router {
     }
 
     #[cfg(feature = "timesync")]
+    /// Returns the best currently known network-time reading, if any.
     pub fn network_time(&self) -> Option<NetworkTimeReading> {
         let now_ms = self.monotonic_now_ms();
         let now_ns = self.monotonic_now_ns();
@@ -1924,6 +1939,7 @@ impl Router {
     }
 
     #[cfg(feature = "timesync")]
+    /// Returns the current network time as Unix milliseconds when available.
     pub fn network_time_ms(&self) -> Option<u64> {
         self.network_time().and_then(|t| t.unix_time_ms)
     }
@@ -1977,6 +1993,7 @@ impl Router {
     }
 
     #[cfg(feature = "timesync")]
+    /// Runs one time sync maintenance cycle and queues any required announce or request packets.
     pub fn poll_timesync(&self) -> TelemetryResult<bool> {
         let now_ms = self.monotonic_now_ms();
         let now_ns = self.monotonic_now_ns();
@@ -2242,6 +2259,7 @@ impl Router {
         self.add_side_serialized_with_options(name, tx, RouterSideOptions::default())
     }
 
+    /// Adds a serialized-output side with explicit reliability and link-local options.
     pub fn add_side_serialized_with_options<F>(
         &self,
         name: &'static str,
@@ -2271,6 +2289,7 @@ impl Router {
         self.add_side_packet_with_options(name, tx, RouterSideOptions::default())
     }
 
+    /// Adds a packet-output side with explicit reliability and link-local options.
     pub fn add_side_packet_with_options<F>(
         &self,
         name: &'static str,

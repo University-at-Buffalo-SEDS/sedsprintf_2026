@@ -710,12 +710,15 @@ mod timeout_tests {
     }
 
     impl StepClock {
+        /// Creates a boxed [`StepClock`] with the specified start time and step size.
         pub fn new_box(start: u64, step: u64) -> Box<dyn Clock + Send + Sync> {
             Box::new(StepClock::new(start, step))
         }
+        /// Creates a boxed [`StepClock`] pinned at zero for tests that need a fixed clock.
         pub fn new_default_box() -> Box<dyn Clock + Send + Sync> {
             Box::new(StepClock::new(0, 0))
         }
+        /// Creates a deterministic test clock that advances by `step` on each read.
         pub fn new(start: u64, step: u64) -> Self {
             Self {
                 t: AtomicU64::new(start),

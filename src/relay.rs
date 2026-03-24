@@ -853,6 +853,7 @@ impl Relay {
         self.add_side_serialized_with_options(name, tx, RelaySideOptions::default())
     }
 
+    /// Adds a serialized-output side with explicit reliability and link-local options.
     pub fn add_side_serialized_with_options<F>(
         &self,
         name: &'static str,
@@ -883,6 +884,7 @@ impl Relay {
         self.add_side_packet_with_options(name, tx, RelaySideOptions::default())
     }
 
+    /// Adds a packet-output side with explicit reliability and link-local options.
     pub fn add_side_packet_with_options<F>(
         &self,
         name: &'static str,
@@ -905,16 +907,19 @@ impl Relay {
     }
 
     #[cfg(feature = "discovery")]
+    /// Queues an immediate discovery announcement for this relay.
     pub fn announce_discovery(&self) -> TelemetryResult<()> {
         self.queue_discovery_announce()
     }
 
     #[cfg(feature = "discovery")]
+    /// Polls discovery state and queues an announce if the cadence says one is due.
     pub fn poll_discovery(&self) -> TelemetryResult<bool> {
         self.poll_discovery_announce()
     }
 
     #[cfg(feature = "discovery")]
+    /// Exports the relay's current discovered topology snapshot.
     pub fn export_topology(&self) -> TopologySnapshot {
         let now_ms = self.clock.now_ms();
         let mut st = self.state.lock();

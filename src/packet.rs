@@ -762,6 +762,7 @@ impl Packet {
         from_f64_slice,  f64;
     }
 
+    /// Builds a packet with an empty payload for types whose schema allows zero bytes.
     #[inline]
     pub fn from_no_data(
         ty: DataType,
