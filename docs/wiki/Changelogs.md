@@ -1,5 +1,28 @@
 # Changelogs
 
+## Version 3.4.2 highlights
+
+- Time sync election and continuity:
+    - `Source` routers now participate in producer election instead of always acting as masters.
+    - Routers keep per-remote-source time state instead of collapsing all remotes into one shared
+      internal source slot.
+    - Non-winning producers now follow the elected leader rather than continuing to serve
+      independently.
+    - Failover now uses monotonic holdover plus slew so network time does not jump backward during
+      source changes.
+- Tie breaking and consumer promotion:
+    - Same-priority producers now resolve leadership by selecting one winner and advertising a
+      temporary boosted priority while the standby producers keep their configured priorities.
+    - Consumers with a non-uptime-based clock can optionally self-promote when no producers remain,
+      allowing the network to stay aligned during complete producer loss.
+- Docs and tooling updates:
+    - Added Rust system-test coverage for election, priority ties, consumer promotion, and failover
+      monotonicity.
+    - Wiki source links now default to GitHub in-repo, while the wiki sync script rewrites them to
+      the target GitLab repo path when publishing to GitLab.
+- Full
+  changelog: [v3.4.1...v3.4.2](https://github.com/Rylan-Meilutis/sedsprintf_rs/compare/v3.4.1...v3.4.2)
+
 ## Version 3.4.1 highlights
 
 - Discovery and time sync routing integration:
@@ -133,15 +156,15 @@ What's included:
 - Feature: `timesync` adds `TIME_SYNC` endpoint and `TIME_SYNC_ANNOUNCE/REQUEST/RESPONSE` types (built-in like
   `TelemetryError`).
 - Examples:
-  rust-example-code/timesync_example.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/rust-example-code/timesync_example.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rust-example-code/timesync_example.rs)),
-  rust-example-code/relay_example.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/rust-example-code/relay_example.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rust-example-code/relay_example.rs)),
-  rust-example-code/reliable_example.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/rust-example-code/reliable_example.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rust-example-code/reliable_example.rs)),
-  rust-example-code/queue_timeout_example.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/rust-example-code/queue_timeout_example.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rust-example-code/queue_timeout_example.rs)),
-  rust-example-code/multinode_sim_example.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/rust-example-code/multinode_sim_example.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rust-example-code/multinode_sim_example.rs)),
-  c-example-code/src/timesync_example.c ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/c-example-code/src/timesync_example.c) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/c-example-code/src/timesync_example.c)),
-  python-example/timesync_example.py ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/python-example/timesync_example.py) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/python-example/timesync_example.py)),
-  rtos-example-code/freertos_timesync.c ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/rtos-example-code/freertos_timesync.c) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rtos-example-code/freertos_timesync.c)),
-  rtos-example-code/threadx_timesync.c ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/rtos-example-code/threadx_timesync.c) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rtos-example-code/threadx_timesync.c)).
+  rust-example-code/timesync_example.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rust-example-code/timesync_example.rs)),
+  rust-example-code/relay_example.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rust-example-code/relay_example.rs)),
+  rust-example-code/reliable_example.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rust-example-code/reliable_example.rs)),
+  rust-example-code/queue_timeout_example.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rust-example-code/queue_timeout_example.rs)),
+  rust-example-code/multinode_sim_example.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rust-example-code/multinode_sim_example.rs)),
+  c-example-code/src/timesync_example.c ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/c-example-code/src/timesync_example.c)),
+  python-example/timesync_example.py ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/python-example/timesync_example.py)),
+  rtos-example-code/freertos_timesync.c ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rtos-example-code/freertos_timesync.c)),
+  rtos-example-code/threadx_timesync.c ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rtos-example-code/threadx_timesync.c)).
 - C system test and examples demonstrate Time Sync announce/request/response flows.
 - Python example handles Time Sync without re-entering the router from handlers.
 

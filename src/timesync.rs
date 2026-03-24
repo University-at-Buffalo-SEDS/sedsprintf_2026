@@ -31,6 +31,8 @@ pub struct TimeSyncConfig {
     pub source_timeout_ms: u64,
     pub announce_interval_ms: u64,
     pub request_interval_ms: u64,
+    pub consumer_promotion_enabled: bool,
+    pub max_slew_ppm: u32,
 }
 
 impl Default for TimeSyncConfig {
@@ -41,8 +43,16 @@ impl Default for TimeSyncConfig {
             source_timeout_ms: 5_000,
             announce_interval_ms: 1_000,
             request_interval_ms: 1_000,
+            consumer_promotion_enabled: true,
+            max_slew_ppm: 50_000,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TimeSyncLeader {
+    Local { priority: u64 },
+    Remote(TimeSyncSource),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -207,6 +217,95 @@ impl NetworkTime {
 pub struct NetworkTimeReading {
     pub time: PartialNetworkTime,
     pub unix_time_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SlewedNetworkClock {
+    anchor_mono_ns: u64,
+    anchor_unix_ns: i128,
+    pending_adjust_ns: i128,
+    max_slew_ppm: u32,
+    initialized: bool,
+}
+
+impl Default for SlewedNetworkClock {
+    fn default() -> Self {
+        Self {
+            anchor_mono_ns: 0,
+            anchor_unix_ns: 0,
+            pending_adjust_ns: 0,
+            max_slew_ppm: 50_000,
+            initialized: false,
+        }
+    }
+}
+
+impl SlewedNetworkClock {
+    pub fn new(max_slew_ppm: u32) -> Self {
+        Self {
+            max_slew_ppm: max_slew_ppm.min(999_999),
+            ..Default::default()
+        }
+    }
+
+    pub fn is_initialized(&self) -> bool {
+        self.initialized
+    }
+
+    pub fn read_unix_ns(&self, now_mono_ns: u64) -> Option<i128> {
+        if !self.initialized {
+            return None;
+        }
+
+        let elapsed_ns = now_mono_ns.saturating_sub(self.anchor_mono_ns) as i128;
+        let max_adjust_ns = elapsed_ns.saturating_mul(self.max_slew_ppm as i128) / 1_000_000;
+        let applied_adjust_ns = if self.pending_adjust_ns >= 0 {
+            self.pending_adjust_ns.min(max_adjust_ns)
+        } else {
+            -((-self.pending_adjust_ns).min(max_adjust_ns))
+        };
+
+        Some(
+            self.anchor_unix_ns
+                .saturating_add(elapsed_ns)
+                .saturating_add(applied_adjust_ns),
+        )
+    }
+
+    pub fn read_unix_ms(&self, now_mono_ns: u64) -> Option<u64> {
+        let unix_ns = self.read_unix_ns(now_mono_ns)?;
+        if unix_ns < 0 {
+            return None;
+        }
+        u64::try_from(unix_ns / 1_000_000).ok()
+    }
+
+    pub fn steer_unix_ms(&mut self, now_mono_ns: u64, target_unix_ms: u64) {
+        let target_unix_ns = (target_unix_ms as i128) * 1_000_000;
+        if !self.initialized {
+            self.anchor_mono_ns = now_mono_ns;
+            self.anchor_unix_ns = target_unix_ns;
+            self.pending_adjust_ns = 0;
+            self.initialized = true;
+            return;
+        }
+
+        let current_unix_ns = self.read_unix_ns(now_mono_ns).unwrap_or(target_unix_ns);
+        let elapsed_ns = now_mono_ns.saturating_sub(self.anchor_mono_ns) as i128;
+        let max_adjust_ns = elapsed_ns.saturating_mul(self.max_slew_ppm as i128) / 1_000_000;
+        let applied_adjust_ns = if self.pending_adjust_ns >= 0 {
+            self.pending_adjust_ns.min(max_adjust_ns)
+        } else {
+            -((-self.pending_adjust_ns).min(max_adjust_ns))
+        };
+        let remaining_adjust_ns = self.pending_adjust_ns.saturating_sub(applied_adjust_ns);
+
+        self.anchor_mono_ns = now_mono_ns;
+        self.anchor_unix_ns = current_unix_ns;
+        self.pending_adjust_ns = remaining_adjust_ns
+            .saturating_add(target_unix_ns.saturating_sub(current_unix_ns));
+        self.initialized = true;
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -412,16 +511,81 @@ impl TimeSyncTracker {
         self.reselect_source(now_ms)
     }
 
-    pub fn should_announce(&self, now_ms: u64) -> bool {
+    pub fn best_active_source(&self, now_ms: u64) -> Option<&TimeSyncSource> {
+        self.sources
+            .values()
+            .filter(|src| Self::source_is_active(src, now_ms, self.cfg.source_timeout_ms))
+            .min_by(|a, b| {
+                a.priority
+                    .cmp(&b.priority)
+                    .then_with(|| a.sender.cmp(&b.sender))
+            })
+    }
+
+    pub fn local_candidate_priority(&self, now_ms: u64, has_usable_time: bool) -> Option<u64> {
         match self.cfg.role {
-            TimeSyncRole::Consumer => false,
-            TimeSyncRole::Source => true,
-            TimeSyncRole::Auto => !self.is_source_active(now_ms),
+            TimeSyncRole::Consumer => {
+                if has_usable_time
+                    && self.cfg.consumer_promotion_enabled
+                    && self.best_active_source(now_ms).is_none()
+                {
+                    Some(self.cfg.priority)
+                } else {
+                    None
+                }
+            }
+            TimeSyncRole::Source => Some(self.cfg.priority),
+            TimeSyncRole::Auto => {
+                if has_usable_time && self.best_active_source(now_ms).is_none() {
+                    Some(self.cfg.priority)
+                } else {
+                    None
+                }
+            }
         }
     }
 
-    pub fn should_serve(&self, now_ms: u64) -> bool {
-        self.should_announce(now_ms)
+    pub fn leader(&self, now_ms: u64, has_usable_time: bool) -> Option<TimeSyncLeader> {
+        let local_priority = self.local_candidate_priority(now_ms, has_usable_time);
+        let remote = self.best_active_source(now_ms).cloned();
+        match (local_priority, remote) {
+            (Some(priority), Some(remote)) => {
+                if priority < remote.priority
+                    || (priority == remote.priority && self.local_id < remote.sender.as_str())
+                {
+                    Some(TimeSyncLeader::Local { priority })
+                } else {
+                    Some(TimeSyncLeader::Remote(remote))
+                }
+            }
+            (Some(priority), None) => Some(TimeSyncLeader::Local { priority }),
+            (None, Some(remote)) => Some(TimeSyncLeader::Remote(remote)),
+            (None, None) => None,
+        }
+    }
+
+    pub fn local_announce_priority(&self, now_ms: u64, has_usable_time: bool) -> Option<u64> {
+        let Some(TimeSyncLeader::Local { priority }) = self.leader(now_ms, has_usable_time) else {
+            return None;
+        };
+        let tie_exists = self
+            .sources
+            .values()
+            .filter(|src| Self::source_is_active(src, now_ms, self.cfg.source_timeout_ms))
+            .any(|src| src.priority == priority);
+        Some(if tie_exists {
+            priority.saturating_sub(1)
+        } else {
+            priority
+        })
+    }
+
+    pub fn should_announce(&self, now_ms: u64, has_usable_time: bool) -> bool {
+        self.local_announce_priority(now_ms, has_usable_time).is_some()
+    }
+
+    pub fn should_serve(&self, now_ms: u64, has_usable_time: bool) -> bool {
+        self.should_announce(now_ms, has_usable_time)
     }
 
     pub fn handle_announce(
@@ -455,15 +619,7 @@ impl TimeSyncTracker {
     }
 
     fn best_active_source_id(&self, now_ms: u64) -> Option<String> {
-        self.sources
-            .values()
-            .filter(|src| Self::source_is_active(src, now_ms, self.cfg.source_timeout_ms))
-            .min_by(|a, b| {
-                a.priority
-                    .cmp(&b.priority)
-                    .then_with(|| a.sender.cmp(&b.sender))
-            })
-            .map(|src| src.sender.clone())
+        self.best_active_source(now_ms).map(|src| src.sender.clone())
     }
 
     fn reselect_source(&mut self, now_ms: u64) -> TimeSyncUpdate {
