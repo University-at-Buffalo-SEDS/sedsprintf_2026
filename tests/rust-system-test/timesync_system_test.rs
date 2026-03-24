@@ -1,6 +1,6 @@
 #[cfg(feature = "timesync")]
 mod timesync_system_test {
-    use sedsprintf_rs_2026::config::{DataEndpoint, DataType};
+    use sedsprintf_rs_2026::config::{DEVICE_IDENTIFIER, DataEndpoint, DataType};
     use sedsprintf_rs_2026::packet::Packet;
     use sedsprintf_rs_2026::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
     use sedsprintf_rs_2026::serialize;
@@ -91,16 +91,16 @@ mod timesync_system_test {
         tracker.handle_announce(&pkt_a, 5_000).unwrap();
         tracker.handle_announce(&pkt_b, 5_000).unwrap();
         assert_eq!(tracker.current_source().unwrap().sender, "SRC_A");
-        assert!(!tracker.should_announce(5_000));
+        assert!(!tracker.should_announce(5_000, true));
 
         tracker.refresh(6_500);
         assert!(tracker.current_source().is_none());
-        assert!(tracker.should_announce(6_500));
+        assert!(tracker.should_announce(6_500, true));
 
         let pkt_b_late = build_timesync_announce_with_sender("SRC_B", 20, 6_500).unwrap();
         tracker.handle_announce(&pkt_b_late, 6_500).unwrap();
         assert_eq!(tracker.current_source().unwrap().sender, "SRC_B");
-        assert!(!tracker.should_announce(6_500));
+        assert!(!tracker.should_announce(6_500, true));
     }
 
     #[test]
@@ -124,7 +124,73 @@ mod timesync_system_test {
             sedsprintf_rs::timesync::TimeSyncUpdate::SourceChanged
         ));
         assert_eq!(tracker.current_source().unwrap().sender, "SRC_B");
-        assert!(!tracker.should_announce(6_050));
+        assert!(!tracker.should_announce(6_050, true));
+    }
+
+    #[test]
+    fn source_role_participates_in_priority_election_and_follows_better_remote() {
+        let mut tracker = TimeSyncTracker::new(TimeSyncConfig {
+            role: TimeSyncRole::Source,
+            priority: 20,
+            source_timeout_ms: 1_000,
+            ..Default::default()
+        });
+
+        assert!(tracker.should_announce(0, true));
+
+        let pkt_better = build_timesync_announce_with_sender("SRC_A", 10, 5_000).unwrap();
+        tracker.handle_announce(&pkt_better, 5_000).unwrap();
+
+        assert_eq!(tracker.current_source().unwrap().sender, "SRC_A");
+        assert!(!tracker.should_announce(5_000, true));
+        assert_eq!(
+            tracker.leader(5_000, true),
+            Some(sedsprintf_rs::timesync::TimeSyncLeader::Remote(
+                tracker.current_source().unwrap().clone()
+            ))
+        );
+    }
+
+    #[test]
+    fn same_priority_leader_gets_boosted_priority() {
+        let mut tracker = TimeSyncTracker::new(TimeSyncConfig {
+            role: TimeSyncRole::Source,
+            priority: 10,
+            source_timeout_ms: 1_000,
+            ..Default::default()
+        });
+
+        let remote = if DEVICE_IDENTIFIER < "ZZZ" { "ZZZ" } else { "zzzz" };
+        let pkt_same = build_timesync_announce_with_sender(remote, 10, 5_000).unwrap();
+        tracker.handle_announce(&pkt_same, 5_000).unwrap();
+
+        assert_eq!(tracker.local_announce_priority(5_000, true), Some(9));
+    }
+
+    #[test]
+    fn consumer_can_promote_when_no_remote_producer_and_has_time() {
+        let tracker = TimeSyncTracker::new(TimeSyncConfig {
+            role: TimeSyncRole::Consumer,
+            priority: 40,
+            source_timeout_ms: 1_000,
+            consumer_promotion_enabled: true,
+            ..Default::default()
+        });
+
+        assert!(tracker.should_announce(1_000, true));
+    }
+
+    #[test]
+    fn consumer_promotion_can_be_disabled() {
+        let tracker = TimeSyncTracker::new(TimeSyncConfig {
+            role: TimeSyncRole::Consumer,
+            priority: 40,
+            source_timeout_ms: 1_000,
+            consumer_promotion_enabled: false,
+            ..Default::default()
+        });
+
+        assert!(!tracker.should_announce(1_000, true));
     }
 
     #[test]
@@ -157,6 +223,39 @@ mod timesync_system_test {
         assert!(
             later >= first + 25,
             "network time should advance with monotonic clock"
+        );
+    }
+
+    #[test]
+    fn router_failover_slews_without_jumping_backwards() {
+        let now = Arc::new(AtomicU64::new(1_000));
+        let router = Router::new_with_clock(
+            RouterMode::Sink,
+            RouterConfig::default().with_timesync(TimeSyncConfig {
+                role: TimeSyncRole::Consumer,
+                priority: 50,
+                source_timeout_ms: 100,
+                max_slew_ppm: 50_000,
+                ..Default::default()
+            }),
+            shared_clock(now.clone()),
+        );
+
+        let leader_a =
+            build_timesync_announce_with_sender("SRC_A", 10, 1_700_000_000_000).unwrap();
+        let leader_b =
+            build_timesync_announce_with_sender("SRC_B", 20, 1_699_999_990_000).unwrap();
+
+        router.rx(&leader_a).unwrap();
+        router.rx(&leader_b).unwrap();
+        let before_failover = router.network_time_ms().expect("network time unavailable");
+
+        now.store(1_200, Ordering::SeqCst);
+        let after_timeout = router.network_time_ms().expect("network time unavailable");
+
+        assert!(
+            after_timeout >= before_failover,
+            "failover must not jump backwards"
         );
     }
 

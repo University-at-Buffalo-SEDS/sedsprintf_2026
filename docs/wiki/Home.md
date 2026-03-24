@@ -43,39 +43,39 @@ Detailed pages that describe internals, data structures, and formats.
 
 -
 
-src/ ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/tree/main/src) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/tree/main/src)):
+src/ ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/tree/main/src)):
 core Rust library (schema, packet types, serialization, router/relay).
 
 -
 
-sedsprintf_macros/ ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/tree/main/sedsprintf_macros) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/tree/main/sedsprintf_macros)):
+sedsprintf_macros/ ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/tree/main/sedsprintf_macros)):
 proc-macros that generate schema constants.
 
 -
 
-telemetry_config.json ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/telemetry_config.json) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/telemetry_config.json)):
+telemetry_config.json ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/telemetry_config.json)):
 schema source of truth (endpoints + data types).
 
 -
 
-build.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/build.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.rs)):
+build.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.rs)):
 generates C header and Python .pyi from the schema.
 
 -
 
-C-Headers/ ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/tree/main/C-Headers) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/tree/main/C-Headers)):
+C-Headers/ ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/tree/main/C-Headers)):
 generated C header (`sedsprintf.h`).
 
 -
 
-python-files/ ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/tree/main/python-files) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/tree/main/python-files)):
+python-files/ ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/tree/main/python-files)):
 Python package assets and generated .pyi.
 
 -
 
-c-example-code/ ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/tree/main/c-example-code) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/tree/main/c-example-code))
+c-example-code/ ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/tree/main/c-example-code))
 and
-python-example/ ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/tree/main/python-example) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/tree/main/python-example)):
+python-example/ ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/tree/main/python-example)):
 runnable examples.
 
 ## Data flow at a glance
@@ -96,6 +96,6 @@ Core ideas:
 - Telemetry packets carry a schema-defined type, endpoints, sender name, and payload.
 - Routers deliver packets to local endpoints and optionally relay them outward.
 - The schema (DataType/DataEndpoint) is generated from
-  telemetry_config.json ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/telemetry_config.json) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/telemetry_config.json)).
+  telemetry_config.json ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/telemetry_config.json)).
 
 If you want an implementation-level tour, go to [Technical-Architecture](Technical-Architecture).

@@ -5,7 +5,7 @@ Python bindings are built with pyo3 and maturin. The Python module name is `seds
 ## Build and install
 
 Option 1: use
-build.py ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/build.py) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.py)) (
+build.py ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.py)) (
 recommended in this repo)
 
 ```
@@ -57,10 +57,10 @@ If you need a custom monotonic source for tests or simulation, pass `now_ms=...`
 router uses its internal monotonic clock on `std` builds.
 
 See python-example/main.py
-([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/python-example/main.py) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/python-example/main.py))
+([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/python-example/main.py))
 for a more complete multi-process example.
 Time sync is demonstrated in python-example/timesync_example.py
-([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/python-example/timesync_example.py) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/python-example/timesync_example.py)).
+([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/python-example/timesync_example.py)).
 See [Time-Sync](Time-Sync) for the time sync packet flow and roles.
 
 With `timesync` enabled, `Router` keeps an internal network clock. `TIME_SYNC` packets are

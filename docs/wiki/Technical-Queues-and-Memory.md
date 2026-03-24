@@ -1,7 +1,7 @@
 # Queues and Memory (Technical)
 
 This page documents the bounded queue implementation in
-src/queue.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/src/queue.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/queue.rs))
+src/queue.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/queue.rs))
 and how it affects router and relay behavior.
 
 ## BoundedDeque
@@ -53,7 +53,7 @@ Relay:
 ## Configuration knobs
 
 These values are set at compile time via
-src/config.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/src/config.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/config.rs)):
+src/config.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/config.rs)):
 
 - `STARTING_QUEUE_SIZE`
 - `MAX_QUEUE_SIZE`
@@ -62,9 +62,9 @@ src/config.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprin
 - `STARTING_RECENT_RX_IDS`
 
 They can be overridden using `build.py env:KEY=VALUE` (
-build.py: [source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/build.py) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.py))
+build.py: [source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.py))
 or `.cargo/config.toml`. (
-build.py: [source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/build.py) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.py))
+build.py: [source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.py))
 
 ## Tuning guidance
 

@@ -1,7 +1,7 @@
 # Packet Details (Technical)
 
 This page documents `Packet` in
-src/telemetry_packet.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/src/telemetry_packet.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/telemetry_packet.rs))
+src/telemetry_packet.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/telemetry_packet.rs))
 and how payload validation works.
 
 ## Structure

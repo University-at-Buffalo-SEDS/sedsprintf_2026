@@ -7,7 +7,7 @@ Location:
 
 -
 
-telemetry_config.json ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/telemetry_config.json) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/telemetry_config.json)) (
+telemetry_config.json ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/telemetry_config.json)) (
 override path with `SEDSPRINTF_RS_SCHEMA_PATH`)
 
 Optional board-local IPC overlay:
@@ -22,16 +22,16 @@ Optional board-local IPC overlay:
 Generated outputs:
 
 - Rust enums and metadata: `define_telemetry_schema!` in
-  src/config.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/src/config.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/config.rs))
+  src/config.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/config.rs))
 - C header:
-  C-Headers/sedsprintf.h ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/C-Headers/sedsprintf.h) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/C-Headers/sedsprintf.h))
+  C-Headers/sedsprintf.h ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/C-Headers/sedsprintf.h))
 - Python stubs:
-  python-files/sedsprintf_rs/sedsprintf_rs.pyi ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/python-files/sedsprintf_rs/sedsprintf_rs.pyi) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/python-files/sedsprintf_rs/sedsprintf_rs.pyi))
+  python-files/sedsprintf_rs/sedsprintf_rs.pyi ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/python-files/sedsprintf_rs/sedsprintf_rs.pyi))
 
 ## Why schema order matters
 
 The order of items in
-telemetry_config.json ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/telemetry_config.json) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/telemetry_config.json))
+telemetry_config.json ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/telemetry_config.json))
 defines the enum discriminants (with built-ins inserted as noted below).
 Those discriminants are sent on the wire and used in endpoint bitmaps. Reordering entries without updating every
 deployed system will break decode compatibility.
@@ -116,13 +116,13 @@ For static `String` or `Binary` payloads, the schema uses the compile-time limit
 - `STATIC_HEX_LENGTH`
 
 These are configured in
-src/config.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/src/config.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/config.rs))
+src/config.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/config.rs))
 and used by `data_type_size`.
 
 ## Rust-side metadata
 
 The macro-generated metadata types are defined in
-src/lib.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/src/lib.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/lib.rs)):
+src/lib.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/lib.rs)):
 
 - `MessageMeta { name, element, endpoints, reliable }`
 - `MessageElement::{Static, Dynamic}`
@@ -172,9 +172,9 @@ overlay file, not because they carry a separate flag.
 Before deploying a schema change:
 
 - Ensure every node uses the same
-  telemetry_config.json ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/telemetry_config.json) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/telemetry_config.json))
+  telemetry_config.json ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/telemetry_config.json))
   order.
 - Regenerate C and Python bindings via
-  build.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/build.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.rs)).
+  build.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.rs)).
 - Verify that any static sizes have not changed unexpectedly.
 - Redeploy all nodes that exchange telemetry.

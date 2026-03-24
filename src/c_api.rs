@@ -619,6 +619,8 @@ pub extern "C" fn seds_router_configure_timesync(
         source_timeout_ms,
         announce_interval_ms,
         request_interval_ms,
+        consumer_promotion_enabled: true,
+        max_slew_ppm: 50_000,
     }));
     status_from_result_code(SedsResult::SedsOk)
 }

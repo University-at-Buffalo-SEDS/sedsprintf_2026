@@ -6,7 +6,7 @@ This page explains the built-in time sync support that ships with the `timesync`
 
 - Enable the `timesync` Cargo feature.
 - Python builds in this repo enable it by default (
-  pyproject.toml ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/pyproject.toml) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/pyproject.toml))).
+  pyproject.toml ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/pyproject.toml))).
 
 When enabled, the build adds the `TIME_SYNC` endpoint (broadcast mode `Always`) plus built-in
 time sync packet types in code.
@@ -16,6 +16,8 @@ The current model is router-owned:
 - The router keeps an internal non-monotonic network clock separate from the monotonic clock you
   use for router timing (`Router::new(...)` on `std`, or `Router::new_with_clock(...)` when you
   provide a custom clock).
+- The monotonic clock drives scheduling, request timestamps, holdover, and slew; it is not treated
+  as UTC.
 - `TIME_SYNC` traffic is consumed internally by the router. It does not dispatch to normal local
   endpoint handlers.
 - Packet timestamps prefer the internal network clock when one is available.
@@ -42,10 +44,12 @@ With the `discovery` feature enabled, discovery also adds a built-in
 
 The router handles the built-in time sync packet types internally:
 
-- `TimeSyncAnnounce` updates the router's internal network clock source state.
+- `TimeSyncAnnounce` updates per-remote-source state; the router does not collapse all remotes into
+  one shared slot.
 - `TimeSyncRequest` may cause the router to queue an internal response when it is acting as a
   source.
-- `TimeSyncResponse` updates the consumer-side estimate using the local monotonic receive time.
+- `TimeSyncResponse` updates the leader's remote sample and steers the local network clock using
+  the local monotonic receive time.
 - When discovery is enabled, outbound `TIME_SYNC` traffic prefers exact discovered source paths
   over generic `TIME_SYNC` endpoint reachability.
 - Internally generated `TimeSyncResponse` packets are returned to the requesting ingress side
@@ -61,15 +65,25 @@ Applications can read the resulting network time through:
 
 `TimeSyncTracker` maintains the current best source and exposes a small state machine:
 
-- `Consumer`: never announces; uses the best active source.
-- `Source`: always announces.
-- `Auto`: announces only when no active source is present.
+- `Consumer`: follows the elected producer. If `consumer_promotion_enabled` is set and there are no
+  active producers, a consumer that already has non-uptime-based network time may temporarily
+  promote itself to keep the network aligned.
+- `Source`: participates in election as a producer. It announces and serves only while it is the
+  elected leader; otherwise it follows the leader like a consumer.
+- `Auto`: acts like an opportunistic producer. It only enters the election when no active producer
+  is present and it has usable network time.
 
 Sources are chosen by priority (lower is better). Ties are broken by sender ID (lexicographic).
-The tracker keeps the active source set, so if the current winner becomes inactive and another
-source with the same or worse priority is still active, failover can happen immediately without
-waiting for a fresh announce. If no announce is seen within `source_timeout_ms`, a source is
-considered inactive.
+When several producers have the same configured priority, the elected leader advertises a boosted
+priority for as long as it remains leader so the tie resolves consistently without changing the
+standby producers' configured priorities. If no announce is seen within `source_timeout_ms`, a
+source is considered inactive.
+
+Failover uses holdover plus slew:
+
+- the network clock keeps running monotonically during producer loss or producer change
+- a new leader does not step the clock backward or forward immediately
+- instead, the router slews toward the new leader at the configured `max_slew_ppm` rate
 
 The internal clock also supports merging partial absolute sources:
 
@@ -95,8 +109,9 @@ discovery or flooding.
 ## Typical flow
 
 1) A source periodically sends `TimeSyncAnnounce`.
-2) A consumer sends `TimeSyncRequest` with `t1_ms`.
-3) The source replies with `TimeSyncResponse` and timestamps `t2_ms`/`t3_ms`.
+2) The elected follower sends `TimeSyncRequest` with monotonic `t1_ms`.
+3) The elected source replies with `TimeSyncResponse` and timestamps `t2_ms`/`t3_ms` in network
+   time.
 4) The consumer captures `t4_ms` and calls `compute_offset_delay(t1, t2, t3, t4)`.
 
 The returned `offset_ms` and `delay_ms` mirror the standard NTP-style round trip calculation.
@@ -108,6 +123,9 @@ itself once time sync is configured.
 Drive that runtime by calling `poll_timesync()` periodically from your main loop, then processing
 the router's normal TX/RX queues. The poll is non-blocking: it only queues an announce or request
 when the configured interval says work is due.
+
+If you want a producer to advertise real UTC, inject that absolute time through the local network
+time setters. The router's timing callback remains monotonic-only.
 
 ## Master / local clock injection
 
@@ -168,12 +186,12 @@ Example implementations:
 
 -
 
-rust-example-code/timesync_example.rs ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/rust-example-code/timesync_example.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rust-example-code/timesync_example.rs))
+rust-example-code/timesync_example.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rust-example-code/timesync_example.rs))
 -
-c-example-code/src/timesync_example.c ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/c-example-code/src/timesync_example.c) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/c-example-code/src/timesync_example.c))
+c-example-code/src/timesync_example.c ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/c-example-code/src/timesync_example.c))
 -
-python-example/timesync_example.py ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/python-example/timesync_example.py) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/python-example/timesync_example.py))
+python-example/timesync_example.py ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/python-example/timesync_example.py))
 -
-rtos-example-code/freertos_timesync.c ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/rtos-example-code/freertos_timesync.c) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rtos-example-code/freertos_timesync.c))
+rtos-example-code/freertos_timesync.c ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rtos-example-code/freertos_timesync.c))
 -
-rtos-example-code/threadx_timesync.c ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/rtos-example-code/threadx_timesync.c) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rtos-example-code/threadx_timesync.c))
+rtos-example-code/threadx_timesync.c ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rtos-example-code/threadx_timesync.c))
