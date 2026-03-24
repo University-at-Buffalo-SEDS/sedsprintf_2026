@@ -14,15 +14,15 @@
 #[cfg(feature = "timesync")]
 use crate::timesync::{NetworkTimeReading, PartialNetworkTime, TimeSyncConfig};
 use crate::{
-    DataType, MessageElement, TelemetryError, TelemetryErrorCode, TelemetryResult,
-    config::DataEndpoint,
-    do_vec_log_typed, get_needed_message_size, message_meta,
-    packet::Packet,
+    config::DataEndpoint, do_vec_log_typed, get_needed_message_size, message_meta, packet::Packet,
     router::{Clock, LeBytes, RouterSideOptions},
-    router::{EndpointHandler, Router, RouterConfig},
-    serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet},
+    router::{EndpointHandler, Router, RouterConfig}, serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet}, DataType,
+    MessageElement,
+    TelemetryError,
+    TelemetryErrorCode,
+    TelemetryResult,
 };
-use crate::{MessageDataType::NoData, get_data_type};
+use crate::{get_data_type, MessageDataType::NoData};
 use alloc::{boxed::Box, string::String, sync::Arc, vec, vec::Vec};
 use core::{ffi::c_char, ffi::c_void, mem::size_of, ptr, slice, str::from_utf8};
 
@@ -202,7 +202,7 @@ type CEndpointHandler = Option<extern "C" fn(pkt: *const SedsPacketView, user: *
 
 /// Endpoint handler callback (serialized bytes) (legacy).
 type CSerializedHandler =
-    Option<extern "C" fn(bytes: *const u8, len: usize, user: *mut c_void) -> i32>;
+Option<extern "C" fn(bytes: *const u8, len: usize, user: *mut c_void) -> i32>;
 
 /// C-facing endpoint descriptor (legacy, must match C header).
 #[repr(C)]

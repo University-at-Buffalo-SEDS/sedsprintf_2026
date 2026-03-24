@@ -35,16 +35,16 @@ use std::sync::{Arc as SArc, Mutex, OnceLock};
 #[cfg(feature = "timesync")]
 use crate::timesync::TimeSyncConfig;
 use crate::{
-    MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE, MessageElement, TelemetryError, TelemetryResult,
-    config::{DataEndpoint, DataType},
-    get_message_name, get_needed_message_size, message_meta,
-    packet::Packet,
+    config::{DataEndpoint, DataType}, get_message_name, get_needed_message_size, message_meta, packet::Packet,
     relay::{Relay, RelaySideOptions},
     router::{
         Clock, EndpointHandler, LeBytes, Router, RouterConfig, RouterMode, RouterSideOptions,
-    },
-    serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet},
-    try_enum_from_u32,
+    }, serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet}, try_enum_from_u32,
+    MessageElement,
+    TelemetryError,
+    TelemetryResult,
+    MAX_VALUE_DATA_ENDPOINT,
+    MAX_VALUE_DATA_TYPE,
 };
 
 static GLOBAL_ROUTER_SINGLETON: OnceLock<SArc<Mutex<Router>>> = OnceLock::new();
@@ -1055,6 +1055,7 @@ impl PyRouter {
         second=None,
         nanosecond=None
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn set_local_network_time(
         &self,
         year: Option<i32>,
@@ -1162,6 +1163,7 @@ impl PyRouter {
     }
 
     #[cfg(feature = "timesync")]
+    #[allow(clippy::too_many_arguments)]
     fn set_local_network_datetime_millis(
         &self,
         year: i32,
@@ -1181,6 +1183,7 @@ impl PyRouter {
     }
 
     #[cfg(feature = "timesync")]
+    #[allow(clippy::too_many_arguments)]
     fn set_local_network_datetime_nanos(
         &self,
         year: i32,
@@ -1462,6 +1465,7 @@ impl PyRelay {
 // ============================================================================
 
 #[pyfunction]
+/// Deserializes wire bytes into a `PyPacket` instance.
 pub fn deserialize_packet_py(py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let bytes: &[u8] = data.extract()?;
     let pkt = deserialize_packet(bytes).map_err(py_err_from)?;
@@ -1472,6 +1476,7 @@ pub fn deserialize_packet_py(py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResul
 }
 
 #[pyfunction]
+/// Peeks the packet envelope from wire bytes and returns a Python dictionary summary.
 pub fn peek_header_py(py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let bytes: &[u8] = data.extract()?;
     let env = peek_envelope(bytes).map_err(py_err_from)?;
@@ -1492,6 +1497,7 @@ pub fn peek_header_py(py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResult<Py<Py
 
 #[pyfunction]
 #[pyo3(signature = (ty, sender, endpoints, timestamp_ms, payload))]
+/// Builds a `PyPacket` from explicit packet fields supplied by Python.
 pub fn make_packet(
     py: Python<'_>,
     ty: u32,
@@ -1529,6 +1535,7 @@ pub fn make_packet(
 // ============================================================================
 
 #[pymodule]
+/// Initializes the `sedsprintf_rs` Python extension module.
 pub fn sedsprintf_rs(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyRouter>()?;
     m.add_class::<PyPacket>()?;

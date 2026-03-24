@@ -4,15 +4,15 @@ use crate::config::{
 };
 #[cfg(feature = "discovery")]
 use crate::discovery::{
-    self, DISCOVERY_ROUTE_TTL_MS, DiscoveryCadenceState, TopologySideRoute, TopologySnapshot,
+    self, DiscoveryCadenceState, TopologySideRoute, TopologySnapshot, DISCOVERY_ROUTE_TTL_MS,
 };
-use crate::packet::{Packet, hash_bytes_u64};
+use crate::packet::{hash_bytes_u64, Packet};
 use crate::queue::{BoundedDeque, ByteCost};
 use crate::serialize;
 use crate::{is_reliable_type, reliable_mode};
 use crate::{
     router::Clock,
-    {TelemetryError, TelemetryResult, lock::RouterMutex},
+    {lock::RouterMutex, TelemetryError, TelemetryResult},
 };
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
@@ -452,10 +452,10 @@ impl Relay {
                 }
                 if restrict_link_local
                     && st
-                        .sides
-                        .get(side)
-                        .map(|s| !s.opts.link_local_enabled)
-                        .unwrap_or(true)
+                    .sides
+                    .get(side)
+                    .map(|s| !s.opts.link_local_enabled)
+                    .unwrap_or(true)
                 {
                     continue;
                 }
@@ -649,8 +649,8 @@ impl Relay {
                     )
                     .is_empty()
                     || !self
-                        .advertised_discovery_timesync_sources_for_link_locked(&st, now_ms)
-                        .is_empty()
+                    .advertised_discovery_timesync_sources_for_link_locked(&st, now_ms)
+                    .is_empty()
             });
             if st.sides.is_empty() || !has_any {
                 return Ok(false);
@@ -853,6 +853,7 @@ impl Relay {
         self.add_side_serialized_with_options(name, tx, RelaySideOptions::default())
     }
 
+    /// Adds a serialized-output side with explicit reliability and link-local options.
     pub fn add_side_serialized_with_options<F>(
         &self,
         name: &'static str,
@@ -883,6 +884,7 @@ impl Relay {
         self.add_side_packet_with_options(name, tx, RelaySideOptions::default())
     }
 
+    /// Adds a packet-output side with explicit reliability and link-local options.
     pub fn add_side_packet_with_options<F>(
         &self,
         name: &'static str,
@@ -905,16 +907,19 @@ impl Relay {
     }
 
     #[cfg(feature = "discovery")]
+    /// Queues an immediate discovery announcement for this relay.
     pub fn announce_discovery(&self) -> TelemetryResult<()> {
         self.queue_discovery_announce()
     }
 
     #[cfg(feature = "discovery")]
+    /// Polls discovery state and queues an announce if the cadence says one is due.
     pub fn poll_discovery(&self) -> TelemetryResult<bool> {
         self.poll_discovery_announce()
     }
 
     #[cfg(feature = "discovery")]
+    /// Exports the relay's current discovered topology snapshot.
     pub fn export_topology(&self) -> TopologySnapshot {
         let now_ms = self.clock.now_ms();
         let mut st = self.state.lock();
