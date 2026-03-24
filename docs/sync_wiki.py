@@ -167,14 +167,52 @@ def clear_repo_worktree(repo_dir: Path):
         ) from e
 
 
-def copy_source(source_dir: Path, repo_dir: Path):
+def rewrite_links_for_target(
+        text: str,
+        target_host: str,
+        target_owner: str,
+        target_repo: str,
+) -> str:
+    target_host_l = target_host.lower()
+    if "gitlab" not in target_host_l:
+        return text
+
+    def _rewrite_github_url(match: re.Match[str]) -> str:
+        suffix = match.group("suffix")
+        return f"https://{target_host}/{target_owner}/{target_repo}/{suffix}"
+
+    return re.sub(
+        r"https://github\.com/[^/]+/[^/]+/(?P<suffix>(?:blob|tree)/[^)\s]+)",
+        _rewrite_github_url,
+        text,
+    )
+
+
+def copy_source(
+        source_dir: Path,
+        repo_dir: Path,
+        target_host: str,
+        target_owner: str,
+        target_repo: str,
+):
     try:
         for item in source_dir.iterdir():
             dest = repo_dir / item.name
             if item.is_dir():
                 shutil.copytree(item, dest)
             else:
-                shutil.copy2(item, dest)
+                if item.suffix.lower() in {".md", ".txt"}:
+                    dest.write_text(
+                        rewrite_links_for_target(
+                            item.read_text(encoding="utf-8"),
+                            target_host,
+                            target_owner,
+                            target_repo,
+                        ),
+                        encoding="utf-8",
+                    )
+                else:
+                    shutil.copy2(item, dest)
     except OSError as e:
         raise SystemExit(
             f"Failed to copy wiki files from {source_dir} to {repo_dir}: {e}. "
@@ -197,7 +235,8 @@ def sync_one(name: str, url: str, source_dir: Path, workdir: Path, message: str)
     repo_dir = workdir / name
     ensure_repo(url, repo_dir)
     clear_repo_worktree(repo_dir)
-    copy_source(source_dir, repo_dir)
+    host, owner, repo = parse_git_remote_url(url)
+    copy_source(source_dir, repo_dir, host, owner, repo)
 
     if has_changes(repo_dir):
         commit_and_push(repo_dir, message)

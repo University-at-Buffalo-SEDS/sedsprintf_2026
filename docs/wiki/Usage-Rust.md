@@ -65,7 +65,7 @@ monotonic source for tests, simulation, or `no_std`, use `Router::new_with_clock
 ## Reliable delivery (opt-in)
 
 If a `DataType` is marked `reliable: true` in
-telemetry_config.json ([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/telemetry_config.json) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/telemetry_config.json)),
+telemetry_config.json ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/telemetry_config.json)),
 the router can provide
 ordered delivery and retransmits on **serialized sides**. ACK frames are sent back on the
 ingress side automatically via the side's serialized TX handler.
@@ -132,7 +132,7 @@ When the `timesync` feature is enabled, the schema adds time sync packets and th
 an internal network clock separate from its monotonic timing source.
 `TIME_SYNC` packets are handled internally and do not dispatch to normal local endpoint handlers.
 See rust-example-code/timesync_example.rs
-([source](https://gitlab.rylanswebsite.com/rylan-meilutis/sedsprintf_rs/blob/main/rust-example-code/timesync_example.rs) | [mirror](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rust-example-code/timesync_example.rs))
+([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/rust-example-code/timesync_example.rs))
 for a full example.
 For protocol details and role selection, see [Time-Sync](Time-Sync).
 

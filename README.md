@@ -67,6 +67,19 @@ environments.
 
 ---
 
+## Version 3.4.2 highlights
+
+- Time sync producers now participate in leader election instead of always serving unconditionally.
+- Routers now keep per-remote-source time state, and non-winning producers follow the elected
+  leader.
+- Failover now uses monotonic holdover plus slew, so network time stays continuous while
+  converging toward the new leader.
+- Same-priority producers now resolve leadership deterministically, and consumers can optionally
+  self-promote when no producers remain but a usable network clock is still available.
+- Wiki docs now keep GitHub `source` links in-repo, and the wiki sync script rewrites them to the
+  target GitLab repo path when publishing there.
+- Full changelog: [v3.4.1...v3.4.2](https://github.com/Rylan-Meilutis/sedsprintf_rs/compare/v3.4.1...v3.4.2)
+
 ## Version 3.4.1 highlights
 
 - Discovery can now advertise reachable time source sender IDs in addition to endpoint reachability.
