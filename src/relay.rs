@@ -4,15 +4,15 @@ use crate::config::{
 };
 #[cfg(feature = "discovery")]
 use crate::discovery::{
-    self, DISCOVERY_ROUTE_TTL_MS, DiscoveryCadenceState, TopologySideRoute, TopologySnapshot,
+    self, DiscoveryCadenceState, TopologySideRoute, TopologySnapshot, DISCOVERY_ROUTE_TTL_MS,
 };
-use crate::packet::{Packet, hash_bytes_u64};
+use crate::packet::{hash_bytes_u64, Packet};
 use crate::queue::{BoundedDeque, ByteCost};
 use crate::serialize;
 use crate::{is_reliable_type, reliable_mode};
 use crate::{
     router::Clock,
-    {TelemetryError, TelemetryResult, lock::RouterMutex},
+    {lock::RouterMutex, TelemetryError, TelemetryResult},
 };
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
@@ -452,10 +452,10 @@ impl Relay {
                 }
                 if restrict_link_local
                     && st
-                        .sides
-                        .get(side)
-                        .map(|s| !s.opts.link_local_enabled)
-                        .unwrap_or(true)
+                    .sides
+                    .get(side)
+                    .map(|s| !s.opts.link_local_enabled)
+                    .unwrap_or(true)
                 {
                     continue;
                 }
@@ -649,8 +649,8 @@ impl Relay {
                     )
                     .is_empty()
                     || !self
-                        .advertised_discovery_timesync_sources_for_link_locked(&st, now_ms)
-                        .is_empty()
+                    .advertised_discovery_timesync_sources_for_link_locked(&st, now_ms)
+                    .is_empty()
             });
             if st.sides.is_empty() || !has_any {
                 return Ok(false);

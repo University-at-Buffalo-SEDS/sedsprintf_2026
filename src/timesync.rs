@@ -2,10 +2,10 @@ use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use crate::router::{Router, encode_slice_le};
+use crate::router::{encode_slice_le, Router};
 use crate::{
-    DataEndpoint, DataType, TelemetryError, TelemetryResult, config::DEVICE_IDENTIFIER,
-    message_meta, packet::Packet,
+    config::DEVICE_IDENTIFIER, message_meta, packet::Packet, DataEndpoint, DataType,
+    TelemetryError, TelemetryResult,
 };
 
 pub const TIMESYNC_ANNOUNCE_WORDS: usize = 2;
@@ -387,13 +387,15 @@ impl NetworkClock {
         let second = best_source(&sources, |src| src.time.second.is_some()).map(|(_, src)| src);
         let subsec = best_source(&sources, |src| src.time.nanosecond.is_some()).map(|(_, src)| src);
 
-        let mut merged = PartialNetworkTime::default();
-        merged.year = year.and_then(|src| src.time.year);
-        merged.month = month.and_then(|src| src.time.month);
-        merged.day = day.and_then(|src| src.time.day);
-        merged.hour = hour.and_then(|src| src.time.hour);
-        merged.minute = minute.and_then(|src| src.time.minute);
-        merged.second = second.and_then(|src| src.time.second);
+        let mut merged = PartialNetworkTime {
+            year: year.and_then(|src| src.time.year),
+            month: month.and_then(|src| src.time.month),
+            day: day.and_then(|src| src.time.day),
+            hour: hour.and_then(|src| src.time.hour),
+            minute: minute.and_then(|src| src.time.minute),
+            second: second.and_then(|src| src.time.second),
+            ..Default::default()
+        };
         if let Some(src) = subsec {
             merged.nanosecond = src.time.nanosecond;
         }

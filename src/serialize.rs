@@ -10,10 +10,10 @@
 //! the header fields used by `peek_envelope`.
 
 use crate::{
-    DataEndpoint, TelemetryError, TelemetryResult, get_message_name, is_reliable_type,
-    packet::Packet,
-    try_enum_from_u32,
-    {MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE, config::DataType},
+    get_message_name, is_reliable_type, packet::Packet, try_enum_from_u32, DataEndpoint,
+    TelemetryError,
+    TelemetryResult,
+    {config::DataType, MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE},
 };
 
 use crate::packet::hash_bytes_u64;
@@ -841,11 +841,11 @@ pub fn header_size_bytes(pkt: &Packet) -> usize {
         + uleb128_size(pkt.timestamp())
         + uleb128_size(sender_bytes.len() as u64)
         + if sender_compressed {
-            // extra varint for sender_wire_len when compressed
-            uleb128_size(sender_wire.len() as u64)
-        } else {
-            0
-        }
+        // extra varint for sender_wire_len when compressed
+        uleb128_size(sender_wire.len() as u64)
+    } else {
+        0
+    }
 }
 
 /// Compute the total wire size (header + bitmap + sender + payload) in bytes.

@@ -1,13 +1,13 @@
 #[cfg(feature = "timesync")]
 mod timesync_system_test {
-    use sedsprintf_rs::config::{DEVICE_IDENTIFIER, DataEndpoint, DataType};
+    use sedsprintf_rs::config::{DataEndpoint, DataType, DEVICE_IDENTIFIER};
     use sedsprintf_rs::packet::Packet;
     use sedsprintf_rs::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
     use sedsprintf_rs::serialize;
     use sedsprintf_rs::timesync::{
-        PartialNetworkTime, TimeSyncConfig, TimeSyncRole, TimeSyncTracker,
-        build_timesync_announce_with_sender, build_timesync_request, build_timesync_response,
-        compute_offset_delay,
+        build_timesync_announce_with_sender, build_timesync_request, build_timesync_response, compute_offset_delay,
+        PartialNetworkTime, TimeSyncConfig, TimeSyncRole,
+        TimeSyncTracker,
     };
 
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -368,7 +368,7 @@ mod timesync_system_test {
                         ts,
                         Arc::<[u8]>::from(payload.as_slice()),
                     )
-                    .expect("packet build failed");
+                        .expect("packet build failed");
 
                     let wire = serialize::serialize_packet(&pkt);
                     let decoded = serialize::deserialize_packet(&wire).expect("deserialize failed");

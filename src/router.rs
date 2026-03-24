@@ -13,7 +13,7 @@ use crate::config::{
 };
 #[cfg(feature = "discovery")]
 use crate::discovery::{
-    self, DISCOVERY_ROUTE_TTL_MS, DiscoveryCadenceState, TopologySideRoute, TopologySnapshot,
+    self, DiscoveryCadenceState, TopologySideRoute, TopologySnapshot, DISCOVERY_ROUTE_TTL_MS,
 };
 use crate::packet::hash_bytes_u64;
 use crate::queue::{BoundedDeque, ByteCost};
@@ -21,23 +21,23 @@ use crate::queue::{BoundedDeque, ByteCost};
 use crate::seds_error_msg;
 #[cfg(feature = "timesync")]
 use crate::timesync::{
-    INTERNAL_TIMESYNC_SOURCE_ID, LOCAL_TIMESYNC_DATE_SOURCE_ID, LOCAL_TIMESYNC_FULL_SOURCE_ID,
-    LOCAL_TIMESYNC_SUBSEC_SOURCE_ID, LOCAL_TIMESYNC_TOD_SOURCE_ID, NetworkClock,
+    advance_network_time, compute_network_time_sample, decode_timesync_announce,
+    decode_timesync_request, decode_timesync_response, NetworkClock,
     NetworkTimeReading, PartialNetworkTime, SlewedNetworkClock, TimeSyncConfig, TimeSyncLeader,
-    TimeSyncTracker, advance_network_time, compute_network_time_sample, decode_timesync_announce,
-    decode_timesync_request, decode_timesync_response,
+    TimeSyncTracker, INTERNAL_TIMESYNC_SOURCE_ID, LOCAL_TIMESYNC_DATE_SOURCE_ID, LOCAL_TIMESYNC_FULL_SOURCE_ID,
+    LOCAL_TIMESYNC_SUBSEC_SOURCE_ID, LOCAL_TIMESYNC_TOD_SOURCE_ID,
 };
 use crate::{
-    EndpointsBroadcastMode, MessageElement, TelemetryError, TelemetryResult,
     config::{
-        DEVICE_IDENTIFIER, DataEndpoint, DataType, MAX_HANDLER_RETRIES, RELIABLE_MAX_PENDING,
+        DataEndpoint, DataType, DEVICE_IDENTIFIER, MAX_HANDLER_RETRIES, RELIABLE_MAX_PENDING,
         RELIABLE_MAX_RETRIES, RELIABLE_RETRANSMIT_MS,
-    },
-    get_needed_message_size, impl_letype_num, is_reliable_type,
+    }, get_needed_message_size, impl_letype_num, is_reliable_type,
     lock::RouterMutex,
-    message_meta,
-    packet::Packet,
-    reliable_mode, serialize,
+    message_meta, packet::Packet, reliable_mode,
+    serialize,
+    EndpointsBroadcastMode,
+    MessageElement,
+    TelemetryError, TelemetryResult,
 };
 use alloc::string::String;
 use alloc::{
@@ -779,9 +779,9 @@ impl Router {
     fn timesync_has_usable_time_locked(st: &TimeSyncRuntime, now_mono_ns: u64) -> bool {
         st.disciplined_clock.read_unix_ms(now_mono_ns).is_some()
             || st.clock
-                .current_time(now_mono_ns)
-                .and_then(|reading| reading.unix_time_ms)
-                .is_some()
+            .current_time(now_mono_ns)
+            .and_then(|reading| reading.unix_time_ms)
+            .is_some()
     }
 
     ///Helper function for relay_send
@@ -947,10 +947,10 @@ impl Router {
                 }
                 if restrict_link_local
                     && st
-                        .sides
-                        .get(side)
-                        .map(|s| !s.opts.link_local_enabled)
-                        .unwrap_or(true)
+                    .sides
+                    .get(side)
+                    .map(|s| !s.opts.link_local_enabled)
+                    .unwrap_or(true)
                 {
                     continue;
                 }
@@ -1017,9 +1017,9 @@ impl Router {
             let st = self.timesync.lock();
             if let Some(tracker) = st.tracker.as_ref()
                 && tracker.should_serve(
-                    now_ms,
-                    Self::timesync_has_usable_time_locked(&st, self.monotonic_now_ns()),
-                )
+                now_ms,
+                Self::timesync_has_usable_time_locked(&st, self.monotonic_now_ns()),
+            )
             {
                 return vec![self.sender.to_owned()];
             }
@@ -1192,8 +1192,8 @@ impl Router {
                     )
                     .is_empty()
                     || !self
-                        .advertised_discovery_timesync_sources_for_link_locked(&st, now_ms)
-                        .is_empty()
+                    .advertised_discovery_timesync_sources_for_link_locked(&st, now_ms)
+                    .is_empty()
             });
             if st.sides.is_empty() || !has_any {
                 return Ok(false);
@@ -1832,6 +1832,7 @@ impl Router {
     }
 
     #[cfg(feature = "timesync")]
+    #[allow(clippy::too_many_arguments)]
     pub fn set_local_network_datetime_millis(
         &self,
         year: i32,
@@ -1850,11 +1851,11 @@ impl Router {
             minute: Some(minute),
             second: Some(second),
             nanosecond: Some((millisecond as u32).saturating_mul(1_000_000)),
-            ..Default::default()
         });
     }
 
     #[cfg(feature = "timesync")]
+    #[allow(clippy::too_many_arguments)]
     pub fn set_local_network_datetime_nanos(
         &self,
         year: i32,
@@ -1873,7 +1874,6 @@ impl Router {
             minute: Some(minute),
             second: Some(second),
             nanosecond: Some(nanosecond),
-            ..Default::default()
         });
     }
 
