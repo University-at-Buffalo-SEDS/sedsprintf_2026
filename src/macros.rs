@@ -206,6 +206,7 @@ macro_rules! do_vec_log_typed {
 macro_rules! impl_from_prim_slices {
     ($($fn_name:ident, $elem_ty:ty);+ $(;)?) => {
         $(
+            #[doc = concat!("Build a packet from a slice of little-endian `", stringify!($elem_ty), "` values.")]
             #[inline]
             pub fn $fn_name(
                 ty: DataType,

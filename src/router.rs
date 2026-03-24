@@ -13,7 +13,7 @@ use crate::config::{
 };
 #[cfg(feature = "discovery")]
 use crate::discovery::{
-    self, DISCOVERY_ROUTE_TTL_MS, DiscoveryCadenceState, TopologySideRoute, TopologySnapshot,
+    self, DiscoveryCadenceState, TopologySideRoute, TopologySnapshot, DISCOVERY_ROUTE_TTL_MS,
 };
 use crate::packet::hash_bytes_u64;
 use crate::queue::{BoundedDeque, ByteCost};
@@ -21,23 +21,23 @@ use crate::queue::{BoundedDeque, ByteCost};
 use crate::seds_error_msg;
 #[cfg(feature = "timesync")]
 use crate::timesync::{
-    INTERNAL_TIMESYNC_SOURCE_ID, LOCAL_TIMESYNC_DATE_SOURCE_ID, LOCAL_TIMESYNC_FULL_SOURCE_ID,
-    LOCAL_TIMESYNC_SUBSEC_SOURCE_ID, LOCAL_TIMESYNC_TOD_SOURCE_ID, NetworkClock,
+    advance_network_time, compute_network_time_sample, decode_timesync_announce,
+    decode_timesync_request, decode_timesync_response, NetworkClock,
     NetworkTimeReading, PartialNetworkTime, SlewedNetworkClock, TimeSyncConfig, TimeSyncLeader,
-    TimeSyncTracker, advance_network_time, compute_network_time_sample, decode_timesync_announce,
-    decode_timesync_request, decode_timesync_response,
+    TimeSyncTracker, INTERNAL_TIMESYNC_SOURCE_ID, LOCAL_TIMESYNC_DATE_SOURCE_ID, LOCAL_TIMESYNC_FULL_SOURCE_ID,
+    LOCAL_TIMESYNC_SUBSEC_SOURCE_ID, LOCAL_TIMESYNC_TOD_SOURCE_ID,
 };
 use crate::{
-    EndpointsBroadcastMode, MessageElement, TelemetryError, TelemetryResult,
     config::{
-        DEVICE_IDENTIFIER, DataEndpoint, DataType, MAX_HANDLER_RETRIES, RELIABLE_MAX_PENDING,
+        DataEndpoint, DataType, DEVICE_IDENTIFIER, MAX_HANDLER_RETRIES, RELIABLE_MAX_PENDING,
         RELIABLE_MAX_RETRIES, RELIABLE_RETRANSMIT_MS,
-    },
-    get_needed_message_size, impl_letype_num, is_reliable_type,
+    }, get_needed_message_size, impl_letype_num, is_reliable_type,
     lock::RouterMutex,
-    message_meta,
-    packet::Packet,
-    reliable_mode, serialize,
+    message_meta, packet::Packet, reliable_mode,
+    serialize,
+    EndpointsBroadcastMode,
+    MessageElement,
+    TelemetryError, TelemetryResult,
 };
 use alloc::string::String;
 use alloc::{
@@ -383,6 +383,7 @@ impl RouterConfig {
     }
 
     #[cfg(feature = "timesync")]
+    /// Enables and configures built-in time synchronization for this router.
     pub fn with_timesync(mut self, cfg: TimeSyncConfig) -> Self {
         self.timesync = Some(cfg);
         self
@@ -779,9 +780,9 @@ impl Router {
     fn timesync_has_usable_time_locked(st: &TimeSyncRuntime, now_mono_ns: u64) -> bool {
         st.disciplined_clock.read_unix_ms(now_mono_ns).is_some()
             || st.clock
-                .current_time(now_mono_ns)
-                .and_then(|reading| reading.unix_time_ms)
-                .is_some()
+            .current_time(now_mono_ns)
+            .and_then(|reading| reading.unix_time_ms)
+            .is_some()
     }
 
     ///Helper function for relay_send
@@ -947,10 +948,10 @@ impl Router {
                 }
                 if restrict_link_local
                     && st
-                        .sides
-                        .get(side)
-                        .map(|s| !s.opts.link_local_enabled)
-                        .unwrap_or(true)
+                    .sides
+                    .get(side)
+                    .map(|s| !s.opts.link_local_enabled)
+                    .unwrap_or(true)
                 {
                     continue;
                 }
@@ -1017,9 +1018,9 @@ impl Router {
             let st = self.timesync.lock();
             if let Some(tracker) = st.tracker.as_ref()
                 && tracker.should_serve(
-                    now_ms,
-                    Self::timesync_has_usable_time_locked(&st, self.monotonic_now_ns()),
-                )
+                now_ms,
+                Self::timesync_has_usable_time_locked(&st, self.monotonic_now_ns()),
+            )
             {
                 return vec![self.sender.to_owned()];
             }
@@ -1192,8 +1193,8 @@ impl Router {
                     )
                     .is_empty()
                     || !self
-                        .advertised_discovery_timesync_sources_for_link_locked(&st, now_ms)
-                        .is_empty()
+                    .advertised_discovery_timesync_sources_for_link_locked(&st, now_ms)
+                    .is_empty()
             });
             if st.sides.is_empty() || !has_any {
                 return Ok(false);
@@ -1620,6 +1621,7 @@ impl Router {
     }
 
     #[cfg(feature = "timesync")]
+    /// Inserts or updates a named network-time source with an optional expiration TTL.
     pub fn update_network_time_source(
         &self,
         source: &str,
@@ -1680,6 +1682,7 @@ impl Router {
     }
 
     #[cfg(feature = "timesync")]
+    /// Sets the local node's network time using any combination of date, time, and sub-second fields.
     pub fn set_local_network_time(&self, time: PartialNetworkTime) {
         let priority = self.local_network_time_priority();
         if time.is_complete_date() && time.is_complete_time() {
@@ -1739,6 +1742,7 @@ impl Router {
     }
 
     #[cfg(feature = "timesync")]
+    /// Removes all locally supplied network-time fragments from the assembled clock.
     pub fn clear_local_network_time(&self) {
         let mut st = self.timesync.lock();
         st.clock.remove_source(LOCAL_TIMESYNC_FULL_SOURCE_ID);
@@ -1748,6 +1752,7 @@ impl Router {
     }
 
     #[cfg(feature = "timesync")]
+    /// Sets only the local calendar date portion of network time.
     pub fn set_local_network_date(&self, year: i32, month: u8, day: u8) {
         self.set_local_network_time(PartialNetworkTime {
             year: Some(year),
@@ -1758,6 +1763,7 @@ impl Router {
     }
 
     #[cfg(feature = "timesync")]
+    /// Sets the local time of day to hour and minute precision.
     pub fn set_local_network_time_hm(&self, hour: u8, minute: u8) {
         self.set_local_network_time(PartialNetworkTime {
             hour: Some(hour),
@@ -1767,6 +1773,7 @@ impl Router {
     }
 
     #[cfg(feature = "timesync")]
+    /// Sets the local time of day to second precision.
     pub fn set_local_network_time_hms(&self, hour: u8, minute: u8, second: u8) {
         self.set_local_network_time(PartialNetworkTime {
             hour: Some(hour),
@@ -1777,6 +1784,7 @@ impl Router {
     }
 
     #[cfg(feature = "timesync")]
+    /// Sets the local time of day with millisecond precision.
     pub fn set_local_network_time_hms_millis(
         &self,
         hour: u8,
@@ -1794,6 +1802,7 @@ impl Router {
     }
 
     #[cfg(feature = "timesync")]
+    /// Sets the local time of day with nanosecond precision.
     pub fn set_local_network_time_hms_nanos(
         &self,
         hour: u8,
@@ -1811,6 +1820,7 @@ impl Router {
     }
 
     #[cfg(feature = "timesync")]
+    /// Sets a complete local date and time with second precision.
     pub fn set_local_network_datetime(
         &self,
         year: i32,
@@ -1832,6 +1842,8 @@ impl Router {
     }
 
     #[cfg(feature = "timesync")]
+    #[allow(clippy::too_many_arguments)]
+    /// Sets a complete local date and time with millisecond precision.
     pub fn set_local_network_datetime_millis(
         &self,
         year: i32,
@@ -1850,11 +1862,12 @@ impl Router {
             minute: Some(minute),
             second: Some(second),
             nanosecond: Some((millisecond as u32).saturating_mul(1_000_000)),
-            ..Default::default()
         });
     }
 
     #[cfg(feature = "timesync")]
+    #[allow(clippy::too_many_arguments)]
+    /// Sets a complete local date and time with nanosecond precision.
     pub fn set_local_network_datetime_nanos(
         &self,
         year: i32,
@@ -1873,17 +1886,18 @@ impl Router {
             minute: Some(minute),
             second: Some(second),
             nanosecond: Some(nanosecond),
-            ..Default::default()
         });
     }
 
     #[cfg(feature = "timesync")]
+    /// Removes a previously registered named network-time source.
     pub fn clear_network_time_source(&self, source: &str) {
         let mut st = self.timesync.lock();
         st.clock.remove_source(source);
     }
 
     #[cfg(feature = "timesync")]
+    /// Replaces the active time sync configuration and resets runtime state derived from it.
     pub fn set_timesync_config(&self, cfg: Option<TimeSyncConfig>) {
         let mut st = self.timesync.lock();
         let stale_remote_sources: Vec<String> = st.remote_sources.keys().cloned().collect();
@@ -1909,6 +1923,7 @@ impl Router {
     }
 
     #[cfg(feature = "timesync")]
+    /// Returns the best currently known network-time reading, if any.
     pub fn network_time(&self) -> Option<NetworkTimeReading> {
         let now_ms = self.monotonic_now_ms();
         let now_ns = self.monotonic_now_ns();
@@ -1924,6 +1939,7 @@ impl Router {
     }
 
     #[cfg(feature = "timesync")]
+    /// Returns the current network time as Unix milliseconds when available.
     pub fn network_time_ms(&self) -> Option<u64> {
         self.network_time().and_then(|t| t.unix_time_ms)
     }
@@ -1977,6 +1993,7 @@ impl Router {
     }
 
     #[cfg(feature = "timesync")]
+    /// Runs one time sync maintenance cycle and queues any required announce or request packets.
     pub fn poll_timesync(&self) -> TelemetryResult<bool> {
         let now_ms = self.monotonic_now_ms();
         let now_ns = self.monotonic_now_ns();
@@ -2242,6 +2259,7 @@ impl Router {
         self.add_side_serialized_with_options(name, tx, RouterSideOptions::default())
     }
 
+    /// Adds a serialized-output side with explicit reliability and link-local options.
     pub fn add_side_serialized_with_options<F>(
         &self,
         name: &'static str,
@@ -2271,6 +2289,7 @@ impl Router {
         self.add_side_packet_with_options(name, tx, RouterSideOptions::default())
     }
 
+    /// Adds a packet-output side with explicit reliability and link-local options.
     pub fn add_side_packet_with_options<F>(
         &self,
         name: &'static str,

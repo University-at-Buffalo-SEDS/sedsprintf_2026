@@ -8,8 +8,8 @@
 //!   - [`get_message_meta`]
 
 use crate::{
-    EndpointMeta, EndpointsBroadcastMode, MessageClass, MessageDataType, MessageElement,
-    MessageMeta, parse_f64, parse_strings, parse_usize,
+    parse_f64, parse_strings, parse_usize, EndpointMeta, EndpointsBroadcastMode,
+    MessageClass, MessageDataType, MessageElement, MessageMeta,
 };
 use sedsprintf_macros::{define_stack_payload, define_telemetry_schema};
 use strum_macros::EnumCount;

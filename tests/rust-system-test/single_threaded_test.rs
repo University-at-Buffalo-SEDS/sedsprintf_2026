@@ -7,9 +7,9 @@ mod single_threaded_test {
     use sedsprintf_rs_2026::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
     use sedsprintf_rs_2026::TelemetryResult;
 
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::mpsc::{self, Receiver, TryRecvError};
+    use std::sync::Arc;
 
     /// Clock that always returns 0
     fn zero_clock() -> Box<dyn Clock + Send + Sync> {
@@ -274,7 +274,7 @@ mod single_threaded_test {
                     &[DataEndpoint::SdCard, DataEndpoint::Radio],
                     (i + 40_000) as u64,
                 )
-                .unwrap();
+                    .unwrap();
                 node.router.tx(pkt2).unwrap();
             }
 

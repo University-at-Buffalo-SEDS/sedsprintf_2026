@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 
 use crate::router::encode_slice_le;
 use crate::{
-    DataEndpoint, DataType, TelemetryError, TelemetryResult, packet::Packet, try_enum_from_u32,
+    packet::Packet, try_enum_from_u32, DataEndpoint, DataType, TelemetryError, TelemetryResult,
 };
 
 pub const DISCOVERY_ROUTE_TTL_MS: u64 = 30_000;
@@ -26,11 +26,13 @@ impl Default for DiscoveryCadenceState {
 }
 
 impl DiscoveryCadenceState {
+    /// Switches discovery back to fast cadence and schedules an immediate announce.
     pub fn on_topology_change(&mut self, now_ms: u64) {
         self.current_interval_ms = DISCOVERY_FAST_INTERVAL_MS;
         self.next_announce_ms = now_ms;
     }
 
+    /// Advances the cadence after sending an announce, backing off toward the slow interval.
     pub fn on_announce_sent(&mut self, now_ms: u64) {
         self.next_announce_ms = now_ms.saturating_add(self.current_interval_ms);
         self.current_interval_ms = core::cmp::min(
@@ -39,6 +41,7 @@ impl DiscoveryCadenceState {
         );
     }
 
+    /// Returns `true` when discovery should emit another announce at `now_ms`.
     pub fn due(&self, now_ms: u64) -> bool {
         now_ms >= self.next_announce_ms
     }
@@ -63,11 +66,13 @@ pub struct TopologySnapshot {
     pub next_announce_ms: u64,
 }
 
+/// Returns `true` when the endpoint is reserved for discovery control traffic.
 #[inline]
 pub const fn is_discovery_endpoint(ep: DataEndpoint) -> bool {
     matches!(ep, DataEndpoint::Discovery)
 }
 
+/// Returns `true` when the data type is a discovery control packet type.
 #[inline]
 pub const fn is_discovery_type(ty: DataType) -> bool {
     matches!(
@@ -76,6 +81,7 @@ pub const fn is_discovery_type(ty: DataType) -> bool {
     )
 }
 
+/// Builds a discovery announce packet advertising reachable non-discovery endpoints.
 pub fn build_discovery_announce(
     sender: &'static str,
     timestamp_ms: u64,
@@ -91,6 +97,7 @@ pub fn build_discovery_announce(
     )
 }
 
+/// Decodes a discovery announce packet into its advertised endpoints.
 pub fn decode_discovery_announce(pkt: &Packet) -> TelemetryResult<Vec<DataEndpoint>> {
     if pkt.data_type() != DataType::DiscoveryAnnounce {
         return Err(TelemetryError::InvalidType);
@@ -98,6 +105,7 @@ pub fn decode_discovery_announce(pkt: &Packet) -> TelemetryResult<Vec<DataEndpoi
     decode_discovery_payload(pkt.payload())
 }
 
+/// Decodes a discovery announce payload into a sorted, deduplicated endpoint list.
 pub fn decode_discovery_payload(payload: &[u8]) -> TelemetryResult<Vec<DataEndpoint>> {
     if !payload.len().is_multiple_of(4) {
         return Err(TelemetryError::Deserialize("discovery payload width"));
@@ -118,6 +126,7 @@ pub fn decode_discovery_payload(payload: &[u8]) -> TelemetryResult<Vec<DataEndpo
     Ok(endpoints)
 }
 
+/// Builds a discovery packet advertising reachable time sync source identifiers.
 pub fn build_discovery_timesync_sources<S: AsRef<str>>(
     sender: &'static str,
     timestamp_ms: u64,
@@ -146,6 +155,7 @@ pub fn build_discovery_timesync_sources<S: AsRef<str>>(
     )
 }
 
+/// Decodes a discovery time sync source packet into source identifiers.
 pub fn decode_discovery_timesync_sources(pkt: &Packet) -> TelemetryResult<Vec<String>> {
     if pkt.data_type() != DataType::DiscoveryTimeSyncSources {
         return Err(TelemetryError::InvalidType);
@@ -153,6 +163,7 @@ pub fn decode_discovery_timesync_sources(pkt: &Packet) -> TelemetryResult<Vec<St
     decode_discovery_timesync_sources_payload(pkt.payload())
 }
 
+/// Decodes a discovery time sync source payload into a sorted, deduplicated source list.
 pub fn decode_discovery_timesync_sources_payload(payload: &[u8]) -> TelemetryResult<Vec<String>> {
     if payload.len() < 4 {
         return Err(TelemetryError::Deserialize(

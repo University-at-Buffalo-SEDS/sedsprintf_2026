@@ -368,7 +368,7 @@ mod timesync_system_test {
                         ts,
                         Arc::<[u8]>::from(payload.as_slice()),
                     )
-                    .expect("packet build failed");
+                        .expect("packet build failed");
 
                     let wire = serialize::serialize_packet(&pkt);
                     let decoded = serialize::deserialize_packet(&wire).expect("deserialize failed");

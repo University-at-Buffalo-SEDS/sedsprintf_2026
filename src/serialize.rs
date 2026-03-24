@@ -10,10 +10,10 @@
 //! the header fields used by `peek_envelope`.
 
 use crate::{
-    DataEndpoint, TelemetryError, TelemetryResult, get_message_name, is_reliable_type,
-    packet::Packet,
-    try_enum_from_u32,
-    {MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE, config::DataType},
+    get_message_name, is_reliable_type, packet::Packet, try_enum_from_u32, DataEndpoint,
+    TelemetryError,
+    TelemetryResult,
+    {config::DataType, MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE},
 };
 
 use crate::packet::hash_bytes_u64;
@@ -655,6 +655,7 @@ pub struct TelemetryFrameInfo {
 
 impl TelemetryFrameInfo {
     #[inline]
+    /// Returns `true` when the frame carries only a reliable-delivery acknowledgment.
     pub fn ack_only(&self) -> bool {
         self.reliable
             .map(|h| (h.flags & RELIABLE_FLAG_ACK_ONLY) != 0)
@@ -841,11 +842,11 @@ pub fn header_size_bytes(pkt: &Packet) -> usize {
         + uleb128_size(pkt.timestamp())
         + uleb128_size(sender_bytes.len() as u64)
         + if sender_compressed {
-            // extra varint for sender_wire_len when compressed
-            uleb128_size(sender_wire.len() as u64)
-        } else {
-            0
-        }
+        // extra varint for sender_wire_len when compressed
+        uleb128_size(sender_wire.len() as u64)
+    } else {
+        0
+    }
 }
 
 /// Compute the total wire size (header + bitmap + sender + payload) in bytes.
@@ -874,6 +875,7 @@ pub fn packet_wire_size(pkt: &Packet) -> usize {
 }
 
 #[inline]
+/// Computes the same packet ID as [`Packet::packet_id`] directly from a serialized wire frame.
 pub fn packet_id_from_wire(buf: &[u8]) -> Result<u64, TelemetryError> {
     let data = verify_crc32(buf)?;
     if data.len() < 2 {
@@ -1087,11 +1089,13 @@ mod payload_compression {
 
     // Stub when compression is disabled (never actually produces compressed payloads).
     #[cfg(not(feature = "compression"))]
+    /// Returns the original payload unchanged when compression support is disabled.
     pub fn compress_if_beneficial<'a>(payload: &'a [u8]) -> (bool, Cow<'a, [u8]>) {
         (false, Cow::Borrowed(payload))
     }
 
     #[cfg(not(feature = "compression"))]
+    /// Reports that compressed payloads cannot be decoded when compression support is disabled.
     pub fn decompress(_compressed: &[u8], _expected_len: usize) -> Result<Vec<u8>, TelemetryError> {
         Err(TelemetryError::Deserialize(
             "compressed payloads not supported (compression feature disabled)",

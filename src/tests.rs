@@ -1,8 +1,8 @@
-use crate::config::{STATIC_HEX_LENGTH, STATIC_STRING_LENGTH, get_message_meta};
+use crate::config::{get_message_meta, STATIC_HEX_LENGTH, STATIC_STRING_LENGTH};
 use crate::get_needed_message_size;
 use crate::packet::Packet;
 use crate::router::{Clock, EndpointHandler};
-use crate::{DataEndpoint, DataType, MessageDataType, TelemetryError, get_data_type, message_meta};
+use crate::{get_data_type, message_meta, DataEndpoint, DataType, MessageDataType, TelemetryError};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -42,7 +42,7 @@ mod compression_memory_tests {
             ts,
             Arc::<[u8]>::from(payload),
         )
-        .expect("packet build failed")
+            .expect("packet build failed")
     }
 
     #[test]
@@ -178,13 +178,13 @@ mod tests2 {
 
     use crate::router::RouterMode;
     use crate::tests::timeout_tests::StepClock;
-    use crate::tests::{SeenType, get_sd_card_handler};
+    use crate::tests::{get_sd_card_handler, SeenType};
     use crate::{
-        TelemetryResult,
         config::{DataEndpoint, DataType},
         packet::Packet,
         router::Router,
         serialize,
+        TelemetryResult,
     };
     use std::sync::{Arc, Mutex};
     use std::vec::Vec;
@@ -201,7 +201,7 @@ mod tests2 {
             endpoints,
             0,
         )
-        .unwrap();
+            .unwrap();
 
         pkt.validate().unwrap();
 
@@ -460,7 +460,7 @@ unsafe fn copy_telemetry_packet_raw(
         s.timestamp(),
         payload_arc,
     )
-    .map_err(|_| "packet validation failed")?;
+        .map_err(|_| "packet validation failed")?;
 
     *d = new_pkt;
     Ok(())
@@ -501,7 +501,7 @@ fn helpers_copy_telemetry_packet() {
         src.timestamp(),
         Arc::from(src.payload()), // deep copy payload
     )
-    .expect("src packet should be valid");
+        .expect("src packet should be valid");
 
     let st = unsafe { copy_telemetry_packet_raw(&mut dest as *mut _, &src as *const _) };
     assert!(st.is_ok());
@@ -530,7 +530,7 @@ mod handler_failure_tests {
     use crate::router::{EndpointHandler, RouterMode};
     use crate::router::{Router, RouterConfig};
     use crate::tests::timeout_tests::StepClock;
-    use crate::{DataType, MAX_VALUE_DATA_TYPE, TelemetryError};
+    use crate::{DataType, TelemetryError, MAX_VALUE_DATA_TYPE};
     use alloc::{sync::Arc, vec, vec::Vec};
     use core::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
@@ -595,7 +595,7 @@ mod handler_failure_tests {
             ts,
             Arc::<[u8]>::from(payload_for(ty)),
         )
-        .unwrap();
+            .unwrap();
 
         handle_errors(router.tx(pkt));
 
@@ -662,7 +662,7 @@ mod handler_failure_tests {
             ts,
             Arc::<[u8]>::from(payload_for(ty)),
         )
-        .unwrap();
+            .unwrap();
 
         handle_errors(router.tx(pkt));
 
@@ -693,10 +693,10 @@ mod timeout_tests {
 
     use crate::config::DataEndpoint;
     use crate::router::{EndpointHandler, RouterMode};
-    use crate::tests::{UnixClock, get_handler};
+    use crate::tests::{get_handler, UnixClock};
     use crate::{
-        DataType, TelemetryResult, packet::Packet, router::Clock, router::Router,
-        router::RouterConfig,
+        packet::Packet, router::Clock, router::Router, router::RouterConfig, DataType,
+        TelemetryResult,
     };
     use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     use std::sync::Arc;
@@ -710,12 +710,15 @@ mod timeout_tests {
     }
 
     impl StepClock {
+        /// Creates a boxed [`StepClock`] with the specified start time and step size.
         pub fn new_box(start: u64, step: u64) -> Box<dyn Clock + Send + Sync> {
             Box::new(StepClock::new(start, step))
         }
+        /// Creates a boxed [`StepClock`] pinned at zero for tests that need a fixed clock.
         pub fn new_default_box() -> Box<dyn Clock + Send + Sync> {
             Box::new(StepClock::new(0, 0))
         }
+        /// Creates a deterministic test clock that advances by `step` on each read.
         pub fn new(start: u64, step: u64) -> Self {
             Self {
                 t: AtomicU64::new(start),
@@ -743,7 +746,7 @@ mod timeout_tests {
             &[DataEndpoint::SdCard], // <- only local
             ts,
         )
-        .unwrap()
+            .unwrap()
     }
 
     /// Build a TX function that increments `counter` for each frame sent.
@@ -843,9 +846,9 @@ mod timeout_tests {
                     &[DataEndpoint::SdCard],
                     1 + i,
                 )
-                .unwrap(),
+                    .unwrap(),
             )
-            .unwrap();
+                .unwrap();
         }
 
         // Non-zero timeout: must do *some* work, but we no longer require
@@ -900,9 +903,9 @@ mod timeout_tests {
                     &[DataEndpoint::SdCard],
                     1 + i,
                 )
-                .unwrap(),
+                    .unwrap(),
             )
-            .unwrap();
+                .unwrap();
         }
 
         // Step is 5ms per call; timeout 10ms allows two iterations max
@@ -972,11 +975,11 @@ mod tests_extra {
     use crate::router::RouterMode;
     use crate::tests::test_payload_len_for;
     use crate::{
-        TelemetryError, TelemetryErrorCode, TelemetryResult,
-        config::DataType,
-        packet::Packet,
-        router::{Clock, EndpointHandler, Router, RouterConfig},
+        config::DataType, packet::Packet, router::{Clock, EndpointHandler, Router, RouterConfig},
         serialize,
+        TelemetryError,
+        TelemetryErrorCode,
+        TelemetryResult,
     };
     use alloc::{string::String, sync::Arc};
     use core::sync::atomic::{AtomicUsize, Ordering};
@@ -1040,7 +1043,7 @@ mod tests_extra {
             &[DataEndpoint::SdCard, DataEndpoint::Radio],
             123,
         )
-        .unwrap();
+            .unwrap();
 
         let wire = serialize::serialize_packet(&pkt);
         let hdr = serialize::header_size_bytes(&pkt);
@@ -1084,7 +1087,7 @@ mod tests_extra {
             &[DataEndpoint::SdCard, DataEndpoint::Radio],
             0,
         )
-        .unwrap();
+            .unwrap();
 
         let wire1 = serialize::serialize_packet(&pkt);
         let pkt2 = serialize::deserialize_packet(&wire1).unwrap();
@@ -1122,7 +1125,7 @@ mod tests_extra {
                 ts,
                 Arc::<[u8]>::from(payload),
             )
-            .unwrap()
+                .unwrap()
         }
 
         // Case 1: small (all varints fit in 1 byte)
@@ -1157,10 +1160,10 @@ mod tests_extra {
     #[test]
     fn endpoints_bitpack_roundtrip_many_and_extremes() {
         use crate::{
-            MAX_VALUE_DATA_ENDPOINT,
             config::{DataEndpoint, DataType},
             packet::Packet,
             serialize,
+            MAX_VALUE_DATA_ENDPOINT,
         };
 
         // Build a long endpoint list by cycling through all enum values (0..=MAX)
@@ -1185,7 +1188,7 @@ mod tests_extra {
             123456,
             Arc::<[u8]>::from(payload),
         )
-        .unwrap();
+            .unwrap();
 
         let wire = serialize::serialize_packet(&pkt);
         let back = serialize::deserialize_packet(&wire).unwrap();
@@ -1215,7 +1218,7 @@ mod tests_extra {
             ts,
             Arc::<[u8]>::from(payload),
         )
-        .unwrap();
+            .unwrap();
 
         let wire = serialize::serialize_packet(&pkt);
         let env = serialize::peek_envelope(&wire).unwrap();
@@ -1237,10 +1240,10 @@ mod tests_extra {
     #[test]
     fn corrupt_endpoint_bits_yields_bad_endpoint_error() {
         use crate::{
-            MAX_VALUE_DATA_ENDPOINT,
             config::{DataEndpoint, DataType},
             packet::Packet,
             serialize,
+            MAX_VALUE_DATA_ENDPOINT,
         };
 
         // Recompute EP_BITS the same way the module does.
@@ -1260,7 +1263,7 @@ mod tests_extra {
             &[DataEndpoint::SdCard],
             123,
         )
-        .unwrap();
+            .unwrap();
         let mut wire = serialize::serialize_packet(&pkt).to_vec();
 
         // Compute where endpoint bits start (right after header varints)
@@ -1304,7 +1307,7 @@ mod tests_extra {
             &[DataEndpoint::SdCard, DataEndpoint::Radio],
             999,
         )
-        .unwrap();
+            .unwrap();
 
         let wire = serialize::serialize_packet(&pkt);
         let hdr = serialize::header_size_bytes(&pkt);
@@ -1334,7 +1337,7 @@ mod tests_extra {
             0,
             Arc::<[u8]>::from(buf),
         )
-        .unwrap();
+            .unwrap();
 
         assert_eq!(pkt.data_as_utf8_ref(), Some("hello"));
     }
@@ -1376,14 +1379,14 @@ mod tests_extra {
             &[DataEndpoint::SdCard, DataEndpoint::Radio],
             0,
         )
-        .unwrap();
+            .unwrap();
         let pkt_rx = Packet::from_f32_slice(
             DataType::GpsData,
             &[4.0_f32, 5.0, 6.0],
             &[DataEndpoint::SdCard], // only local to avoid extra TX during receive
             0,
         )
-        .unwrap();
+            .unwrap();
 
         r.tx_queue(pkt_tx).unwrap();
         r.rx_queue(pkt_rx).unwrap();
@@ -1438,7 +1441,7 @@ mod tests_extra {
             &[DataEndpoint::SdCard],
             0,
         )
-        .unwrap();
+            .unwrap();
 
         // Sending should surface a HandlerError after all retries.
         let res = r.tx(pkt);
@@ -1547,7 +1550,7 @@ mod tests_extra {
             &[DataEndpoint::SdCard, DataEndpoint::Radio],
             7,
         )
-        .unwrap();
+            .unwrap();
 
         let res = r.tx(pkt);
         match res {
@@ -1576,13 +1579,13 @@ mod tests_more {
     use crate::router::RouterMode;
     use crate::tests::UnixClock;
     use crate::{
-        MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE, MessageDataType, MessageElement,
-        TelemetryError, TelemetryErrorCode, TelemetryResult,
-        config::{DataEndpoint, DataType},
-        get_data_type, get_needed_message_size, message_meta,
-        packet::Packet,
-        router::{Clock, EndpointHandler, Router, RouterConfig},
-        serialize,
+        config::{DataEndpoint, DataType}, get_data_type, get_needed_message_size, message_meta,
+        packet::Packet, router::{Clock, EndpointHandler, Router, RouterConfig}, serialize,
+        MessageDataType,
+        MessageElement, TelemetryError, TelemetryErrorCode,
+        TelemetryResult,
+        MAX_VALUE_DATA_ENDPOINT,
+        MAX_VALUE_DATA_TYPE,
     };
     use alloc::{sync::Arc, vec::Vec};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1644,7 +1647,7 @@ mod tests_more {
             0,
             Arc::<[u8]>::from(vec![0u8; need + 1]),
         )
-        .unwrap_err();
+            .unwrap_err();
         assert!(matches!(err, TelemetryError::SizeMismatch { .. }));
     }
 
@@ -1701,7 +1704,7 @@ mod tests_more {
             &[DataEndpoint::SdCard],
             123,
         )
-        .unwrap();
+            .unwrap();
         let wire = serialize::serialize_packet(&pkt);
 
         let called = StdArc::new(AtomicUsize::new(0));
@@ -1792,7 +1795,7 @@ mod tests_more {
             &[DataEndpoint::SdCard],
             0,
         )
-        .unwrap();
+            .unwrap();
         r.tx(pkt).unwrap();
 
         assert_eq!(tx_called.load(Ordering::SeqCst), 0);
@@ -1821,7 +1824,7 @@ mod tests_more {
             &[DataEndpoint::SdCard],
             0,
         )
-        .unwrap();
+            .unwrap();
         r.rx(&pkt).unwrap();
 
         assert_eq!(called.load(Ordering::SeqCst), 1);
@@ -1858,7 +1861,7 @@ mod tests_more {
             &[DataEndpoint::SdCard, DataEndpoint::Radio],
             1,
         )
-        .unwrap();
+            .unwrap();
         let _ = r.tx(pkt);
 
         let s = captured.lock().unwrap().clone();
@@ -2020,7 +2023,7 @@ mod tests_more {
                 &[DataEndpoint::SdCard],
                 i as u64,
             )
-            .unwrap();
+                .unwrap();
             router.rx_queue(pkt).unwrap();
         }
 
@@ -2045,14 +2048,14 @@ mod concurrency_tests {
 
     use crate::router::RouterMode;
     use crate::{
-        TelemetryResult,
         config::{DataEndpoint, DataType},
         packet::Packet,
         router::{Clock, EndpointHandler, Router, RouterConfig},
         serialize,
+        TelemetryResult,
     };
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
 
@@ -2114,7 +2117,7 @@ mod concurrency_tests {
                         &[DataEndpoint::SdCard],
                         idx,
                     )
-                    .unwrap();
+                        .unwrap();
                     r_cloned.rx_queue(pkt).unwrap();
                 }
             }));
@@ -2179,7 +2182,7 @@ mod concurrency_tests {
                         &[DataEndpoint::SdCard],
                         idx,
                     )
-                    .unwrap();
+                        .unwrap();
                     let wire = serialize::serialize_packet(&pkt);
                     r.rx_serialized_queue(&wire).unwrap();
                 }
@@ -2261,7 +2264,7 @@ mod concurrency_tests {
                         &[DataEndpoint::SdCard, DataEndpoint::Radio],
                         idx,
                     )
-                    .unwrap();
+                        .unwrap();
                     let wire = serialize::serialize_packet(&pkt);
                     r.rx_serialized_queue_from_side(&wire, side).unwrap();
                 }
@@ -2341,7 +2344,7 @@ mod concurrency_tests {
             &[DataEndpoint::SdCard],
             100,
         )
-        .unwrap();
+            .unwrap();
         router.rx_queue(first).unwrap();
 
         let (tx_done, rx_done) = mpsc::channel();
@@ -2409,7 +2412,7 @@ mod concurrency_tests {
                         &[DataEndpoint::SdCard],
                         idx,
                     )
-                    .unwrap();
+                        .unwrap();
                     let wire = serialize::serialize_packet(&pkt);
                     r_cloned
                         .rx_serialized(&wire)
@@ -2560,7 +2563,7 @@ mod concurrency_tests {
                     &[DataEndpoint::SdCard],
                     i as u64,
                 )
-                .unwrap();
+                    .unwrap();
                 r_rx.rx_queue(pkt).expect("rx_packet_to_queue failed");
             }
         });
@@ -2599,7 +2602,7 @@ mod data_conversion_types {
 
     use crate::config::{DataEndpoint, DataType};
     use crate::packet::Packet;
-    use crate::{MAX_VALUE_DATA_TYPE, MessageDataType, TelemetryError, get_data_type};
+    use crate::{get_data_type, MessageDataType, TelemetryError, MAX_VALUE_DATA_TYPE};
 
     /// data_as_f32 should round-trip values written via from_f32_slice.
     #[test]
@@ -2671,7 +2674,7 @@ mod relay_tests {
 
     use crate::relay::Relay;
     use crate::tests::timeout_tests::StepClock;
-    use crate::{TelemetryError, TelemetryResult, packet::Packet, serialize};
+    use crate::{packet::Packet, serialize, TelemetryError, TelemetryResult};
     use core::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
@@ -2687,7 +2690,7 @@ mod relay_tests {
             &[DataEndpoint::SdCard],
             v,
         )
-        .unwrap();
+            .unwrap();
         serialize::serialize_packet(&pkt)
     }
 
@@ -2942,10 +2945,10 @@ mod dedupe_tests {
     use crate::relay::Relay;
     use crate::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
     use crate::tests::timeout_tests::StepClock;
-    use crate::{TelemetryResult, packet::Packet, serialize};
+    use crate::{packet::Packet, serialize, TelemetryResult};
 
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     /// Simple clock that always returns 0.
     fn zero_clock() -> Box<dyn Clock + Send + Sync> {
@@ -2959,7 +2962,7 @@ mod dedupe_tests {
             &[DataEndpoint::SdCard],
             v,
         )
-        .unwrap();
+            .unwrap();
         serialize::serialize_packet(&pkt)
     }
 
@@ -2994,7 +2997,7 @@ mod dedupe_tests {
             &[DataEndpoint::SdCard],
             0,
         )
-        .unwrap();
+            .unwrap();
         let wire = serialize::serialize_packet(&pkt);
 
         // Feed the identical frame many times.
@@ -3032,7 +3035,7 @@ mod dedupe_tests {
             &[DataEndpoint::SdCard],
             0,
         )
-        .unwrap();
+            .unwrap();
         let wire = serialize::serialize_packet(&pkt);
 
         // First time → delivered.
@@ -3073,7 +3076,7 @@ mod dedupe_tests {
             &[DataEndpoint::SdCard],
             0,
         )
-        .unwrap();
+            .unwrap();
         let wire_a = serialize::serialize_packet(&pkt_a);
 
         // Frame B (different payload)
@@ -3083,7 +3086,7 @@ mod dedupe_tests {
             &[DataEndpoint::SdCard],
             0,
         )
-        .unwrap();
+            .unwrap();
         let wire_b = serialize::serialize_packet(&pkt_b);
 
         r.rx_serialized(&wire_a).unwrap();
@@ -3235,7 +3238,7 @@ mod relay_reliable_tests {
     use crate::relay::{Relay, RelaySideOptions};
     use crate::router::Clock;
     use crate::tests::timeout_tests::StepClock;
-    use crate::{TelemetryResult, packet::Packet, serialize};
+    use crate::{packet::Packet, serialize, TelemetryResult};
 
     use std::sync::{Arc, Mutex};
 
@@ -3284,14 +3287,14 @@ mod relay_reliable_tests {
             &[DataEndpoint::SdCard],
             0,
         )
-        .unwrap();
+            .unwrap();
         let pkt2 = Packet::from_f32_slice(
             DataType::GpsData,
             &[4.0_f32, 5.0, 6.0],
             &[DataEndpoint::SdCard],
             0,
         )
-        .unwrap();
+            .unwrap();
 
         relay.rx_from_side(0, pkt1).unwrap();
         relay.rx_from_side(0, pkt2).unwrap();
@@ -3405,14 +3408,14 @@ mod relay_reliable_tests {
             &[DataEndpoint::SdCard, DataEndpoint::Radio],
             0,
         )
-        .unwrap();
+            .unwrap();
         let pkt2 = Packet::from_f32_slice(
             DataType::GpsData,
             &[4.0_f32, 5.0, 6.0],
             &[DataEndpoint::SdCard, DataEndpoint::Radio],
             0,
         )
-        .unwrap();
+            .unwrap();
 
         relay1.rx_from_side(0, pkt1).unwrap();
         relay1.rx_from_side(0, pkt2).unwrap();
@@ -3478,14 +3481,14 @@ mod relay_reliable_tests {
             &[DataEndpoint::SdCard],
             0,
         )
-        .unwrap();
+            .unwrap();
         let pkt2 = Packet::from_f32_slice(
             DataType::GpsData,
             &[4.0_f32, 5.0, 6.0],
             &[DataEndpoint::SdCard],
             0,
         )
-        .unwrap();
+            .unwrap();
 
         let seq1 = serialize::serialize_packet_with_reliable(
             &pkt1,
@@ -3527,7 +3530,7 @@ mod reliable_tests {
         Clock, EndpointHandler, Router, RouterConfig, RouterMode, RouterSideOptions,
     };
     use crate::tests::timeout_tests::StepClock;
-    use crate::{TelemetryResult, packet::Packet, serialize};
+    use crate::{packet::Packet, serialize, TelemetryResult};
 
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
@@ -3608,7 +3611,7 @@ mod reliable_tests {
             &[DataEndpoint::SdCard],
             0,
         )
-        .unwrap();
+            .unwrap();
 
         sender.tx(pkt).unwrap();
 
@@ -3657,14 +3660,14 @@ mod reliable_tests {
             &[DataEndpoint::SdCard],
             0,
         )
-        .unwrap();
+            .unwrap();
         let pkt2 = Packet::from_f32_slice(
             DataType::GpsData,
             &[4.0_f32, 5.0, 6.0],
             &[DataEndpoint::SdCard],
             0,
         )
-        .unwrap();
+            .unwrap();
 
         let seq1 = serialize::serialize_packet_with_reliable(
             &pkt1,
@@ -3739,7 +3742,7 @@ mod reliable_tests {
             &[DataEndpoint::SdCard],
             0,
         )
-        .unwrap();
+            .unwrap();
 
         sender.tx(pkt).unwrap();
 
@@ -3758,7 +3761,7 @@ mod router_tests {
     use crate::packet::Packet;
     use crate::router::{EndpointHandler, Router, RouterMode};
     use crate::tests::timeout_tests::StepClock;
-    use crate::{TelemetryResult, serialize};
+    use crate::{serialize, TelemetryResult};
     use std::sync::{Arc, Mutex};
 
     /// In `Relay` mode, receiving a packet that includes at least one
@@ -3898,16 +3901,16 @@ mod router_tests {
     #[cfg(feature = "discovery")]
     mod discovery_tests {
         use crate::discovery::{
-            DISCOVERY_FAST_INTERVAL_MS, build_discovery_announce, build_discovery_timesync_sources,
+            build_discovery_announce, build_discovery_timesync_sources, DISCOVERY_FAST_INTERVAL_MS,
         };
         use crate::relay::Relay;
         use crate::router::{Clock, EndpointHandler, RouterConfig};
         use crate::tests::timeout_tests::StepClock;
-        use crate::{DataEndpoint, DataType, TelemetryResult};
         use crate::{
             packet::Packet,
             router::{Router, RouterMode},
         };
+        use crate::{DataEndpoint, DataType, TelemetryResult};
         use std::sync::{Arc, Mutex};
 
         fn zero_clock() -> Box<dyn Clock + Send + Sync> {
@@ -3964,7 +3967,7 @@ mod router_tests {
                 &[DataEndpoint::Radio],
                 1,
             )
-            .unwrap();
+                .unwrap();
             router.tx(msg).unwrap();
 
             let got_a = seen_a.lock().unwrap().clone();
@@ -4006,7 +4009,7 @@ mod router_tests {
                 &[DataEndpoint::Radio],
                 2,
             )
-            .unwrap();
+                .unwrap();
             relay.rx_from_side(side_c, msg).unwrap();
             relay.process_all_queues().unwrap();
 
@@ -4084,7 +4087,7 @@ mod router_tests {
                 &[DataEndpoint::Radio],
                 3,
             )
-            .unwrap();
+                .unwrap();
             router.tx(msg).unwrap();
 
             assert_eq!(seen_a.lock().unwrap().len(), 1);
@@ -4151,7 +4154,7 @@ mod router_tests {
                 7,
                 Arc::<[u8]>::from(b"hello-ipc".as_slice()),
             )
-            .unwrap();
+                .unwrap();
             router.tx(pkt).unwrap();
 
             assert!(seen_net.lock().unwrap().is_empty());
@@ -4202,7 +4205,7 @@ mod router_tests {
                 8,
                 Arc::<[u8]>::from(b"stay-local".as_slice()),
             )
-            .unwrap();
+                .unwrap();
             router.tx(pkt).unwrap();
 
             assert!(seen_net.lock().unwrap().is_empty());
@@ -4257,7 +4260,7 @@ mod router_tests {
                 9,
                 Arc::<[u8]>::from(b"relay-local".as_slice()),
             )
-            .unwrap();
+                .unwrap();
             relay.rx_from_side(side_src, pkt).unwrap();
             relay.process_all_queues().unwrap();
 

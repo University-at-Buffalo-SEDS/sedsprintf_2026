@@ -6,13 +6,13 @@
 //! - supports pretty printing (header + decoded values) for debugging/logging,
 //! - uses [`SmallPayload`] internally to keep small messages on the stack.
 
-use crate::config::{DEVICE_IDENTIFIER, STRING_PRECISION, StandardSmallPayload};
+use crate::config::{StandardSmallPayload, DEVICE_IDENTIFIER, STRING_PRECISION};
 use crate::queue::ByteCost;
 use crate::{
-    MessageClass, MessageDataType, MessageElement, TelemetryError, TelemetryResult,
-    config::{DataEndpoint, DataType},
-    data_type_size, get_data_type, get_info_type, get_message_name, message_meta,
-    router::LeBytes,
+    config::{DataEndpoint, DataType}, data_type_size, get_data_type, get_info_type, get_message_name,
+    message_meta,
+    router::LeBytes, MessageClass, MessageDataType, MessageElement, TelemetryError,
+    TelemetryResult,
 };
 use crate::{impl_data_as_prim, impl_from_prim_slices, impl_ledecode_auto};
 use alloc::{string::String, string::ToString, sync::Arc, vec, vec::Vec};
@@ -762,6 +762,7 @@ impl Packet {
         from_f64_slice,  f64;
     }
 
+    /// Builds a packet with an empty payload for types whose schema allows zero bytes.
     #[inline]
     pub fn from_no_data(
         ty: DataType,

@@ -753,8 +753,8 @@ def main(argv: list[str]) -> None:
                 (repo_root / "telemetry_config.test.json").resolve()
             )
         if (
-            "SEDSPRINTF_RS_IPC_SCHEMA_PATH" not in env_overrides
-            and "SEDSPRINTF_RS_IPC_SCHEMA_PATH" not in env
+                "SEDSPRINTF_RS_IPC_SCHEMA_PATH" not in env_overrides
+                and "SEDSPRINTF_RS_IPC_SCHEMA_PATH" not in env
         ):
             test_ipc_schema = (repo_root / "telemetry_config.ipc.test.json").resolve()
             if test_ipc_schema.exists():

@@ -73,12 +73,12 @@ ingress side automatically via the side's serialized TX handler.
 ```rust
 let router = Router::new(RouterMode::Sink, cfg);
 router.add_side_serialized_with_options(
-    "RADIO",
-    tx,
-    RouterSideOptions {
-        reliable_enabled: true,
-        link_local_enabled: false,
-    },
+"RADIO",
+tx,
+RouterSideOptions {
+reliable_enabled: true,
+link_local_enabled: false,
+},
 );
 ```
 
@@ -86,12 +86,12 @@ For a software-bus / IPC side that should carry link-local-only endpoints:
 
 ```rust
 router.add_side_serialized_with_options(
-    "IPC",
-    tx,
-    RouterSideOptions {
-        reliable_enabled: false,
-        link_local_enabled: true,
-    },
+"IPC",
+tx,
+RouterSideOptions {
+reliable_enabled: false,
+link_local_enabled: true,
+},
 );
 ```
 
@@ -141,18 +141,18 @@ use sedsprintf_rs::router::{Router, RouterConfig, RouterMode};
 use sedsprintf_rs::timesync::{PartialNetworkTime, TimeSyncConfig, TimeSyncRole};
 
 let router = Router::new(
-    RouterMode::Sink,
-    RouterConfig::default().with_timesync(TimeSyncConfig {
-        role: TimeSyncRole::Source,
-        ..Default::default()
-    }),
+RouterMode::Sink,
+RouterConfig::default ().with_timesync(TimeSyncConfig {
+role: TimeSyncRole::Source,
+..Default::default ()
+}),
 );
 
 router.set_local_network_datetime_millis(2026, 3, 21, 12, 34, 56, 250);
 router.set_local_network_time(PartialNetworkTime {
-    second: Some(57),
-    nanosecond: Some(125_000_000),
-    ..Default::default()
+second: Some(57),
+nanosecond: Some(125_000_000),
+..Default::default ()
 });
 
 let now = router.network_time_ms();
