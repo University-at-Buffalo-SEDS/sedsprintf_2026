@@ -158,7 +158,7 @@ by creating shims that expose pvPortMalloc and vPortFree.
 
 Options:
   release                 Build in release mode.
-  test                    Run cargo tests (also validates python, plus embedded when cross C toolchain exists).
+  test                    Run cargo tests, a short Criterion benchmark smoke pass, and also validate python plus embedded when cross C toolchain exists.
   embedded                Build for the embedded target (enables embedded feature).
   python                  Build with Python bindings (enables python feature).
   timesync                Build with time sync helpers (enables timesync feature).
@@ -187,6 +187,28 @@ Examples:
 - CMake
 - A C++ compiler
 - A C compiler
+
+## Performance benchmarking
+
+Criterion benchmarks are available through Cargo benches. The current benchmark targets exercise packet construction,
+serialization, header peeking, deserialization, and router/relay flows that mirror the Rust system-test path under the
+default host feature set.
+
+Run:
+
+```bash
+cargo bench --bench packet_paths
+cargo bench --bench router_system_paths
+```
+
+If you want profiler-friendly output while iterating locally:
+
+```bash
+cargo bench --bench packet_paths -- --profile-time=5
+```
+
+`./build.py test` now includes a short Criterion smoke pass for both benchmark targets in addition to the existing test
+and build validation steps. That smoke pass uses Cargo `--profile release`.
 
 ## Usage
 

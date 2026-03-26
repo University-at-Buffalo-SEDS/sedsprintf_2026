@@ -27,7 +27,8 @@ def print_help(error: str | None = None) -> None:
 
 Options (can be combined where it makes sense):
   release                 Build in release mode.
-  test                    Run `cargo test` (and also validate python + embedded build if cross C toolchain exists).
+  test                    Run `cargo test`, a short Criterion benchmark smoke pass, and also validate python + 
+  embedded build if cross C toolchain exists.
   embedded                Build for the embedded target (enables `embedded` feature).
   python                  Build with Python bindings (enables `python` feature).
   timesync                Build with time sync helpers (enables `timesync` feature).
@@ -201,6 +202,9 @@ def output_hint_for_cmd(
     if cmd[:2] == ["cargo", "test"]:
         # cargo test builds test artifacts (and deps) under target/...
         return f"Build artifacts: {repo_root / 'target'}"
+
+    if cmd[:2] == ["cargo", "bench"]:
+        return f"Bench artifacts/results: {repo_root / 'target' / 'criterion'}"
 
     if cmd[:2] == ["cargo", "build"]:
         # Determine target dir
@@ -649,6 +653,29 @@ def _apply_env_overrides(env: dict[str, str], overrides: dict[str, str]) -> None
         print(f"info: env override: {k}={v}")
 
 
+def cargo_bench_smoke_cmd() -> list[str]:
+    cmd = [
+        "cargo",
+        "bench",
+        "--profile",
+        "release",
+        "--bench",
+        "packet_paths",
+        "--bench",
+        "router_system_paths",
+    ]
+    cmd.extend([
+        "--",
+        "--sample-size",
+        "10",
+        "--warm-up-time",
+        "0.1",
+        "--measurement-time",
+        "0.1",
+    ])
+    return cmd
+
+
 def main(argv: list[str]) -> None:
     repo_root = Path(__file__).parent.resolve()
     os.chdir(repo_root)
@@ -777,7 +804,7 @@ def main(argv: list[str]) -> None:
                 "(set SEDSPRINTF_RS_INSTALL_C_TOOLCHAIN_CMD to override)."
             )
             can_check_embedded = try_install_embedded_c_toolchain(embedded_target, env)
-        total_steps = 3 if can_check_embedded else 2
+        total_steps = 4 if can_check_embedded else 3
 
         run_cmd(
             ["cargo", "test", "--features", "timesync"],
@@ -789,10 +816,19 @@ def main(argv: list[str]) -> None:
         _success("Tests passed.")
 
         run_cmd(
+            cargo_bench_smoke_cmd(),
+            env=env,
+            repo_root=repo_root,
+            title=f"2/{total_steps} cargo bench (smoke)",
+            release_build=True,
+        )
+        _success("Benchmark smoke pass finished.")
+
+        run_cmd(
             ["cargo", "build", "--features", f"python{feature_suffix}", *build_mode],
             env=env,
             repo_root=repo_root,
-            title=f"2/{total_steps} cargo build (python feature)",
+            title=f"3/{total_steps} cargo build (python feature)",
             release_build=release_build,
         )
         _success(f"Python-feature build finished. Output is under: {repo_root / 'target'}")
@@ -833,7 +869,7 @@ def main(argv: list[str]) -> None:
                 ],
                 env=env,
                 repo_root=repo_root,
-                title=f"{total_steps}/{total_steps} cargo build (embedded feature)",
+                title=f"4/{total_steps} cargo build (embedded feature)",
                 target=embedded_target,
                 release_build=release_build,
                 embedded_profile=uses_custom_profile,
