@@ -76,6 +76,8 @@ environments.
   converging toward the new leader.
 - Same-priority producers now resolve leadership deterministically, and consumers can optionally
   self-promote when no producers remain but a usable network clock is still available.
+- C callers can now force a discovery announce or poll for due discovery traffic on both routers
+  and relays through the public ABI.
 - Wiki docs now keep GitHub `source` links in-repo, and the wiki sync script rewrites them to the
   target GitLab repo path when publishing there.
 - Full changelog: [v3.4.1...v3.4.2](https://github.com/Rylan-Meilutis/sedsprintf_rs/compare/v3.4.1...v3.4.2)
