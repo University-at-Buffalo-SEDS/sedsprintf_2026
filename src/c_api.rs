@@ -2466,6 +2466,7 @@ pub extern "C" fn seds_owned_header_view(
 
 #[cfg(all(test, feature = "discovery"))]
 mod tests {
+    use super::*;
     use crate::discovery::{build_discovery_announce, DISCOVERY_FAST_INTERVAL_MS};
     use crate::router::RouterMode;
     use alloc::sync::Arc;
