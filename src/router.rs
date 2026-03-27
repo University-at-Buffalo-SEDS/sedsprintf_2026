@@ -779,7 +779,8 @@ impl Router {
     #[cfg(feature = "timesync")]
     fn timesync_has_usable_time_locked(st: &TimeSyncRuntime, now_mono_ns: u64) -> bool {
         st.disciplined_clock.read_unix_ms(now_mono_ns).is_some()
-            || st.clock
+            || st
+            .clock
             .current_time(now_mono_ns)
             .and_then(|reading| reading.unix_time_ms)
             .is_some()
@@ -1613,7 +1614,10 @@ impl Router {
             None
         };
         if let Some(TimeSyncLeader::Remote(remote)) = leader {
-            let target_ms = st.remote_sources.get(&remote.sender).map(|src| src.sample_unix_ms);
+            let target_ms = st
+                .remote_sources
+                .get(&remote.sender)
+                .map(|src| src.sample_unix_ms);
             if let Some(target_ms) = target_ms {
                 st.disciplined_clock.steer_unix_ms(now_mono_ns, target_ms);
             }
@@ -2023,13 +2027,18 @@ impl Router {
             };
 
             if let Some(TimeSyncLeader::Remote(remote)) = leader.as_ref() {
-                let target_ms = st.remote_sources.get(&remote.sender).map(|src| src.sample_unix_ms);
+                let target_ms = st
+                    .remote_sources
+                    .get(&remote.sender)
+                    .map(|src| src.sample_unix_ms);
                 if let Some(target_ms) = target_ms {
                     st.disciplined_clock.steer_unix_ms(now_ns, target_ms);
                 }
             }
 
-            if let Some(priority) = announce_prio && now_ms >= st.next_announce_mono_ms {
+            if let Some(priority) = announce_prio
+                && now_ms >= st.next_announce_mono_ms
+            {
                 announce_priority = Some(priority);
                 st.next_announce_mono_ms = now_ms.saturating_add(cfg.announce_interval_ms);
             }
@@ -2136,7 +2145,11 @@ impl Router {
                         let network_now = st
                             .disciplined_clock
                             .read_unix_ms(now_mono_ns)
-                            .or_else(|| st.clock.current_time(now_mono_ns).and_then(|t| t.unix_time_ms))
+                            .or_else(|| {
+                                st.clock
+                                    .current_time(now_mono_ns)
+                                    .and_then(|t| t.unix_time_ms)
+                            })
                             .unwrap_or(now_mono_ms);
                         let t2 = network_now;
                         let t3 = network_now;

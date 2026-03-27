@@ -388,8 +388,8 @@ impl SlewedNetworkClock {
 
         self.anchor_mono_ns = now_mono_ns;
         self.anchor_unix_ns = current_unix_ns;
-        self.pending_adjust_ns = remaining_adjust_ns
-            .saturating_add(target_unix_ns.saturating_sub(current_unix_ns));
+        self.pending_adjust_ns =
+            remaining_adjust_ns.saturating_add(target_unix_ns.saturating_sub(current_unix_ns));
         self.initialized = true;
     }
 }
@@ -685,7 +685,8 @@ impl TimeSyncTracker {
 
     /// Returns `true` when the local node should currently emit announce packets.
     pub fn should_announce(&self, now_ms: u64, has_usable_time: bool) -> bool {
-        self.local_announce_priority(now_ms, has_usable_time).is_some()
+        self.local_announce_priority(now_ms, has_usable_time)
+            .is_some()
     }
 
     /// Returns `true` when the local node should currently answer incoming requests.
@@ -726,7 +727,8 @@ impl TimeSyncTracker {
     }
 
     fn best_active_source_id(&self, now_ms: u64) -> Option<String> {
-        self.best_active_source(now_ms).map(|src| src.sender.clone())
+        self.best_active_source(now_ms)
+            .map(|src| src.sender.clone())
     }
 
     fn reselect_source(&mut self, now_ms: u64) -> TimeSyncUpdate {

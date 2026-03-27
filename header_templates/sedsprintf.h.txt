@@ -178,6 +178,27 @@ SedsResult seds_router_configure_timesync(
 SedsResult seds_router_poll_timesync(SedsRouter * r, bool * out_did_queue);
 
 /**
+ * @brief Queue a built-in discovery advertisement immediately.
+ *
+ * This advertises the router's locally reachable endpoints and, when time sync is
+ * enabled, any local time source sender IDs.
+ *
+ * Requires a build with the `discovery` feature.
+ */
+SedsResult seds_router_announce_discovery(SedsRouter * r);
+
+/**
+ * @brief Poll the router's internal discovery runtime and queue any due discovery traffic.
+ *
+ * This is the non-blocking hook intended for the application's main loop. Call it periodically,
+ * then run the normal queue processing functions. If `out_did_queue` is non-NULL, it is set to
+ * `true` when a discovery packet was queued during this call.
+ *
+ * Requires a build with the `discovery` feature.
+ */
+SedsResult seds_router_poll_discovery(SedsRouter * r, bool * out_did_queue);
+
+/**
  * @brief Set the router's local/master network time source with partial fields.
  *
  * Requires a build with the `timesync` feature. Presence flags indicate which
@@ -537,6 +558,23 @@ SedsRelay * seds_relay_new(SedsNowMsFn now_ms_cb, void * user);
  * @brief Destroy a relay previously returned by seds_relay_new().
  */
 void seds_relay_free(SedsRelay * r);
+
+/**
+ * @brief Queue a built-in discovery advertisement immediately for this relay.
+ *
+ * Requires a build with the `discovery` feature.
+ */
+SedsResult seds_relay_announce_discovery(SedsRelay * r);
+
+/**
+ * @brief Poll the relay's internal discovery runtime and queue any due discovery traffic.
+ *
+ * If `out_did_queue` is non-NULL, it is set to `true` when a discovery packet was
+ * queued during this call.
+ *
+ * Requires a build with the `discovery` feature.
+ */
+SedsResult seds_relay_poll_discovery(SedsRelay * r, bool * out_did_queue);
 
 /**
  * @brief Add a new side/network to the relay.
