@@ -90,6 +90,8 @@ typedef struct SedsLocalEndpointDesc
     void * user;
 } SedsLocalEndpointDesc;
 
+/* {{AUTOGEN:ABI}} */
+
 /* ==============================
    String / error formatting
    ============================== */
