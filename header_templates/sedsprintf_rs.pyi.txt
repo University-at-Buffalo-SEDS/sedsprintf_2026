@@ -269,7 +269,7 @@ class Relay:
         Returns
         -------
         SideId
-            Integer side id to use with ``rx_serialized_from_side`` and ``rx_from_side``.
+            Integer side id to use with ``rx_serialized_from_side`` and ``rx_packet_from_side``.
         """
 
     def rx_packet_from_side(self, side_id: SideId, packet: Packet) -> None: ...
@@ -279,7 +279,7 @@ class Relay:
         Parameters
         ----------
         side_id:
-            Side id previously returned by :meth:`add_side` or :meth:`add_side_packet`.
+            Side id previously returned by :meth:`add_side_serialized` or :meth:`add_side_packet`.
         packet:
             A :class:`Packet` instance.
         """
@@ -290,7 +290,7 @@ class Relay:
         Parameters
         ----------
         side_id:
-            Side id previously returned by :meth:`add_side`.
+            Side id previously returned by :meth:`add_side_serialized`.
         data:
             Serialized packet bytes.
         """

@@ -330,6 +330,28 @@ int32_t seds_dtype_expected_size(SedsDataType ty);
    ============================== */
 
 /**
+ * @brief Byte logger with optional timestamp + queue flag.
+ *
+ * For fixed-size schemas, the payload is padded or truncated to the schema size.
+ */
+SedsResult seds_router_log_bytes_ex(SedsRouter * r,
+                                    SedsDataType ty,
+                                    const uint8_t * data,
+                                    size_t len,
+                                    const uint64_t * timestamp_ms_opt, /* NULL => now */
+                                    int queue /* 0 = immediate, non-zero = queue */);
+
+/**
+ * @brief f32 logger with optional timestamp + queue flag.
+ */
+SedsResult seds_router_log_f32_ex(SedsRouter * r,
+                                  SedsDataType ty,
+                                  const float * vals,
+                                  size_t n_vals,
+                                  const uint64_t * timestamp_ms_opt, /* NULL => now */
+                                  int queue /* 0 = immediate, non-zero = queue */);
+
+/**
  * @brief Unified typed logger with optional timestamp + queue flag.
  *
  * If @p timestamp_ms_opt is NULL, the router’s monotonic clock will be used.
@@ -367,6 +389,28 @@ SedsResult seds_router_log_string_ex(SedsRouter * r,
 /* ==============================
    Legacy convenience (still supported)
    ============================== */
+
+/** @brief Legacy byte logger without timestamp or queue flag. */
+SedsResult seds_router_log_bytes(SedsRouter * r, SedsDataType ty, const uint8_t * data, size_t len);
+
+/** @brief Legacy f32 logger without timestamp or queue flag. */
+SedsResult seds_router_log_f32(SedsRouter * r, SedsDataType ty, const float * vals, size_t n_vals);
+
+/** @brief Legacy typed logger without timestamp or queue flag. */
+SedsResult seds_router_log_typed(SedsRouter * r,
+                                 SedsDataType ty,
+                                 const void * data,
+                                 size_t count,
+                                 size_t elem_size,
+                                 SedsElemKind elem_kind);
+
+/** @brief Legacy typed logger that enqueues instead of sending immediately. */
+SedsResult seds_router_log_queue_typed(SedsRouter * r,
+                                       SedsDataType ty,
+                                       const void * data,
+                                       size_t count,
+                                       size_t elem_size,
+                                       SedsElemKind elem_kind);
 
 /** @brief Receive serialized packet bytes immediately (non-queued). */
 SedsResult seds_router_receive_serialized(SedsRouter * r, const uint8_t * bytes, size_t len);
