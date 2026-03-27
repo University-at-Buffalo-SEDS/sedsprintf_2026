@@ -103,6 +103,11 @@ Call `seds_router_poll_timesync(...)` from your main loop to let the router queu
 announce/request traffic, then process the normal router queues. The call is non-blocking and only
 queues work when the configured interval is due.
 
+With `discovery` enabled, call `seds_router_poll_discovery(...)` from that same main loop to let
+the router queue any due discovery advertisements, or call `seds_router_announce_discovery(...)`
+to force an immediate announce. Relays expose the same pattern through
+`seds_relay_poll_discovery(...)` and `seds_relay_announce_discovery(...)`.
+
 ## Sending and receiving
 
 Common calls:

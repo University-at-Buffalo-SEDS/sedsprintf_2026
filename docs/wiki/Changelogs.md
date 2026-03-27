@@ -16,6 +16,8 @@
     - Consumers with a non-uptime-based clock can optionally self-promote when no producers remain,
       allowing the network to stay aligned during complete producer loss.
 - Docs and tooling updates:
+    - Added C ABI discovery maintenance hooks so C callers can force a discovery announce or poll
+      for due discovery traffic on both routers and relays.
     - Added Rust system-test coverage for election, priority ties, consumer promotion, and failover
       monotonicity.
     - Wiki source links now default to GitHub in-repo, while the wiki sync script rewrites them to

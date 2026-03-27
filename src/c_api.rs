@@ -643,6 +643,34 @@ pub extern "C" fn seds_router_poll_timesync(r: *mut SedsRouter, out_did_queue: *
     }
 }
 
+#[cfg(feature = "discovery")]
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_announce_discovery(r: *mut SedsRouter) -> i32 {
+    if r.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let router = unsafe { &(*r).inner };
+    ok_or_status(router.announce_discovery())
+}
+
+#[cfg(feature = "discovery")]
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_poll_discovery(r: *mut SedsRouter, out_did_queue: *mut bool) -> i32 {
+    if r.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let router = unsafe { &(*r).inner };
+    match router.poll_discovery() {
+        Ok(did_queue) => {
+            if !out_did_queue.is_null() {
+                unsafe { *out_did_queue = did_queue };
+            }
+            status_from_result_code(SedsResult::SedsOk)
+        }
+        Err(e) => status_from_err(e),
+    }
+}
+
 #[cfg(feature = "timesync")]
 #[unsafe(no_mangle)]
 pub extern "C" fn seds_router_set_local_network_time(
@@ -998,6 +1026,34 @@ pub extern "C" fn seds_relay_free(r: *mut SedsRelay) {
     }
     unsafe {
         drop(Box::from_raw(r));
+    }
+}
+
+#[cfg(feature = "discovery")]
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_relay_announce_discovery(r: *mut SedsRelay) -> i32 {
+    if r.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let relay = unsafe { &(*r).inner };
+    ok_or_status(relay.announce_discovery())
+}
+
+#[cfg(feature = "discovery")]
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_relay_poll_discovery(r: *mut SedsRelay, out_did_queue: *mut bool) -> i32 {
+    if r.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let relay = unsafe { &(*r).inner };
+    match relay.poll_discovery() {
+        Ok(did_queue) => {
+            if !out_did_queue.is_null() {
+                unsafe { *out_did_queue = did_queue };
+            }
+            status_from_result_code(SedsResult::SedsOk)
+        }
+        Err(e) => status_from_err(e),
     }
 }
 
@@ -2406,4 +2462,134 @@ pub extern "C" fn seds_owned_header_view(
         *out_view = view;
     }
     status_from_result_code(SedsResult::SedsOk)
+}
+
+#[cfg(all(test, feature = "discovery"))]
+mod tests {
+    use crate::discovery::{build_discovery_announce, DISCOVERY_FAST_INTERVAL_MS};
+    use crate::router::RouterMode;
+    use alloc::sync::Arc;
+    use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+
+    struct TestClock {
+        now_ms: Arc<AtomicU64>,
+    }
+
+    impl Clock for TestClock {
+        fn now_ms(&self) -> u64 {
+            self.now_ms.load(Ordering::SeqCst)
+        }
+    }
+
+    extern "C" fn pkt_counter_cb(pkt: *const SedsPacketView, user: *mut c_void) -> i32 {
+        if pkt.is_null() || user.is_null() {
+            return status_from_result_code(SedsResult::SedsErr);
+        }
+        let hits = unsafe { &*(user as *const AtomicUsize) };
+        hits.fetch_add(1, Ordering::SeqCst);
+        status_from_result_code(SedsResult::SedsOk)
+    }
+
+    #[test]
+    fn router_c_abi_can_announce_and_poll_discovery() {
+        let now_ms = Arc::new(AtomicU64::new(0));
+        let hits = AtomicUsize::new(0);
+        let side_name = b"NET";
+        let mut did_queue = false;
+
+        let router = Router::new_with_clock(
+            RouterMode::Sink,
+            RouterConfig::new(vec![EndpointHandler::new_packet_handler(
+                DataEndpoint::Radio,
+                |_pkt| Ok(()),
+            )]),
+            Box::new(TestClock {
+                now_ms: now_ms.clone(),
+            }),
+        );
+        let router = Box::into_raw(Box::new(SedsRouter {
+            inner: Arc::from(router),
+        }));
+
+        let side_id = seds_router_add_side_packet(
+            router,
+            side_name.as_ptr() as *const c_char,
+            side_name.len(),
+            Some(pkt_counter_cb),
+            (&hits as *const AtomicUsize).cast_mut().cast(),
+            false,
+        );
+        assert!(side_id >= 0);
+
+        assert_eq!(seds_router_announce_discovery(router), 0);
+        assert_eq!(seds_router_process_tx_queue(router), 0);
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+
+        now_ms.store(DISCOVERY_FAST_INTERVAL_MS, Ordering::SeqCst);
+        assert_eq!(seds_router_poll_discovery(router, &mut did_queue), 0);
+        assert!(did_queue);
+        assert_eq!(seds_router_process_tx_queue(router), 0);
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
+
+        seds_router_free(router);
+    }
+
+    #[test]
+    fn relay_c_abi_can_announce_and_poll_discovery() {
+        let now_ms = Arc::new(AtomicU64::new(0));
+        let hits = AtomicUsize::new(0);
+        let side_name_a = b"A";
+        let side_name_b = b"B";
+        let mut did_queue = false;
+
+        let relay = Relay::new(Box::new(TestClock {
+            now_ms: now_ms.clone(),
+        }));
+        let relay = Box::into_raw(Box::new(SedsRelay {
+            inner: Arc::new(relay),
+        }));
+
+        let side_a = seds_relay_add_side_packet(
+            relay,
+            side_name_a.as_ptr() as *const c_char,
+            side_name_a.len(),
+            Some(pkt_counter_cb),
+            (&hits as *const AtomicUsize).cast_mut().cast(),
+            false,
+        );
+        let side_b = seds_relay_add_side_packet(
+            relay,
+            side_name_b.as_ptr() as *const c_char,
+            side_name_b.len(),
+            Some(pkt_counter_cb),
+            (&hits as *const AtomicUsize).cast_mut().cast(),
+            false,
+        );
+        assert!(side_a >= 0);
+        assert!(side_b >= 0);
+
+        let discovery_pkt =
+            build_discovery_announce("REMOTE_A", 0, &[DataEndpoint::Radio]).unwrap();
+        unsafe {
+            (*relay)
+                .inner
+                .rx_from_side(side_a as RelaySideId, discovery_pkt)
+                .unwrap();
+        }
+        assert_eq!(seds_relay_process_rx_queue(relay), 0);
+        assert_eq!(seds_relay_process_tx_queue(relay), 0);
+        let hits_after_learning = hits.load(Ordering::SeqCst);
+
+        assert_eq!(seds_relay_announce_discovery(relay), 0);
+        assert_eq!(seds_relay_process_tx_queue(relay), 0);
+        assert_eq!(hits.load(Ordering::SeqCst), hits_after_learning + 2);
+
+        now_ms.store(DISCOVERY_FAST_INTERVAL_MS, Ordering::SeqCst);
+        assert_eq!(seds_relay_poll_discovery(relay, &mut did_queue), 0);
+        assert!(did_queue);
+        assert_eq!(seds_relay_process_tx_queue(relay), 0);
+        assert_eq!(hits.load(Ordering::SeqCst), hits_after_learning + 4);
+
+        seds_relay_free(relay);
+    }
 }

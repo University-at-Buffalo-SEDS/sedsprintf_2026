@@ -61,6 +61,14 @@ name = "compression_memory_pool_test"
 path = "tests/rust-system-test/compression_memory_pool_test.rs"
 required-features = ["std", "compression", "timesync"]
 
+[[bench]]
+name = "packet_paths"
+harness = false
+
+[[bench]]
+name = "router_system_paths"
+harness = false
+
 [dependencies]
 sedsprintf_macros = { path = "sedsprintf_macros" }
 strum_macros = { version = "0.28.0", default-features = false }
@@ -76,6 +84,9 @@ zstd-safe = { version = "7.2.4", optional = true, default-features = false }
 regex = "1.12.3"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
+
+[dev-dependencies]
+criterion = "0.5"
 
 # Release profile for standard builds, performance optimized
 [profile.release]

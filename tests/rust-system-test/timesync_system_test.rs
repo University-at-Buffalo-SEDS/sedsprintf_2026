@@ -160,7 +160,11 @@ mod timesync_system_test {
             ..Default::default()
         });
 
-        let remote = if DEVICE_IDENTIFIER < "ZZZ" { "ZZZ" } else { "zzzz" };
+        let remote = if DEVICE_IDENTIFIER < "ZZZ" {
+            "ZZZ"
+        } else {
+            "zzzz"
+        };
         let pkt_same = build_timesync_announce_with_sender(remote, 10, 5_000).unwrap();
         tracker.handle_announce(&pkt_same, 5_000).unwrap();
 
@@ -241,10 +245,8 @@ mod timesync_system_test {
             shared_clock(now.clone()),
         );
 
-        let leader_a =
-            build_timesync_announce_with_sender("SRC_A", 10, 1_700_000_000_000).unwrap();
-        let leader_b =
-            build_timesync_announce_with_sender("SRC_B", 20, 1_699_999_990_000).unwrap();
+        let leader_a = build_timesync_announce_with_sender("SRC_A", 10, 1_700_000_000_000).unwrap();
+        let leader_b = build_timesync_announce_with_sender("SRC_B", 20, 1_699_999_990_000).unwrap();
 
         router.rx(&leader_a).unwrap();
         router.rx(&leader_b).unwrap();
