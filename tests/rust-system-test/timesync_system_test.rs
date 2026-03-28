@@ -121,7 +121,7 @@ mod timesync_system_test {
 
         assert!(matches!(
             tracker.refresh(6_050),
-            sedsprintf_rs::timesync::TimeSyncUpdate::SourceChanged
+            sedsprintf_rs_2026::timesync::TimeSyncUpdate::SourceChanged
         ));
         assert_eq!(tracker.current_source().unwrap().sender, "SRC_B");
         assert!(!tracker.should_announce(6_050, true));
@@ -145,7 +145,7 @@ mod timesync_system_test {
         assert!(!tracker.should_announce(5_000, true));
         assert_eq!(
             tracker.leader(5_000, true),
-            Some(sedsprintf_rs::timesync::TimeSyncLeader::Remote(
+            Some(sedsprintf_rs_2026::timesync::TimeSyncLeader::Remote(
                 tracker.current_source().unwrap().clone()
             ))
         );

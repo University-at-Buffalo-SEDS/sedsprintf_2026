@@ -3,8 +3,7 @@
     {
       "rust": "SdCard",
       "name": "SD_CARD",
-      "doc": "On-board storage (e.g. SD card / flash).",
-      "broadcast_mode": "Default"
+      "doc": "On-board storage (e.g. SD card / flash)."
     },
     {
       "rust": "GroundStation",

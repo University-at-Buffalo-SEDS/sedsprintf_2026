@@ -27,6 +27,7 @@ def print_help(error: str | None = None) -> None:
 
 Options (can be combined where it makes sense):
   release                 Build in release mode.
+  check                   Run `cargo clippy` for default, python, and embedded feature variants with `-D warnings`.
   test                    Run `cargo test`, a short Criterion benchmark smoke pass, and also validate python + 
   embedded build if cross C toolchain exists.
   embedded                Build for the embedded target (enables `embedded` feature).
@@ -57,6 +58,8 @@ Examples:
   build.py embedded release target=thumbv7em-none-eabihf
   build.py python
   build.py timesync
+  build.py check
+  build.py check release
   build.py test
   build.py test release
   build.py maturin-build max_stack_payload=256
@@ -676,11 +679,116 @@ def cargo_bench_smoke_cmd() -> list[str]:
     return cmd
 
 
+def cargo_clippy_cmd(
+        *,
+        build_mode: list[str],
+        build_args: list[str],
+        target_args: list[str] | None = None,
+) -> list[str]:
+    return [
+        "cargo",
+        "clippy",
+        *build_mode,
+        *build_args,
+        *(target_args or ["--all-targets"]),
+        "--",
+        "-D",
+        "warnings",
+    ]
+
+
+def run_clippy_checks(
+        *,
+        env: dict[str, str],
+        repo_root: Path,
+        build_mode: list[str],
+        release_build: bool,
+        build_timesync: bool,
+        target: str,
+        start_step: int | None = None,
+        total_steps_override: int | None = None,
+) -> None:
+    feature_suffix = ",timesync" if build_timesync else ""
+    embedded_target = target or "thumbv7em-none-eabihf"
+    can_check_embedded = has_embedded_c_toolchain(embedded_target, env)
+    if not can_check_embedded:
+        expected = ", ".join(preferred_cross_compilers(embedded_target)) or "CC_<target>/TARGET_CC"
+        print(
+            "info: embedded cross C toolchain missing; attempting auto-install "
+            "(set SEDSPRINTF_RS_INSTALL_C_TOOLCHAIN_CMD to override)."
+        )
+        can_check_embedded = try_install_embedded_c_toolchain(embedded_target, env)
+
+    total_steps = total_steps_override if total_steps_override is not None else (3 if can_check_embedded else 2)
+    default_step = start_step if start_step is not None else 1
+    python_step = default_step + 1
+    embedded_step = python_step + 1
+
+    run_cmd(
+        cargo_clippy_cmd(build_mode=build_mode, build_args=(["--features", "timesync"] if build_timesync else [])),
+        env=env,
+        repo_root=repo_root,
+        title=f"{default_step}/{total_steps} cargo clippy (default)",
+        target=target,
+        release_build=release_build,
+    )
+
+    run_cmd(
+        cargo_clippy_cmd(
+            build_mode=build_mode,
+            build_args=["--features", f"python{feature_suffix}"],
+        ),
+        env=env,
+        repo_root=repo_root,
+        title=f"{python_step}/{total_steps} cargo clippy (python feature)",
+        target=target,
+        release_build=release_build,
+    )
+
+    if can_check_embedded:
+        ensure_rust_target_installed(embedded_target)
+        apply_embedded_cflags_defaults(embedded_target, env)
+
+        embedded_mode: list[str] = []
+        uses_custom_profile = False
+        if release_build:
+            embedded_mode = ["--profile", "release-embedded"]
+            uses_custom_profile = True
+
+        run_cmd(
+            cargo_clippy_cmd(
+                build_mode=embedded_mode,
+                build_args=[
+                    "--no-default-features",
+                    "--target",
+                    embedded_target,
+                    "--features",
+                    f"embedded{feature_suffix}",
+                ],
+                target_args=["--lib"],
+            ),
+            env=env,
+            repo_root=repo_root,
+            title=f"{embedded_step}/{total_steps} cargo clippy (embedded feature)",
+            target=embedded_target,
+            release_build=release_build,
+            embedded_profile=uses_custom_profile,
+        )
+    else:
+        expected = ", ".join(preferred_cross_compilers(embedded_target)) or "CC_<target>/TARGET_CC"
+        print(
+            "info: Skipping embedded clippy check: "
+            f"no cross C toolchain found for target `{embedded_target}` "
+            f"(expected {expected} or CC_<target>/TARGET_CC override)."
+        )
+
+
 def main(argv: list[str]) -> None:
     repo_root = Path(__file__).parent.resolve()
     os.chdir(repo_root)
 
     build_mode: list[str] = []
+    checks = False
     tests = False
     build_embedded = False
     build_python = False
@@ -706,6 +814,9 @@ def main(argv: list[str]) -> None:
 
         elif arg == "test":
             tests = True
+
+        elif arg == "check":
+            checks = True
 
         elif arg == "embedded":
             print("Building for Embedded target.")
@@ -791,6 +902,20 @@ def main(argv: list[str]) -> None:
     if release_build:
         build_mode = ["--release"]
 
+    # ---- CHECK MODE: lint default + python + embedded variants ----
+    if checks:
+        _banner("CHECK MODE")
+        run_clippy_checks(
+            env=env,
+            repo_root=repo_root,
+            build_mode=build_mode,
+            release_build=release_build,
+            build_timesync=build_timesync,
+            target=target,
+        )
+        _success("All clippy checks passed.")
+        return
+
     # ---- TEST MODE: also validate embedded + python builds ----
     if tests:
         _banner("TEST MODE")
@@ -804,13 +929,25 @@ def main(argv: list[str]) -> None:
                 "(set SEDSPRINTF_RS_INSTALL_C_TOOLCHAIN_CMD to override)."
             )
             can_check_embedded = try_install_embedded_c_toolchain(embedded_target, env)
-        total_steps = 4 if can_check_embedded else 3
+        total_steps = 7 if can_check_embedded else 6
+
+        run_clippy_checks(
+            env=env,
+            repo_root=repo_root,
+            build_mode=build_mode,
+            release_build=release_build,
+            build_timesync=build_timesync,
+            target=target,
+            start_step=1,
+            total_steps_override=total_steps,
+        )
+        _success("Clippy checks passed.")
 
         run_cmd(
             ["cargo", "test", "--features", "timesync"],
             env=env,
             repo_root=repo_root,
-            title=f"1/{total_steps} cargo test",
+            title=f"4/{total_steps} cargo test",
             release_build=release_build,
         )
         _success("Tests passed.")
@@ -819,7 +956,7 @@ def main(argv: list[str]) -> None:
             cargo_bench_smoke_cmd(),
             env=env,
             repo_root=repo_root,
-            title=f"2/{total_steps} cargo bench (smoke)",
+            title=f"5/{total_steps} cargo bench (smoke)",
             release_build=True,
         )
         _success("Benchmark smoke pass finished.")
@@ -828,7 +965,7 @@ def main(argv: list[str]) -> None:
             ["cargo", "build", "--features", f"python{feature_suffix}", *build_mode],
             env=env,
             repo_root=repo_root,
-            title=f"3/{total_steps} cargo build (python feature)",
+            title=f"6/{total_steps} cargo build (python feature)",
             release_build=release_build,
         )
         _success(f"Python-feature build finished. Output is under: {repo_root / 'target'}")
@@ -869,7 +1006,7 @@ def main(argv: list[str]) -> None:
                 ],
                 env=env,
                 repo_root=repo_root,
-                title=f"4/{total_steps} cargo build (embedded feature)",
+                title=f"7/{total_steps} cargo build (embedded feature)",
                 target=embedded_target,
                 release_build=release_build,
                 embedded_profile=uses_custom_profile,

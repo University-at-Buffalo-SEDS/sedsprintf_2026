@@ -1,9 +1,9 @@
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
-use sedsprintf_rs::config::{DataEndpoint, DataType};
-use sedsprintf_rs::packet::Packet;
-use sedsprintf_rs::relay::Relay;
-use sedsprintf_rs::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
-use sedsprintf_rs::TelemetryResult;
+use sedsprintf_rs_2026::config::{DataEndpoint, DataType};
+use sedsprintf_rs_2026::packet::Packet;
+use sedsprintf_rs_2026::relay::Relay;
+use sedsprintf_rs_2026::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
+use sedsprintf_rs_2026::TelemetryResult;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -86,7 +86,7 @@ fn benchmark_router_system_paths(c: &mut Criterion) {
                 let pkt = next_gps_packet(&relay_counter);
                 relay_frames_a.lock().unwrap().clear();
                 relay_frames_b.lock().unwrap().clear();
-                sedsprintf_rs::serialize::serialize_packet(&pkt)
+                sedsprintf_rs_2026::serialize::serialize_packet(&pkt)
             },
             |frame| {
                 relay.rx_serialized_from_side(side_a, &frame).unwrap();

@@ -320,9 +320,9 @@ struct JsonEndpoint {
     /// Optional docstring for the enum variant
     #[serde(default)]
     doc: Option<String>,
-    /// Optional broadcast mode variant name, e.g. "Default"
-    #[serde(default)]
-    broadcast_mode: Option<String>,
+    /// Deprecated legacy field; normalized into `link_local_only`.
+    #[serde(default, alias = "broadcast_mode")]
+    deprecated_broadcast_mode: Option<String>,
     #[serde(default)]
     link_local_only: Option<bool>,
 }
@@ -445,7 +445,6 @@ fn is_discovery_type(ty: &JsonType) -> bool {
         (ty.rust.as_str(), ty.name.as_str()),
         ("DiscoveryAnnounce", _)
             | (_, "DISCOVERY_ANNOUNCE")
-            | ("DiscoveryTimeSyncSources", _)
             | (_, "DISCOVERY_TIMESYNC_SOURCES")
     )
 }
@@ -507,7 +506,20 @@ fn load_schema(path_rel: &str) -> Result<TelemetryConfig, String> {
 
 fn normalize_base_schema(cfg: &mut TelemetryConfig) {
     for ep in &mut cfg.endpoints {
-        ep.link_local_only = Some(false);
+        normalize_endpoint_legacy_fields(ep);
+        if ep.deprecated_broadcast_mode.as_deref() != Some("Never") {
+            ep.link_local_only = Some(false);
+        }
+    }
+}
+
+fn normalize_endpoint_legacy_fields(ep: &mut JsonEndpoint) {
+    let Some(mode) = ep.deprecated_broadcast_mode.as_deref() else {
+        return;
+    };
+
+    if mode == "Never" {
+        ep.link_local_only = Some(true);
     }
 }
 
@@ -607,12 +619,6 @@ fn msg_class_token(name: &str) -> proc_macro2::TokenStream {
     quote!(MessageClass::#id)
 }
 
-fn broadcast_mode_token(name: &str) -> proc_macro2::TokenStream {
-    // Must match caller crate's EndpointsBroadcastMode variant names exactly.
-    let id = syn::Ident::new(name, Span::call_site());
-    quote!(EndpointsBroadcastMode::#id)
-}
-
 fn reliable_mode_token(mode: &str) -> Result<proc_macro2::TokenStream, String> {
     let mode_lc = mode.to_ascii_lowercase();
     let ts = match mode_lc.as_str() {
@@ -702,7 +708,6 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
     let mut ep_idents = Vec::<syn::Ident>::new();
     let mut ep_docs = Vec::<String>::new();
     let mut ep_names = Vec::<String>::new();
-    let mut ep_bm = Vec::<String>::new();
     let mut ep_link_local = Vec::<bool>::new();
 
     for ep in &cfg.endpoints {
@@ -718,7 +723,6 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
         ep_idents.push(id);
         ep_docs.push(ep.doc.clone().unwrap_or_default());
         ep_names.push(ep.name.clone());
-        ep_bm.push(ep.broadcast_mode.clone().unwrap_or_else(|| "Default".to_string()));
         ep_link_local.push(ep.link_local_only.unwrap_or(false));
     }
 
@@ -726,14 +730,12 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
         ep_idents.push(syn::Ident::new("TimeSync", Span::call_site()));
         ep_docs.push("Time sync routing endpoint (always forwarded).".to_string());
         ep_names.push("TIME_SYNC".to_string());
-        ep_bm.push("Always".to_string());
         ep_link_local.push(false);
     }
     if discovery_enabled {
         ep_idents.push(syn::Ident::new("Discovery", Span::call_site()));
         ep_docs.push("Discovery control endpoint for internal route advertisements.".to_string());
         ep_names.push("DISCOVERY".to_string());
-        ep_bm.push("Always".to_string());
         ep_link_local.push(false);
     }
 
@@ -743,7 +745,6 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
             .to_string(),
     );
     ep_names.push("TELEMETRY_ERROR".to_string());
-    ep_bm.push("Always".to_string());
     ep_link_local.push(false);
 
     let max_ep_value = cfg.endpoints.len() as u32
@@ -765,15 +766,12 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
     let ep_meta_arms = ep_idents
         .iter()
         .zip(ep_names.iter())
-        .zip(ep_bm.iter())
         .zip(ep_link_local.iter())
-        .map(|(((id, name), bm), link_local_only)| {
-            let bm_ts = broadcast_mode_token(bm);
+        .map(|((id, name), link_local_only)| {
             let link_local_only = *link_local_only;
             quote! {
                 DataEndpoint::#id => EndpointMeta {
                     name: #name,
-                    broadcast_mode: #bm_ts,
                     link_local_only: #link_local_only,
                 },
             }
@@ -1030,7 +1028,7 @@ mod tests {
             rust: rust.to_string(),
             name: name.to_string(),
             doc: None,
-            broadcast_mode: Some("Default".to_string()),
+            deprecated_broadcast_mode: None,
             link_local_only: Some(link_local_only),
         }
     }
@@ -1097,6 +1095,23 @@ mod tests {
 
         normalize_base_schema(&mut base);
         assert_eq!(base.endpoints[0].link_local_only, Some(false));
+    }
+
+    #[test]
+    fn normalize_base_schema_upgrades_legacy_broadcast_mode_never() {
+        let mut base = TelemetryConfig {
+            endpoints: vec![JsonEndpoint {
+                rust: "SoftwareBus".to_string(),
+                name: "SOFTWARE_BUS".to_string(),
+                doc: None,
+                deprecated_broadcast_mode: Some("Never".to_string()),
+                link_local_only: None,
+            }],
+            types: vec![datatype("IpcMessage", "IPC_MESSAGE", &["SoftwareBus"])],
+        };
+
+        normalize_base_schema(&mut base);
+        assert_eq!(base.endpoints[0].link_local_only, Some(true));
     }
 
     #[test]

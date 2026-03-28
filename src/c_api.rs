@@ -116,6 +116,18 @@ fn ok_or_status(r: TelemetryResult<()>) -> i32 {
     }
 }
 
+#[inline]
+#[allow(clippy::unnecessary_cast)]
+fn c_char_ptr_as_u8(ptr: *const c_char) -> *const u8 {
+    ptr as *const u8
+}
+
+#[inline]
+#[allow(clippy::unnecessary_cast)]
+fn c_char_mut_ptr_as_u8(ptr: *mut c_char) -> *mut u8 {
+    ptr as *mut u8
+}
+
 /// Returns the fixed payload size (in bytes) for a static schema, or `None`
 /// if the message type is dynamically sized.
 #[inline]
@@ -236,7 +248,7 @@ fn view_to_packet(view: &SedsPacketView) -> Result<Packet, ()> {
     let sender_owned: &str = if view.sender.is_null() || view.sender_len == 0 {
         ""
     } else {
-        let sb = unsafe { slice::from_raw_parts(view.sender as *const u8, view.sender_len) };
+        let sb = unsafe { slice::from_raw_parts(c_char_ptr_as_u8(view.sender), view.sender_len) };
         from_utf8(sb).map_err(|_| ())?
     };
 
@@ -274,7 +286,7 @@ unsafe fn write_str_to_buf(s: &str, buf: *mut c_char, buf_len: usize) -> i32 {
 
     let ncopy = core::cmp::min(s.len(), buf_len.saturating_sub(1));
     unsafe {
-        ptr::copy_nonoverlapping(s.as_ptr(), buf as *mut u8, ncopy);
+        ptr::copy_nonoverlapping(s.as_ptr(), c_char_mut_ptr_as_u8(buf), ncopy);
         *buf.add(ncopy) = 0;
     }
 
@@ -866,7 +878,7 @@ pub extern "C" fn seds_router_add_side_serialized(
     let side_name: &'static str = if name.is_null() || name_len == 0 {
         ""
     } else {
-        let bytes = unsafe { slice::from_raw_parts(name as *const u8, name_len) };
+        let bytes = unsafe { slice::from_raw_parts(c_char_ptr_as_u8(name), name_len) };
         match from_utf8(bytes) {
             Ok(s) => {
                 let owned = String::from(s);
@@ -919,7 +931,7 @@ pub extern "C" fn seds_router_add_side_packet(
     let side_name: &'static str = if name.is_null() || name_len == 0 {
         ""
     } else {
-        let bytes = unsafe { slice::from_raw_parts(name as *const u8, name_len) };
+        let bytes = unsafe { slice::from_raw_parts(c_char_ptr_as_u8(name), name_len) };
         match from_utf8(bytes) {
             Ok(s) => {
                 let owned = String::from(s);
@@ -1077,7 +1089,7 @@ pub extern "C" fn seds_relay_add_side_serialized(
     let side_name: &'static str = if name.is_null() || name_len == 0 {
         ""
     } else {
-        let bytes = unsafe { slice::from_raw_parts(name as *const u8, name_len) };
+        let bytes = unsafe { slice::from_raw_parts(c_char_ptr_as_u8(name), name_len) };
         match from_utf8(bytes) {
             Ok(s) => {
                 let owned = String::from(s);
@@ -1129,7 +1141,7 @@ pub extern "C" fn seds_relay_add_side_packet(
     let side_name: &'static str = if name.is_null() || name_len == 0 {
         ""
     } else {
-        let bytes = unsafe { slice::from_raw_parts(name as *const u8, name_len) };
+        let bytes = unsafe { slice::from_raw_parts(c_char_ptr_as_u8(name), name_len) };
         match from_utf8(bytes) {
             Ok(s) => {
                 let owned = String::from(s);
@@ -1466,7 +1478,7 @@ pub extern "C" fn seds_router_log_string_ex(
         Err(_) => return status_from_err(TelemetryError::InvalidType),
     };
 
-    let src = unsafe { slice::from_raw_parts(bytes as *const u8, len) };
+    let src = unsafe { slice::from_raw_parts(c_char_ptr_as_u8(bytes), len) };
     let ts = opt_ts(timestamp_ms_opt);
 
     if let Some(required) = fixed_payload_size_if_static(ty) {

@@ -158,7 +158,7 @@ mod compression_memory_pool_test {
     #[test]
     fn compression_path_is_stable_under_limited_memory_pool() {
         // Warm-up outside the cap to initialize one-time internals.
-        let warm = make_packet(&vec![b'W'; 128], 0);
+        let warm = make_packet(&[b'W'; 128], 0);
         let wire = serialize::serialize_packet(&warm);
         let _ = serialize::deserialize_packet(&wire).expect("warm-up deserialize failed");
 

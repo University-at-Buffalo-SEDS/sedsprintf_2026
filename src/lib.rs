@@ -331,8 +331,6 @@ pub const fn parse_u128(s: &str) -> u128 {
 pub struct EndpointMeta {
     /// Static name of the endpoint
     name: &'static str,
-    /// Broadcast mode for the endpoint
-    broadcast_mode: EndpointsBroadcastMode,
     /// Restrict remote forwarding to link-local/software-bus sides only.
     link_local_only: bool,
 }
@@ -345,13 +343,6 @@ impl EndpointMeta {
     /// external tooling.
     pub fn as_str(&self) -> &'static str {
         self.name
-    }
-
-    /// Get the broadcast mode for the endpoint
-    /// # Returns
-    /// - `EndpointsBroadcastMode` enum value.
-    pub fn get_broadcast_mode(&self) -> EndpointsBroadcastMode {
-        self.broadcast_mode
     }
 
     /// Return whether this endpoint is restricted to link-local/software-bus sides.
@@ -369,13 +360,6 @@ impl DataEndpoint {
     /// external tooling.
     pub fn as_str(&self) -> &'static str {
         get_endpoint_meta(*self).name
-    }
-
-    /// Get the broadcast mode for the endpoint
-    /// # Returns
-    /// - `EndpointsBroadcastMode` enum value.
-    pub fn get_broadcast_mode(&self) -> EndpointsBroadcastMode {
-        get_endpoint_meta(*self).broadcast_mode
     }
 
     /// Return whether this endpoint is restricted to link-local/software-bus sides.
@@ -416,17 +400,6 @@ impl MessageElement {
             MessageElement::Dynamic(_, mt) => *mt,
         }
     }
-}
-
-/// Broadcast mode for endpoints
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
-pub enum EndpointsBroadcastMode {
-    /// Always transmit the message, even if we have and endpoint for it.
-    Always,
-    /// Never transmit the packet, even if we don't have an endpoint for it.
-    Never,
-    /// Transmit only if we don't have an endpoint for it. Otherwise, use the endpoint handler and don't broadcast.
-    Default,
 }
 
 /// Reliable delivery mode for a data type.

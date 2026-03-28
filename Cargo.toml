@@ -1,6 +1,6 @@
 [package]
 name = "sedsprintf_rs_2026"
-version = "3.4.2"
+version = "3.5.0"
 edition = "2024"
 build = "build.rs"
 authors = ["Rylan Meilutis <rylan@rylanswebsite.com>"]
@@ -86,7 +86,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 
 [dev-dependencies]
-criterion = "0.5"
+criterion = "0.8.2"
 
 # Release profile for standard builds, performance optimized
 [profile.release]

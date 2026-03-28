@@ -17,14 +17,22 @@ Examples:
 
 ```
 ./build.py release
+./build.py check
+./build.py check release
 ./build.py embedded release target=thumbv7em-none-eabihf device_id=FC
 ./build.py python
+./build.py test release
 ./build.py maturin-install env:MAX_RECENT_RX_IDS=256 env:MAX_STACK_PAYLOAD=128
 ```
 
 Useful options:
 
+- `check` runs `cargo clippy -D warnings` for the default, python, and embedded builds.
+- `test` runs the same clippy checks, then the Cargo test suite, a short benchmark smoke pass, and python plus embedded
+  build validation.
 - `device_id=<id>` sets `DEVICE_IDENTIFIER` for the build.
+- `schema_path=<path>` sets `SEDSPRINTF_RS_SCHEMA_PATH`.
+- `ipc_schema_path=<path>` sets `SEDSPRINTF_RS_IPC_SCHEMA_PATH` for a board-local IPC overlay.
 - `max_stack_payload=<n>` sets `MAX_STACK_PAYLOAD` for inline payload storage.
 - `env:KEY=VALUE` passes any compile-time env var used by
   src/config.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/src/config.rs)).
@@ -147,7 +155,8 @@ build.rs ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/bui
 can be directed to alternate sources or disabled:
 
 - `SEDSPRINTF_RS_SKIP_ENUMGEN=1` skips enum generation.
-- `SEDSPRINTF_RS_CONFIG_RS=path/to/config.rs` overrides schema source.
+- `SEDSPRINTF_RS_SCHEMA_PATH=path/to/telemetry_config.json` overrides the base schema source.
+- `SEDSPRINTF_RS_IPC_SCHEMA_PATH=path/to/ipc_config.json` adds a board-local IPC overlay schema.
 - `SEDSPRINTF_RS_LIB_RS=path/to/lib.rs` overrides error enum source.
 
 ## Embedded allocator hooks

@@ -3,14 +3,12 @@
     {
       "rust": "SdCard",
       "name": "SD_CARD",
-      "doc": "On-board storage (e.g. SD card / flash).",
-      "broadcast_mode": "Default"
+      "doc": "On-board storage (e.g. SD card / flash)."
     },
     {
       "rust": "Radio",
       "name": "RADIO",
-      "doc": "Radio or external link (telemetry uplink/downlink).",
-      "broadcast_mode": "Default"
+      "doc": "Radio or external link (telemetry uplink/downlink)."
     }
   ],
   "types": [
