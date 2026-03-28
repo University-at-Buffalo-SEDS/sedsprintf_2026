@@ -67,6 +67,20 @@ environments.
 
 ---
 
+## Version 3.5.0 highlights
+
+- Endpoint routing no longer depends on schema `broadcast_mode`; discovery state and link-local scope now decide whether
+  traffic stays local, targets discovered remote sides, or falls back to relay flooding during bootstrap.
+- Older telemetry schemas are upgraded automatically during code generation, so legacy `broadcast_mode` configs continue
+  to build while migrating to the newer `link_local_only` model.
+- `build.rs` now regenerates the public C header with the current ABI wrappers, avoiding drift between exported Rust
+  symbols and `C-Headers/sedsprintf.h`.
+- `build.py` now has a dedicated `check` mode for strict clippy validation, and `build.py test` now includes that lint
+  coverage before running the broader test/build checks.
+- The generated C and Python stubs, plus the C telemetry examples, were refreshed to match the current logging and
+  discovery API surface.
+- Full changelog: [CHANGELOG.md](./CHANGELOG.md)
+
 ## Version 3.4.2 highlights
 
 - Time sync producers now participate in leader election instead of always serving unconditionally.
@@ -160,16 +174,18 @@ by creating shims that expose pvPortMalloc and vPortFree.
 
 Options:
   release                 Build in release mode.
-  test                    Run cargo tests, a short Criterion benchmark smoke pass, and also validate python plus embedded when cross C toolchain exists.
+  check                   Run cargo clippy with -D warnings for default, python, and embedded builds.
+  test                    Run the clippy checks, cargo tests, a short Criterion benchmark smoke pass, and also validate python plus embedded builds when the cross C toolchain exists.
   embedded                Build for the embedded target (enables embedded feature).
   python                  Build with Python bindings (enables python feature).
   timesync                Build with time sync helpers (enables timesync feature).
-  discovery               Build with adaptive topology discovery helpers (enables discovery feature).
   maturin-build           Run maturin build with the .pyi .gitignore hack.
   maturin-develop         Run maturin develop with the .pyi .gitignore hack.
   maturin-install         Build wheel and install it with uv pip install.
   target=<triple>         Set Rust compilation target (e.g. target=thumbv7em-none-eabihf).
   device_id=<id>          Set DEVICE_IDENTIFIER env var for the build.
+  schema_path=<path>      Set SEDSPRINTF_RS_SCHEMA_PATH for the build.
+  ipc_schema_path=<path>  Set SEDSPRINTF_RS_IPC_SCHEMA_PATH for a board-local IPC overlay.
   max_stack_payload=<n>   Set MAX_STACK_PAYLOAD for define_stack_payload!(env="MAX_STACK_PAYLOAD", ...).
   env:KEY=VALUE           Set arbitrary environment variable(s) for the build (repeatable).
 ```
@@ -178,8 +194,11 @@ Examples:
 
 ```
 ./build.py release
+./build.py check
+./build.py check release
 ./build.py embedded release target=thumbv7em-none-eabihf device_id=FC
 ./build.py python
+./build.py test release
 ./build.py maturin-install env:MAX_RECENT_RX_IDS=256 env:MAX_STACK_PAYLOAD=128
 ```
 
@@ -209,8 +228,9 @@ If you want profiler-friendly output while iterating locally:
 cargo bench --bench packet_paths -- --profile-time=5
 ```
 
-`./build.py test` now includes a short Criterion smoke pass for both benchmark targets in addition to the existing test
-and build validation steps. That smoke pass uses Cargo `--profile release`.
+`./build.py test` now starts with the same strict clippy checks as `./build.py check`, then runs the Cargo test suite,
+a short Criterion smoke pass, and the python plus embedded build validation steps. The benchmark smoke pass uses Cargo
+`--profile release`.
 
 ## Usage
 
@@ -347,14 +367,12 @@ Example `telemetry_config.json`:
     {
       "rust": "Radio",
       "name": "RADIO",
-      "doc": "Downlink radio",
-      "broadcast_mode": "Default"
+      "doc": "Downlink radio"
     },
     {
       "rust": "SdCard",
       "name": "SD_CARD",
-      "doc": "Onboard logging",
-      "broadcast_mode": "Default"
+      "doc": "Onboard logging"
     }
   ],
   "types": [

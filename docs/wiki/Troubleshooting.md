@@ -8,7 +8,8 @@
 - Ensure
   telemetry_config.json ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/telemetry_config.json))
   is valid JSON.
-- If you override the schema path, set `SEDSPRINTF_RS_CONFIG_RS`.
+- If you override the schema path, set `SEDSPRINTF_RS_SCHEMA_PATH`.
+- If you use a board-local IPC overlay, also check `SEDSPRINTF_RS_IPC_SCHEMA_PATH`.
 
 ## Schema mismatch between systems
 
@@ -48,7 +49,8 @@ the same feature set or disable compression everywhere.
 Check:
 
 - Router mode is `Relay` (not `Sink`).
-- Endpoints are not marked `Never`.
+- Link-local-only endpoints stay on link-local/software-bus sides.
+- Non-local endpoints depend on discovery state for selective remote routing.
 - Your TX callback is installed (non-NULL) and returns OK.
 
 ## Echo loops
@@ -80,7 +82,6 @@ If C system tests print warnings like "object file ... built for newer 'macOS' v
 ## Python import fails
 
 - Ensure you built the extension: `./build.py python` or `maturin develop`. (
-  build.py: [source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.py)) (
   build.py: [source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/build.py))
 - Verify you are using the same Python interpreter/venv used for the build.
 - If the module loads but symbols are missing, rebuild after schema changes.
