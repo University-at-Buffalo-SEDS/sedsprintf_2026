@@ -8,44 +8,37 @@
     {
       "rust": "GroundStation",
       "name": "GROUND_STATION",
-      "doc": "Data destined for the groundstation",
-      "broadcast_mode": "Default"
+      "doc": "Data destined for the groundstation"
     },
     {
       "rust": "FlightController",
       "name": "FLIGHT_CONTROLLER",
-      "doc": "Data destined for the Flight Computer",
-      "broadcast_mode": "Default"
+      "doc": "Data destined for the Flight Computer"
     },
     {
       "rust": "ValveBoard",
       "name": "VALVE_BOARD",
-      "doc": "Data destined for the Valve Board",
-      "broadcast_mode": "Default"
+      "doc": "Data destined for the Valve Board"
     },
     {
       "rust": "Abort",
       "name": "ABORT",
-      "doc": "Endpoint For abort commands",
-      "broadcast_mode": "Always"
+      "doc": "Endpoint For abort commands"
     },
     {
       "rust": "FlightState",
       "name": "FLIGHT_STATE",
-      "doc": "Flight state updates",
-      "broadcast_mode": "Always"
+      "doc": "Flight state updates"
     },
     {
       "rust": "HeartBeat",
       "name": "HEART_BEAT",
-      "doc": "Endpoint for heartbeat messages",
-      "broadcast_mode": "Always"
+      "doc": "Endpoint for heartbeat messages"
     },
     {
       "rust": "ActuatorBoard",
       "name": "ACTUATOR_BOARD",
-      "doc": "Actuator board endpoint",
-      "broadcast_mode": "Default"
+      "doc": "Actuator board endpoint"
     }
   ],
   "types": [
