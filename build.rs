@@ -58,9 +58,9 @@ struct JsonEndpoint {
     /// Optional docstring for the enum variant
     #[serde(default)]
     doc: Option<String>,
-    /// Optional broadcast mode variant name, e.g. "Default"
+    /// Deprecated legacy field; normalized into `link_local_only`.
     #[serde(default, alias = "broadcast_mode")]
-    _broadcast_mode: Option<String>,
+    deprecated_broadcast_mode: Option<String>,
     /// Whether this endpoint is restricted to link-local/software-bus sides.
     #[serde(default, alias = "link_local_only")]
     _link_local_only: Option<bool>,
@@ -299,7 +299,38 @@ fn load_schema_absolute(path: &Path) -> TelemetryConfig {
 
 fn normalize_base_schema(base: &mut TelemetryConfig) {
     for ep in &mut base.endpoints {
-        ep._link_local_only = Some(false);
+        normalize_endpoint_legacy_fields(ep);
+        if ep.deprecated_broadcast_mode.as_deref() != Some("Never") {
+            ep._link_local_only = Some(false);
+        }
+    }
+}
+
+fn normalize_endpoint_legacy_fields(ep: &mut JsonEndpoint) {
+    let Some(mode) = ep.deprecated_broadcast_mode.as_deref() else {
+        return;
+    };
+
+    match mode {
+        "Never" => {
+            ep._link_local_only = Some(true);
+            println!(
+                "cargo:warning=Deprecated telemetry schema field broadcast_mode=\"Never\" on endpoint {} was normalized to link_local_only=true",
+                ep.name
+            );
+        }
+        "Default" | "Always" => {
+            println!(
+                "cargo:warning=Deprecated telemetry schema field broadcast_mode on endpoint {} is ignored; discovery now controls remote routing",
+                ep.name
+            );
+        }
+        other => {
+            println!(
+                "cargo:warning=Unknown deprecated broadcast_mode value {:?} on endpoint {}; ignoring it",
+                other, ep.name
+            );
+        }
     }
 }
 
@@ -493,7 +524,6 @@ fn is_discovery_type(ty: &JsonType) -> bool {
         (ty.rust.as_str(), ty.name.as_str()),
         ("DiscoveryAnnounce", _)
             | (_, "DISCOVERY_ANNOUNCE")
-            | ("DiscoveryTimeSyncSources", _)
             | (_, "DISCOVERY_TIMESYNC_SOURCES")
     )
 }
@@ -503,7 +533,7 @@ fn append_timesync_builtins(cfg: &mut TelemetryConfig) {
         rust: "TimeSync".to_string(),
         name: "TIME_SYNC".to_string(),
         doc: Some("Time sync routing endpoint (always forwarded).".to_string()),
-        _broadcast_mode: Some("Always".to_string()),
+        deprecated_broadcast_mode: None,
         _link_local_only: Some(false),
     });
 
@@ -549,7 +579,7 @@ fn append_discovery_builtins(cfg: &mut TelemetryConfig) {
         rust: "Discovery".to_string(),
         name: "DISCOVERY".to_string(),
         doc: Some("Discovery control endpoint for internal route advertisements.".to_string()),
-        _broadcast_mode: Some("Always".to_string()),
+        deprecated_broadcast_mode: None,
         _link_local_only: Some(false),
     });
 
@@ -625,7 +655,7 @@ fn parse_seds_result_from_lib_rs(lib_rs_path: &Path) -> SedsResultEnum {
 
     let body = caps.get(1).unwrap().as_str();
 
-    let re_member = Regex::new(r#"(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([-]?\d+)\s*,?\s*$"#)
+    let re_member = Regex::new(r#"(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(-?\d+)\s*,?\s*$"#)
         .expect("regex compile failed");
 
     let mut members: Vec<(String, i64)> = Vec::new();
@@ -890,7 +920,7 @@ fn render_c_abi_decls() -> String {
         "                                  const uint64_t * timestamp_ms_opt,",
         "                                  int queue);",
     ]
-    .join("\n")
+        .join("\n")
 }
 
 // ========================= template injection =========================

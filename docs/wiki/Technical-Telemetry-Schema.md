@@ -65,15 +65,25 @@ Top-level keys:
 - `rust`: Rust enum variant name.
 - `name`: wire/display name (typically ALL_CAPS).
 - `doc`: optional description.
-- `broadcast_mode`: `Default`, `Always`, or `Never`.
 - `link_local_only`: derived by schema file. Endpoints coming from the IPC overlay are link-local-only; endpoints coming
   from the base schema are not.
 
-`broadcast_mode` influences forwarding in `RouterMode::Relay`:
+Legacy config upgrade rules:
 
-- `Always`: forward even if a local handler exists.
-- `Never`: never forward.
-- `Default`: forward only if the endpoint is not handled locally.
+- Older schemas may still contain `broadcast_mode`.
+- `build.rs` and `define_telemetry_schema!` accept that legacy field and normalize it during schema loading.
+- `broadcast_mode = "Never"` is upgraded to `link_local_only = true`.
+- `broadcast_mode = "Default"` and `broadcast_mode = "Always"` are accepted but ignored.
+- Unknown `broadcast_mode` values are ignored with a build warning.
+- New schemas should omit `broadcast_mode` entirely.
+
+Remote forwarding is topology-driven:
+
+- IPC/link-local endpoints are restricted to link-local/software-bus sides.
+- Discovery advertisements tell routers which remote sides can currently reach which endpoints.
+- If multiple local/remote candidates exist for the same endpoint, routing fans out to the discovered matches.
+- If only one candidate exists, the packet is delivered only there.
+- If discovery has not learned any route for a non-local endpoint yet, relay mode falls back to flooding.
 
 Link-local scope further constrains forwarding:
 
@@ -148,7 +158,7 @@ Helpers:
 ```
 {
   "endpoints": [
-    { "rust": "Radio", "name": "RADIO", "doc": "Downlink radio", "broadcast_mode": "Default" }
+    { "rust": "Radio", "name": "RADIO", "doc": "Downlink radio" }
   ],
   "types": [
     {
@@ -166,6 +176,52 @@ Helpers:
 
 An IPC overlay file uses the same shape. Its endpoints become link-local automatically because they come from the
 overlay file, not because they carry a separate flag.
+
+Legacy schema example accepted during upgrade:
+
+```
+{
+  "endpoints": [
+    {
+      "rust": "SoftwareBus",
+      "name": "SOFTWARE_BUS",
+      "broadcast_mode": "Never"
+    }
+  ],
+  "types": [
+    {
+      "rust": "IpcMessage",
+      "name": "IPC_MESSAGE",
+      "class": "Data",
+      "element": { "kind": "Dynamic", "data_type": "Binary" },
+      "endpoints": ["SoftwareBus"]
+    }
+  ]
+}
+```
+
+That legacy endpoint is treated exactly like:
+
+```
+{
+  "endpoints": [
+    {
+      "rust": "SoftwareBus",
+      "name": "SOFTWARE_BUS",
+      "link_local_only": true
+    }
+  ],
+  "types": [
+    {
+      "rust": "IpcMessage",
+      "name": "IPC_MESSAGE",
+      "class": "Data",
+      "element": { "kind": "Dynamic", "data_type": "Binary" },
+      "endpoints": ["SoftwareBus"]
+    }
+  ]
+}
+```
 
 ## Compatibility checklist
 

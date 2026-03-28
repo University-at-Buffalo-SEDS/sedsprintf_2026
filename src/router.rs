@@ -35,7 +35,6 @@ use crate::{
     lock::RouterMutex,
     message_meta, packet::Packet, reliable_mode,
     serialize,
-    EndpointsBroadcastMode,
     MessageElement,
     TelemetryError, TelemetryResult,
 };
@@ -709,24 +708,13 @@ impl Debug for Router {
     }
 }
 
-/// Check if any of the provided endpoints require remote forwarding
+/// Check if any of the provided endpoints require remote forwarding when
+/// discovery is unavailable and routing falls back to local-vs-remote schema.
 #[inline]
-fn has_remote_endpoint(eps: &[DataEndpoint], cfg: &RouterConfig) -> bool {
-    eps.iter().copied().any(|ep| {
-        (!cfg.is_local_endpoint(ep) && ep.get_broadcast_mode() != EndpointsBroadcastMode::Never)
-            || ep.get_broadcast_mode() == EndpointsBroadcastMode::Always
-    })
-}
-
-#[inline]
-fn force_remote_for_type(ty: DataType) -> bool {
-    #[cfg(feature = "discovery")]
-    if matches!(ty, DataType::DiscoveryAnnounce) {
-        return true;
-    }
-
-    let _ = ty;
-    false
+fn has_nonlocal_endpoint(eps: &[DataEndpoint], cfg: &RouterConfig) -> bool {
+    eps.iter()
+        .copied()
+        .any(|ep| !cfg.is_local_endpoint(ep) && !ep.is_link_local_only())
 }
 
 #[inline]
@@ -898,6 +886,30 @@ impl Router {
         !eps.is_empty() && eps.iter().all(|ep| ep.is_link_local_only())
     }
 
+    fn should_route_remote(
+        &self,
+        data: &RouterItem,
+        exclude: Option<RouterSideId>,
+    ) -> TelemetryResult<bool> {
+        #[cfg(feature = "discovery")]
+        {
+            match self.remote_side_plan(data, exclude)? {
+                RemoteSidePlan::Target(sides) => Ok(!sides.is_empty()),
+                RemoteSidePlan::Flood => {
+                    let st = self.state.lock();
+                    Ok(st.sides.iter().enumerate().any(|(side, _)| exclude != Some(side)))
+                }
+            }
+        }
+
+        #[cfg(not(feature = "discovery"))]
+        {
+            let _ = exclude;
+            let (eps, ty) = self.item_route_info(data)?;
+            Ok(has_nonlocal_endpoint(&eps, &self.cfg) || force_remote_for_type(ty))
+        }
+    }
+
     fn remote_side_plan(
         &self,
         data: &RouterItem,
@@ -906,9 +918,17 @@ impl Router {
         #[cfg(feature = "discovery")]
         {
             let (eps, ty) = self.item_route_info(data)?;
-            if discovery::is_discovery_type(ty) || force_remote_for_type(ty) {
+            if discovery::is_discovery_type(ty) {
                 return Ok(RemoteSidePlan::Flood);
             }
+
+            #[cfg(feature = "timesync")]
+            let bootstrap_timesync = matches!(
+                ty,
+                DataType::TimeSyncAnnounce | DataType::TimeSyncRequest | DataType::TimeSyncResponse
+            );
+            #[cfg(not(feature = "timesync"))]
+            let bootstrap_timesync = false;
 
             #[cfg(feature = "timesync")]
             let preferred_timesync_source = self.preferred_timesync_route_source(data, ty)?;
@@ -916,6 +936,7 @@ impl Router {
             let preferred_timesync_source: Option<String> = None;
 
             let st = self.state.lock();
+            let has_nonlocal = has_nonlocal_endpoint(&eps, &self.cfg);
             let restrict_link_local = Self::endpoints_are_link_local_only(&eps);
             if st.discovery_routes.is_empty() {
                 if restrict_link_local {
@@ -933,7 +954,11 @@ impl Router {
                         .collect();
                     return Ok(RemoteSidePlan::Target(targets));
                 }
-                return Ok(RemoteSidePlan::Flood);
+                return if has_nonlocal || bootstrap_timesync {
+                    Ok(RemoteSidePlan::Flood)
+                } else {
+                    Ok(RemoteSidePlan::Target(Vec::new()))
+                };
             }
             let now_ms = self.clock.now_ms();
             let mut had_exact = false;
@@ -987,8 +1012,10 @@ impl Router {
                     })
                     .collect();
                 Ok(RemoteSidePlan::Target(targets))
-            } else {
+            } else if has_nonlocal || bootstrap_timesync {
                 Ok(RemoteSidePlan::Flood)
+            } else {
+                Ok(RemoteSidePlan::Target(Vec::new()))
             }
         }
         #[cfg(not(feature = "discovery"))]
@@ -3018,8 +3045,6 @@ impl Router {
             return Ok(());
         }
 
-        let mut has_sent_relay = false;
-
         match &item.data {
             RouterItem::Packet(pkt) => {
                 pkt.validate()?;
@@ -3050,7 +3075,11 @@ impl Router {
                 eps.sort_unstable();
                 eps.dedup();
 
-                let has_remote = has_remote_endpoint(&eps, &self.cfg);
+                let has_remote = if self.mode == RouterMode::Relay {
+                    self.should_route_remote(&item.data, item.src)?
+                } else {
+                    false
+                };
 
                 let has_serialized_local = eps
                     .iter()
@@ -3094,17 +3123,12 @@ impl Router {
                         }
                     }
 
-                    let rejected_by_filter = !any_matched;
+                    let _ = any_matched;
+                }
 
-                    if self.mode == RouterMode::Relay
-                        && has_remote
-                        && rejected_by_filter
-                        && !has_sent_relay
-                    {
-                        let relay_item = RouterItem::Packet(pkt.to_owned());
-                        self.relay_send(relay_item, item.src, called_from_queue)?;
-                        has_sent_relay = true;
-                    }
+                if self.mode == RouterMode::Relay && has_remote {
+                    let relay_item = RouterItem::Packet(pkt.to_owned());
+                    self.relay_send(relay_item, item.src, called_from_queue)?;
                 }
 
                 Ok(())
@@ -3155,7 +3179,11 @@ impl Router {
                 eps.sort_unstable();
                 eps.dedup();
 
-                let has_remote = has_remote_endpoint(&eps, &self.cfg);
+                let has_remote = if self.mode == RouterMode::Relay {
+                    self.should_route_remote(&item.data, item.src)?
+                } else {
+                    false
+                };
 
                 for dest in eps {
                     let mut any_matched = false;
@@ -3190,20 +3218,15 @@ impl Router {
                         }
                     }
 
-                    let rejected_by_filter = !any_matched;
+                    let _ = any_matched;
+                }
 
-                    if self.mode == RouterMode::Relay
-                        && has_remote
-                        && rejected_by_filter
-                        && !has_sent_relay
-                    {
-                        let relay_item = match pkt_opt {
-                            Some(ref p) => RouterItem::Packet(p.clone()),
-                            None => RouterItem::Serialized(bytes.clone()),
-                        };
-                        self.relay_send(relay_item, item.src, called_from_queue)?;
-                        has_sent_relay = true;
-                    }
+                if self.mode == RouterMode::Relay && has_remote {
+                    let relay_item = match pkt_opt {
+                        Some(ref p) => RouterItem::Packet(p.clone()),
+                        None => RouterItem::Serialized(bytes.clone()),
+                    };
+                    self.relay_send(relay_item, item.src, called_from_queue)?;
                 }
 
                 Ok(())
@@ -3364,18 +3387,11 @@ impl Router {
                 let send_remote = match &data {
                     RouterItem::Packet(pkt) => {
                         pkt.validate()?;
-                        let mut eps: Vec<DataEndpoint> = pkt.endpoints().to_vec();
-                        eps.sort_unstable();
-                        eps.dedup();
-                        has_remote_endpoint(&eps, &self.cfg)
-                            || force_remote_for_type(pkt.data_type())
+                        self.should_route_remote(&data, None)?
                     }
                     RouterItem::Serialized(bytes) => {
-                        let env = serialize::peek_envelope(bytes.as_ref())?;
-                        let mut eps: Vec<DataEndpoint> = env.endpoints.iter().copied().collect();
-                        eps.sort_unstable();
-                        eps.dedup();
-                        has_remote_endpoint(&eps, &self.cfg) || force_remote_for_type(env.ty)
+                        let _ = serialize::peek_envelope(bytes.as_ref())?;
+                        self.should_route_remote(&data, None)?
                     }
                 };
 
