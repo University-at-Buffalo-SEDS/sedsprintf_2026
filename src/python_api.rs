@@ -998,6 +998,24 @@ impl PyRouter {
         rtr.poll_timesync().map_err(py_err_from)
     }
 
+    #[cfg(feature = "discovery")]
+    fn announce_discovery(&self) -> PyResult<()> {
+        let rtr = self
+            .inner
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
+        rtr.announce_discovery().map_err(py_err_from)
+    }
+
+    #[cfg(feature = "discovery")]
+    fn poll_discovery(&self) -> PyResult<bool> {
+        let rtr = self
+            .inner
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
+        rtr.poll_discovery().map_err(py_err_from)
+    }
+
     #[cfg(feature = "timesync")]
     fn network_time_ms(&self) -> PyResult<Option<u64>> {
         let rtr = self
@@ -1457,6 +1475,16 @@ impl PyRelay {
         self.inner
             .process_all_queues_with_timeout(timeout_ms)
             .map_err(py_err_from)
+    }
+
+    #[cfg(feature = "discovery")]
+    fn announce_discovery(&self) -> PyResult<()> {
+        self.inner.announce_discovery().map_err(py_err_from)
+    }
+
+    #[cfg(feature = "discovery")]
+    fn poll_discovery(&self) -> PyResult<bool> {
+        self.inner.poll_discovery().map_err(py_err_from)
     }
 }
 

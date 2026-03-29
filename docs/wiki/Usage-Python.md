@@ -71,6 +71,11 @@ Call `router.poll_timesync()` from your main loop to let the router queue any du
 traffic, then run the normal queue processing methods. The call is non-blocking and returns
 whether it queued a time-sync packet during that poll.
 
+With `discovery` enabled, both `Router` and `Relay` also expose `announce_discovery()` and
+`poll_discovery()`. Call `poll_discovery()` from the same loop to let the adaptive discovery
+runtime queue due advertisements, or call `announce_discovery()` to force an immediate advertise
+cycle.
+
 ## Logging API
 
 The Python API exposes typed log helpers that mirror the Rust API:
