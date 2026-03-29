@@ -522,9 +522,7 @@ fn is_timesync_type(ty: &JsonType) -> bool {
 fn is_discovery_type(ty: &JsonType) -> bool {
     matches!(
         (ty.rust.as_str(), ty.name.as_str()),
-        ("DiscoveryAnnounce", _)
-            | (_, "DISCOVERY_ANNOUNCE")
-            | (_, "DISCOVERY_TIMESYNC_SOURCES")
+        ("DiscoveryAnnounce", _) | (_, "DISCOVERY_ANNOUNCE") | (_, "DISCOVERY_TIMESYNC_SOURCES")
     )
 }
 

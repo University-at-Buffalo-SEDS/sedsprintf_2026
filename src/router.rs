@@ -31,9 +31,10 @@ use crate::{
     config::{
         DataEndpoint, DataType, DEVICE_IDENTIFIER, MAX_HANDLER_RETRIES, RELIABLE_MAX_PENDING,
         RELIABLE_MAX_RETRIES, RELIABLE_RETRANSMIT_MS,
-    }, get_needed_message_size, impl_letype_num, is_reliable_type,
-    lock::RouterMutex,
-    message_meta, packet::Packet, reliable_mode,
+    }, get_needed_message_size, impl_letype_num,
+    is_reliable_type,
+    lock::RouterMutex, message_meta, packet::Packet,
+    reliable_mode,
     serialize,
     MessageElement,
     TelemetryError, TelemetryResult,
@@ -897,7 +898,11 @@ impl Router {
                 RemoteSidePlan::Target(sides) => Ok(!sides.is_empty()),
                 RemoteSidePlan::Flood => {
                     let st = self.state.lock();
-                    Ok(st.sides.iter().enumerate().any(|(side, _)| exclude != Some(side)))
+                    Ok(st
+                        .sides
+                        .iter()
+                        .enumerate()
+                        .any(|(side, _)| exclude != Some(side)))
                 }
             }
         }
