@@ -4056,6 +4056,70 @@ mod router_tests {
             assert!(snap_after.current_announce_interval_ms >= DISCOVERY_FAST_INTERVAL_MS);
         }
 
+        #[cfg(feature = "timesync")]
+        #[test]
+        fn router_periodic_dispatches_discovery_and_timesync_when_enabled() {
+            let seen: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_c = seen.clone();
+
+            let router = Router::new_with_clock(
+                RouterMode::Sink,
+                RouterConfig::default().with_timesync(crate::timesync::TimeSyncConfig {
+                    role: crate::timesync::TimeSyncRole::Source,
+                    ..Default::default()
+                }),
+                zero_clock(),
+            );
+            router.add_side_packet("NET", move |pkt: &Packet| -> TelemetryResult<()> {
+                seen_c.lock().unwrap().push(pkt.clone());
+                Ok(())
+            });
+
+            router.periodic(0).unwrap();
+
+            let pkts = seen.lock().unwrap().clone();
+            assert!(
+                pkts.iter()
+                    .any(|pkt| pkt.data_type() == DataType::DiscoveryAnnounce)
+            );
+            assert!(
+                pkts.iter()
+                    .any(|pkt| pkt.data_type() == DataType::TimeSyncAnnounce)
+            );
+        }
+
+        #[cfg(feature = "timesync")]
+        #[test]
+        fn router_periodic_can_skip_timesync_but_still_dispatch_discovery() {
+            let seen: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_c = seen.clone();
+
+            let router = Router::new_with_clock(
+                RouterMode::Sink,
+                RouterConfig::default().with_timesync(crate::timesync::TimeSyncConfig {
+                    role: crate::timesync::TimeSyncRole::Source,
+                    ..Default::default()
+                }),
+                zero_clock(),
+            );
+            router.add_side_packet("NET", move |pkt: &Packet| -> TelemetryResult<()> {
+                seen_c.lock().unwrap().push(pkt.clone());
+                Ok(())
+            });
+
+            router.periodic_no_timesync(0).unwrap();
+
+            let pkts = seen.lock().unwrap().clone();
+            assert!(
+                pkts.iter()
+                    .any(|pkt| pkt.data_type() == DataType::DiscoveryAnnounce)
+            );
+            assert!(
+                pkts.iter()
+                    .all(|pkt| pkt.data_type() != DataType::TimeSyncAnnounce)
+            );
+        }
+
         #[test]
         fn reliable_packets_are_sent_to_all_discovered_candidate_sides() {
             let seen_a: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
@@ -4114,6 +4178,41 @@ mod router_tests {
             );
             assert_eq!(snap.routes.len(), 1);
             assert_eq!(snap.routes[0].side_name, "A");
+        }
+
+        #[test]
+        fn relay_periodic_dispatches_discovery() {
+            let seen_a: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_b: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_a_c = seen_a.clone();
+            let seen_b_c = seen_b.clone();
+
+            let relay = Relay::new(zero_clock());
+            let side_a = relay.add_side_packet("A", move |pkt: &Packet| -> TelemetryResult<()> {
+                seen_a_c.lock().unwrap().push(pkt.clone());
+                Ok(())
+            });
+            relay.add_side_packet("B", move |pkt: &Packet| -> TelemetryResult<()> {
+                seen_b_c.lock().unwrap().push(pkt.clone());
+                Ok(())
+            });
+
+            let discovery_pkt =
+                build_discovery_announce("NODE_A", 0, &[DataEndpoint::Radio]).unwrap();
+            relay.rx_from_side(side_a, discovery_pkt).unwrap();
+            relay.periodic(0).unwrap();
+            seen_a.lock().unwrap().clear();
+            seen_b.lock().unwrap().clear();
+
+            relay.periodic(0).unwrap();
+
+            assert!(
+                seen_b
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|pkt| pkt.data_type() == DataType::DiscoveryAnnounce)
+            );
         }
 
         #[test]

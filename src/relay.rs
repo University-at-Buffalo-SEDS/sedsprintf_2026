@@ -1357,4 +1357,17 @@ impl Relay {
 
         Ok(())
     }
+
+    /// Runs one application-loop maintenance cycle.
+    ///
+    /// This polls built-in discovery when that feature is compiled in, then drains queued RX/TX
+    /// work for up to `timeout_ms` milliseconds.
+    pub fn periodic(&self, timeout_ms: u32) -> TelemetryResult<()> {
+        #[cfg(feature = "discovery")]
+        {
+            let _ = self.poll_discovery()?;
+        }
+
+        self.process_all_queues_with_timeout(timeout_ms)
+    }
 }

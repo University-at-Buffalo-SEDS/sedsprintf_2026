@@ -161,6 +161,9 @@ let now = router.network_time_ms();
 `TIME_SYNC` is a built-in endpoint with broadcast mode set to `Always`, so time sync packets
 forward across sides even though the handling is internal. Packet timestamps use the internal
 network clock when one is available.
+For normal application loops, prefer `router.periodic(timeout_ms)` to run time sync, discovery,
+and queue draining together. If you need to skip time sync for a cycle while keeping the feature
+enabled, use `router.periodic_no_timesync(timeout_ms)`.
 applications just call the plain RX APIs. Use side-aware RX only when you need to override
 ingress explicitly (custom relays, multi-link bridges, etc.).
 
@@ -188,6 +191,8 @@ Queues are bounded. If you enqueue frequently, call:
 - `process_rx_queue()`
 - `process_tx_queue()`
 - `process_all_queues()`
+- `periodic(timeout_ms)`
+- `periodic_no_timesync(timeout_ms)` (router only)
 
 to keep latency low and avoid evictions.
 

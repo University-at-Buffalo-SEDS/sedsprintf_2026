@@ -120,9 +120,11 @@ For most applications using router-managed timesync, you do not need to manually
 these packets. The router can announce, request, respond, and maintain the internal network clock
 itself once time sync is configured.
 
-Drive that runtime by calling `poll_timesync()` periodically from your main loop, then processing
-the router's normal TX/RX queues. The poll is non-blocking: it only queues an announce or request
-when the configured interval says work is due.
+Drive that runtime with `periodic(timeout_ms)` in normal application loops. That runs time sync,
+discovery, and queue draining together. If you need to skip time sync for a cycle while keeping the
+feature enabled, use `periodic_no_timesync(timeout_ms)`.
+`poll_timesync()` remains available as a lower-level hook when you want to queue only due
+announce/request traffic and manage the surrounding queue processing yourself.
 
 If you want a producer to advertise real UTC, inject that absolute time through the local network
 time setters. The router's timing callback remains monotonic-only.

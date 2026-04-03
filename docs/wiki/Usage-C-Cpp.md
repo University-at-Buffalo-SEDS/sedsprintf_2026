@@ -99,14 +99,17 @@ packets internally. Use `seds_router_get_network_time_ms` / `seds_router_get_net
 read the current synthesized network time. Source/master nodes can seed that clock directly with
 the `seds_router_set_local_network_*` functions for date-only, time-only, millisecond, or
 nanosecond precision inputs.
-Call `seds_router_poll_timesync(...)` from your main loop to let the router queue any due
-announce/request traffic, then process the normal router queues. The call is non-blocking and only
-queues work when the configured interval is due.
+For normal application loops, call `seds_router_periodic(...)` to run time sync, discovery, and
+queue draining together. If you need to skip time sync for a cycle while keeping the feature
+enabled, call `seds_router_periodic_no_timesync(...)` instead.
+`seds_router_poll_timesync(...)` remains available as a lower-level non-blocking hook when you
+want to manage maintenance phases manually.
 
-With `discovery` enabled, call `seds_router_poll_discovery(...)` from that same main loop to let
-the router queue any due discovery advertisements, or call `seds_router_announce_discovery(...)`
-to force an immediate announce. Relays expose the same pattern through
-`seds_relay_poll_discovery(...)` and `seds_relay_announce_discovery(...)`.
+With `discovery` enabled, `seds_router_poll_discovery(...)` remains available as a lower-level
+hook to queue due discovery advertisements, and `seds_router_announce_discovery(...)` still forces
+an immediate announce. Relays now expose `seds_relay_periodic(...)` for the normal main-loop path,
+alongside the lower-level `seds_relay_poll_discovery(...)` and `seds_relay_announce_discovery(...)`
+functions.
 
 ## Sending and receiving
 

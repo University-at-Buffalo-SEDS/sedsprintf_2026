@@ -277,17 +277,18 @@ impl PyRouter {
 
     /// Create or retrieve a per-process singleton Router.
     #[staticmethod]
-    #[pyo3(signature = (now_ms=None, handlers=None, mode = 0))]
+    #[pyo3(signature = (now_ms=None, handlers=None, mode = 0, timesync_enabled = true))]
     fn new_singleton(
         py: Python<'_>,
         now_ms: Option<Py<PyAny>>,
         handlers: Option<&Bound<'_, PyAny>>,
         mode: u32,
+        timesync_enabled: bool,
     ) -> PyResult<Self> {
         if let Some(existing) = GLOBAL_ROUTER_SINGLETON.get() {
-            if now_ms.is_some() || handlers.is_some() {
+            if now_ms.is_some() || handlers.is_some() || !timesync_enabled {
                 return Err(PyRuntimeError::new_err(
-                    "Router singleton already exists; cannot modify now_ms/handlers",
+                    "Router singleton already exists; cannot modify now_ms/handlers/timesync_enabled",
                 ));
             }
 
@@ -381,7 +382,11 @@ impl PyRouter {
         let cfg = {
             let cfg = RouterConfig::new(handlers_vec);
             #[cfg(feature = "timesync")]
-            let cfg = cfg.with_timesync(TimeSyncConfig::default());
+            let cfg = if timesync_enabled {
+                cfg.with_timesync(TimeSyncConfig::default())
+            } else {
+                cfg
+            };
             cfg
         };
 
@@ -419,12 +424,14 @@ impl PyRouter {
 
     /// Create a new router.
     #[new]
-    #[pyo3(signature = (now_ms=None, handlers=None, mode=RouterMode::Relay as u32))]
+    #[pyo3(signature = (now_ms=None, handlers=None, mode=RouterMode::Relay as u32, timesync_enabled=true)
+    )]
     fn new(
         py: Python<'_>,
         now_ms: Option<Py<PyAny>>,
         handlers: Option<&Bound<'_, PyAny>>,
         mode: u32,
+        timesync_enabled: bool,
     ) -> PyResult<Self> {
         let now_keep = now_ms.as_ref().map(|p| p.clone_ref(py));
 
@@ -504,7 +511,11 @@ impl PyRouter {
         let cfg = {
             let cfg = RouterConfig::new(handlers_vec);
             #[cfg(feature = "timesync")]
-            let cfg = cfg.with_timesync(TimeSyncConfig::default());
+            let cfg = if timesync_enabled {
+                cfg.with_timesync(TimeSyncConfig::default())
+            } else {
+                cfg
+            };
             cfg
         };
 
@@ -1292,6 +1303,22 @@ impl PyRouter {
         rtr.process_all_queues_with_timeout(timeout_ms)
             .map_err(py_err_from)
     }
+
+    fn periodic(&self, timeout_ms: u32) -> PyResult<()> {
+        let rtr = self
+            .inner
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
+        rtr.periodic(timeout_ms).map_err(py_err_from)
+    }
+
+    fn periodic_no_timesync(&self, timeout_ms: u32) -> PyResult<()> {
+        let rtr = self
+            .inner
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("router poisoned"))?;
+        rtr.periodic_no_timesync(timeout_ms).map_err(py_err_from)
+    }
 }
 
 // ============================================================================
@@ -1475,6 +1502,10 @@ impl PyRelay {
         self.inner
             .process_all_queues_with_timeout(timeout_ms)
             .map_err(py_err_from)
+    }
+
+    fn periodic(&self, timeout_ms: u32) -> PyResult<()> {
+        self.inner.periodic(timeout_ms).map_err(py_err_from)
     }
 
     #[cfg(feature = "discovery")]

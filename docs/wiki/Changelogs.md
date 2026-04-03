@@ -1,5 +1,21 @@
 # Changelogs
 
+## Version 3.5.1 highlights
+
+- Main-loop maintenance API cleanup:
+    - Added `Router::periodic(timeout_ms)` and `Router::periodic_no_timesync(timeout_ms)` so
+      applications can drive discovery, optional time sync, and queue draining through one call.
+    - Added `Relay::periodic(timeout_ms)` so relays can drive discovery plus queue draining through
+      one call as well.
+    - Added matching C ABI and Python binding entry points for the new periodic helpers.
+- Documentation refresh:
+    - Updated Rust, Python, C/C++, and time-sync usage docs to recommend the periodic helpers for
+      normal application loops.
+    - Kept the lower-level `poll_timesync()` and `poll_discovery()` APIs documented for advanced
+      callers that want explicit control over maintenance phases.
+- Full
+  changelog: [v3.5.0...v3.5.1](https://github.com/Rylan-Meilutis/sedsprintf_rs/compare/v3.5.0...v3.5.1)
+
 ## Version 3.4.2 highlights
 
 - Time sync election and continuity:
