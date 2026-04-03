@@ -683,6 +683,24 @@ pub extern "C" fn seds_router_poll_discovery(r: *mut SedsRouter, out_did_queue: 
     }
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_periodic(r: *mut SedsRouter, timeout_ms: u32) -> i32 {
+    if r.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let router = unsafe { &(*r).inner };
+    ok_or_status(router.periodic(timeout_ms))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_router_periodic_no_timesync(r: *mut SedsRouter, timeout_ms: u32) -> i32 {
+    if r.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let router = unsafe { &(*r).inner };
+    ok_or_status(router.periodic_no_timesync(timeout_ms))
+}
+
 #[cfg(feature = "timesync")]
 #[unsafe(no_mangle)]
 pub extern "C" fn seds_router_set_local_network_time(
@@ -1067,6 +1085,15 @@ pub extern "C" fn seds_relay_poll_discovery(r: *mut SedsRelay, out_did_queue: *m
         }
         Err(e) => status_from_err(e),
     }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn seds_relay_periodic(r: *mut SedsRelay, timeout_ms: u32) -> i32 {
+    if r.is_null() {
+        return status_from_err(TelemetryError::BadArg);
+    }
+    let relay = unsafe { &(*r).inner };
+    ok_or_status(relay.periodic(timeout_ms))
 }
 
 // ============================================================================
@@ -2548,6 +2575,41 @@ mod tests {
     }
 
     #[test]
+    fn router_c_abi_periodic_runs_discovery_and_queue_processing() {
+        let hits = AtomicUsize::new(0);
+        let side_name = b"NET";
+
+        let router = Router::new_with_clock(
+            RouterMode::Sink,
+            RouterConfig::new(vec![EndpointHandler::new_packet_handler(
+                DataEndpoint::Radio,
+                |_pkt| Ok(()),
+            )]),
+            Box::new(TestClock {
+                now_ms: Arc::new(AtomicU64::new(0)),
+            }),
+        );
+        let router = Box::into_raw(Box::new(SedsRouter {
+            inner: Arc::from(router),
+        }));
+
+        let side_id = seds_router_add_side_packet(
+            router,
+            side_name.as_ptr() as *const c_char,
+            side_name.len(),
+            Some(pkt_counter_cb),
+            (&hits as *const AtomicUsize).cast_mut().cast(),
+            false,
+        );
+        assert!(side_id >= 0);
+
+        assert_eq!(seds_router_periodic_no_timesync(router, 0), 0);
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+
+        seds_router_free(router);
+    }
+
+    #[test]
     fn relay_c_abi_can_announce_and_poll_discovery() {
         let now_ms = Arc::new(AtomicU64::new(0));
         let hits = AtomicUsize::new(0);
@@ -2602,6 +2664,55 @@ mod tests {
         assert!(did_queue);
         assert_eq!(seds_relay_process_tx_queue(relay), 0);
         assert_eq!(hits.load(Ordering::SeqCst), hits_after_learning + 4);
+
+        seds_relay_free(relay);
+    }
+
+    #[test]
+    fn relay_c_abi_periodic_runs_discovery_and_queue_processing() {
+        let hits = AtomicUsize::new(0);
+        let side_name_a = b"A";
+        let side_name_b = b"B";
+
+        let relay = Relay::new(Box::new(TestClock {
+            now_ms: Arc::new(AtomicU64::new(0)),
+        }));
+        let relay = Box::into_raw(Box::new(SedsRelay {
+            inner: Arc::new(relay),
+        }));
+
+        let side_a = seds_relay_add_side_packet(
+            relay,
+            side_name_a.as_ptr() as *const c_char,
+            side_name_a.len(),
+            Some(pkt_counter_cb),
+            (&hits as *const AtomicUsize).cast_mut().cast(),
+            false,
+        );
+        let side_b = seds_relay_add_side_packet(
+            relay,
+            side_name_b.as_ptr() as *const c_char,
+            side_name_b.len(),
+            Some(pkt_counter_cb),
+            (&hits as *const AtomicUsize).cast_mut().cast(),
+            false,
+        );
+        assert!(side_a >= 0);
+        assert!(side_b >= 0);
+
+        let discovery_pkt =
+            build_discovery_announce("REMOTE_A", 0, &[DataEndpoint::Radio]).unwrap();
+        unsafe {
+            (*relay)
+                .inner
+                .rx_from_side(side_a as RelaySideId, discovery_pkt)
+                .unwrap();
+        }
+
+        assert_eq!(seds_relay_periodic(relay, 0), 0);
+        let hits_after_learning = hits.load(Ordering::SeqCst);
+        assert_eq!(seds_relay_periodic(relay, 0), 0);
+        assert_eq!(hits.load(Ordering::SeqCst), hits_after_learning + 2);
 
         seds_relay_free(relay);
     }

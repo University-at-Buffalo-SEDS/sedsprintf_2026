@@ -2549,9 +2549,7 @@ impl Router {
 
     /// Process packets in the transmit queue for up to `timeout_ms` milliseconds.
     /// If `timeout_ms == 0`, drains the queue fully.
-    pub fn process_tx_queue_with_timeout(&self, timeout_ms: u32) -> TelemetryResult<()> {
-        #[cfg(feature = "timesync")]
-        let _ = self.poll_timesync()?;
+    fn process_tx_queue_with_timeout_impl(&self, timeout_ms: u32) -> TelemetryResult<()> {
         let start = self.clock.now_ms();
         loop {
             self.process_reliable_timeouts()?;
@@ -2568,6 +2566,14 @@ impl Router {
         Ok(())
     }
 
+    /// Process packets in the transmit queue for up to `timeout_ms` milliseconds.
+    /// If `timeout_ms == 0`, drains the queue fully.
+    pub fn process_tx_queue_with_timeout(&self, timeout_ms: u32) -> TelemetryResult<()> {
+        #[cfg(feature = "timesync")]
+        let _ = self.poll_timesync()?;
+        self.process_tx_queue_with_timeout_impl(timeout_ms)
+    }
+
     /// Process a single queued receive item.
     #[inline]
     fn process_rx_queue_item(&self, item: RouterRxItem) -> TelemetryResult<()> {
@@ -2576,9 +2582,7 @@ impl Router {
 
     /// Process packets in the receive queue for up to `timeout_ms` milliseconds.
     /// If `timeout_ms == 0`, drains the queue fully.
-    pub fn process_rx_queue_with_timeout(&self, timeout_ms: u32) -> TelemetryResult<()> {
-        #[cfg(feature = "timesync")]
-        let _ = self.poll_timesync()?;
+    fn process_rx_queue_with_timeout_impl(&self, timeout_ms: u32) -> TelemetryResult<()> {
         let start = self.clock.now_ms();
         loop {
             let item_opt = self.isr_rx_queue.pop_front().unwrap_or(None).or_else(|| {
@@ -2594,11 +2598,17 @@ impl Router {
         Ok(())
     }
 
-    /// Process both transmit and receive queues for up to `timeout_ms` milliseconds.
-    /// If `timeout_ms == 0`, drains both queues fully.
-    pub fn process_all_queues_with_timeout(&self, timeout_ms: u32) -> TelemetryResult<()> {
+    /// Process packets in the receive queue for up to `timeout_ms` milliseconds.
+    /// If `timeout_ms == 0`, drains the queue fully.
+    pub fn process_rx_queue_with_timeout(&self, timeout_ms: u32) -> TelemetryResult<()> {
         #[cfg(feature = "timesync")]
         let _ = self.poll_timesync()?;
+        self.process_rx_queue_with_timeout_impl(timeout_ms)
+    }
+
+    /// Process both transmit and receive queues for up to `timeout_ms` milliseconds.
+    /// If `timeout_ms == 0`, drains both queues fully.
+    fn process_all_queues_with_timeout_impl(&self, timeout_ms: u32) -> TelemetryResult<()> {
         let drain_fully = timeout_ms == 0;
         let start = if drain_fully { 0 } else { self.clock.now_ms() };
 
@@ -2637,6 +2647,43 @@ impl Router {
         }
 
         Ok(())
+    }
+
+    /// Process both transmit and receive queues for up to `timeout_ms` milliseconds.
+    /// If `timeout_ms == 0`, drains both queues fully.
+    pub fn process_all_queues_with_timeout(&self, timeout_ms: u32) -> TelemetryResult<()> {
+        #[cfg(feature = "timesync")]
+        let _ = self.poll_timesync()?;
+        self.process_all_queues_with_timeout_impl(timeout_ms)
+    }
+
+    /// Runs one application-loop maintenance cycle.
+    ///
+    /// This polls built-in time sync and discovery when those features are compiled in, then
+    /// drains queued TX/RX work for up to `timeout_ms` milliseconds.
+    pub fn periodic(&self, timeout_ms: u32) -> TelemetryResult<()> {
+        #[cfg(feature = "timesync")]
+        let _ = self.poll_timesync()?;
+
+        #[cfg(feature = "discovery")]
+        {
+            let _ = self.poll_discovery()?;
+        }
+
+        self.process_all_queues_with_timeout_impl(timeout_ms)
+    }
+
+    /// Runs one application-loop maintenance cycle without polling built-in time sync.
+    ///
+    /// Discovery is still polled when that feature is compiled in, then queued TX/RX work is
+    /// drained for up to `timeout_ms` milliseconds.
+    pub fn periodic_no_timesync(&self, timeout_ms: u32) -> TelemetryResult<()> {
+        #[cfg(feature = "discovery")]
+        {
+            let _ = self.poll_discovery()?;
+        }
+
+        self.process_all_queues_with_timeout_impl(timeout_ms)
     }
 
     /// Enqueue an item for later transmission with flags.

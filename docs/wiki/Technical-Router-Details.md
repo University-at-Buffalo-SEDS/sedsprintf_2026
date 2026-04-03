@@ -67,7 +67,9 @@ Discovery advertisements are adaptive:
 
 - Side add / learned-route change / route expiry resets the announce cadence to a fast interval.
 - Repeated stable announces back off toward a slower interval.
-- Apps drive this by calling `poll_discovery()` periodically, or can force an announce with `announce_discovery()`.
+- Apps normally drive this through `periodic(...)`, or can call `poll_discovery()` directly when
+  they want explicit control over discovery maintenance. `announce_discovery()` still forces an
+  immediate advertise.
 - Apps can inspect the current learned topology with `export_topology()`.
 
 ## Receive pipeline (rx*)
@@ -107,6 +109,9 @@ With discovery enabled, forwarding also consults the learned side map:
 - `log*` builds a packet from typed data, validates it, and serializes it.
 - `tx*` accepts a packet or serialized bytes and forwards them.
 - Queue variants defer the work until `process_tx_queue()` or `process_all_queues()`.
+- `periodic()` bundles the built-in maintenance polling with queue draining.
+- `periodic_no_timesync()` skips the time-sync maintenance phase while still running discovery and
+  queue draining.
 - `announce_discovery()` queues a discovery advertisement immediately.
 - `poll_discovery()` queues one only when the adaptive cadence says it is due.
 - `export_topology()` snapshots the current learned route map and announce cadence, including
@@ -124,6 +129,8 @@ Queues are processed using:
 - `process_rx_queue()`
 - `process_tx_queue()`
 - `process_all_queues()`
+- `periodic()`
+- `periodic_no_timesync()`
 
 This pattern is useful for interrupt-driven systems and for batching work.
 

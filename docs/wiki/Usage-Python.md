@@ -55,6 +55,8 @@ router.process_all_queues()
 
 If you need a custom monotonic source for tests or simulation, pass `now_ms=...`. Otherwise the
 router uses its internal monotonic clock on `std` builds.
+If the extension was built with the `timesync` feature but you do not want router-managed time
+sync for a particular instance, construct `Router(..., timesync_enabled=False)`.
 
 See python-example/main.py
 ([source](https://github.com/Rylan-Meilutis/sedsprintf_rs/blob/main/python-example/main.py))
@@ -67,14 +69,16 @@ With `timesync` enabled, `Router` keeps an internal network clock. `TIME_SYNC` p
 handled internally, `network_time()` / `network_time_ms()` expose the merged current time, and
 source/master nodes can set partial or complete local time with `set_local_network_time(...)`,
 `set_local_network_date(...)`, and the `set_local_network_*` datetime helpers.
-Call `router.poll_timesync()` from your main loop to let the router queue any due announce/request
-traffic, then run the normal queue processing methods. The call is non-blocking and returns
-whether it queued a time-sync packet during that poll.
+For normal application loops, call `router.periodic(timeout_ms)` to run time sync, discovery, and
+queue draining together. If you need to skip time sync for a cycle while keeping the feature
+enabled, call `router.periodic_no_timesync(timeout_ms)` instead.
+`router.poll_timesync()` remains available as a lower-level non-blocking hook when you want to
+manage the maintenance phases manually.
 
 With `discovery` enabled, both `Router` and `Relay` also expose `announce_discovery()` and
-`poll_discovery()`. Call `poll_discovery()` from the same loop to let the adaptive discovery
-runtime queue due advertisements, or call `announce_discovery()` to force an immediate advertise
-cycle.
+`poll_discovery()`. `poll_discovery()` remains available as a lower-level hook when you want to
+manage discovery separately, while `Relay.periodic(timeout_ms)` bundles discovery polling and
+queue draining into one call. `announce_discovery()` still forces an immediate advertise cycle.
 
 ## Logging API
 
@@ -106,6 +110,8 @@ The router can queue RX/TX operations. If you use the queue variants, call:
 - `process_rx_queue()`
 - `process_tx_queue()`
 - `process_all_queues()`
+- `periodic(timeout_ms)`
+- `periodic_no_timesync(timeout_ms)` for router loops that should skip time sync on that cycle
 
 ## Sides
 
