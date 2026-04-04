@@ -33,9 +33,9 @@ use crate::{
         RELIABLE_MAX_RETRIES, RELIABLE_RETRANSMIT_MS,
     }, get_needed_message_size, impl_letype_num,
     is_reliable_type,
-    lock::RouterMutex, message_meta, packet::Packet,
-    reliable_mode,
-    serialize,
+    lock::RouterMutex, message_meta, message_priority,
+    packet::Packet,
+    reliable_mode, serialize,
     MessageElement,
     TelemetryError, TelemetryResult,
 };
@@ -87,6 +87,7 @@ pub enum RouterItem {
 struct RouterRxItem {
     src: Option<RouterSideId>,
     data: RouterItem,
+    priority: u8,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -128,6 +129,7 @@ impl ByteCost for RouterTxItem {
 struct TxQueued {
     item: RouterTxItem,
     ignore_local: bool,
+    priority: u8,
 }
 
 /// ByteCost implementation for TxQueued.
@@ -135,7 +137,7 @@ impl ByteCost for TxQueued {
     /// Byte cost is the cost of the inner item plus one bool.
     #[inline]
     fn byte_cost(&self) -> usize {
-        self.item.byte_cost() + size_of::<bool>()
+        self.item.byte_cost() + size_of::<bool>() + size_of::<u8>()
     }
 }
 
@@ -607,10 +609,17 @@ impl IsrRxQueue {
         }
     }
 
+    #[allow(dead_code)]
     #[inline]
     fn push_back(&self, item: RouterRxItem) -> TelemetryResult<()> {
         let mut g = self.try_lock()?;
         g.push_back(item)
+    }
+
+    #[inline]
+    fn push_back_prioritized(&self, item: RouterRxItem) -> TelemetryResult<()> {
+        let mut g = self.try_lock()?;
+        g.push_back_prioritized(item, |queued| queued.priority)
     }
 
     #[inline]
@@ -765,14 +774,42 @@ where
 }
 /// Router implementation
 impl Router {
+    fn router_item_priority(data: &RouterItem) -> TelemetryResult<u8> {
+        let ty = match data {
+            RouterItem::Packet(pkt) => pkt.data_type(),
+            RouterItem::Serialized(bytes) => serialize::peek_envelope(bytes.as_ref())?.ty,
+        };
+        Ok(message_priority(ty))
+    }
+
     #[cfg(feature = "timesync")]
     fn timesync_has_usable_time_locked(st: &TimeSyncRuntime, now_mono_ns: u64) -> bool {
         st.disciplined_clock.read_unix_ms(now_mono_ns).is_some()
             || st
-            .clock
-            .current_time(now_mono_ns)
-            .and_then(|reading| reading.unix_time_ms)
-            .is_some()
+                .clock
+                .current_time(now_mono_ns)
+                .and_then(|reading| reading.unix_time_ms)
+                .is_some()
+    }
+
+    #[cfg(feature = "timesync")]
+    fn reconcile_pending_timesync_request_locked(
+        st: &mut TimeSyncRuntime,
+        leader: &Option<TimeSyncLeader>,
+        now_ms: u64,
+    ) {
+        let active_remote = match leader {
+            Some(TimeSyncLeader::Remote(remote)) => Some(remote.sender.as_str()),
+            _ => None,
+        };
+        let should_clear = st
+            .pending_request
+            .as_ref()
+            .is_some_and(|pending| Some(pending.source.as_str()) != active_remote);
+        if should_clear {
+            st.pending_request = None;
+            st.next_request_mono_ms = now_ms;
+        }
     }
 
     ///Helper function for relay_send
@@ -785,6 +822,7 @@ impl Router {
     ) -> TelemetryResult<()> {
         let plan = self.remote_side_plan(&data, exclude)?;
         let mut st = self.state.lock();
+        let priority = Self::router_item_priority(&data)?;
 
         match plan {
             RemoteSidePlan::Flood => {
@@ -793,24 +831,32 @@ impl Router {
                     if exclude == Some(idx) {
                         continue;
                     }
-                    st.transmit_queue.push_back(TxQueued {
-                        item: RouterTxItem::ToSide {
-                            dst: idx,
-                            data: data.clone(),
+                    st.transmit_queue.push_back_prioritized(
+                        TxQueued {
+                            item: RouterTxItem::ToSide {
+                                dst: idx,
+                                data: data.clone(),
+                            },
+                            ignore_local,
+                            priority,
                         },
-                        ignore_local,
-                    })?;
+                        |queued| queued.priority,
+                    )?;
                 }
             }
             RemoteSidePlan::Target(sides) => {
                 for idx in sides {
-                    st.transmit_queue.push_back(TxQueued {
-                        item: RouterTxItem::ToSide {
-                            dst: idx,
-                            data: data.clone(),
+                    st.transmit_queue.push_back_prioritized(
+                        TxQueued {
+                            item: RouterTxItem::ToSide {
+                                dst: idx,
+                                data: data.clone(),
+                            },
+                            ignore_local,
+                            priority,
                         },
-                        ignore_local,
-                    })?;
+                        |queued| queued.priority,
+                    )?;
                 }
             }
         }
@@ -979,10 +1025,10 @@ impl Router {
                 }
                 if restrict_link_local
                     && st
-                    .sides
-                    .get(side)
-                    .map(|s| !s.opts.link_local_enabled)
-                    .unwrap_or(true)
+                        .sides
+                        .get(side)
+                        .map(|s| !s.opts.link_local_enabled)
+                        .unwrap_or(true)
                 {
                     continue;
                 }
@@ -1051,9 +1097,9 @@ impl Router {
             let st = self.timesync.lock();
             if let Some(tracker) = st.tracker.as_ref()
                 && tracker.should_serve(
-                now_ms,
-                Self::timesync_has_usable_time_locked(&st, self.monotonic_now_ns()),
-            )
+                    now_ms,
+                    Self::timesync_has_usable_time_locked(&st, self.monotonic_now_ns()),
+                )
             {
                 return vec![self.sender.to_owned()];
             }
@@ -1226,8 +1272,8 @@ impl Router {
                     )
                     .is_empty()
                     || !self
-                    .advertised_discovery_timesync_sources_for_link_locked(&st, now_ms)
-                    .is_empty()
+                        .advertised_discovery_timesync_sources_for_link_locked(&st, now_ms)
+                        .is_empty()
             });
             if st.sides.is_empty() || !has_any {
                 return Ok(false);
@@ -1645,10 +1691,11 @@ impl Router {
         } else {
             None
         };
-        if let Some(TimeSyncLeader::Remote(remote)) = leader {
+        Self::reconcile_pending_timesync_request_locked(&mut st, &leader, now_mono_ms);
+        if let Some(TimeSyncLeader::Remote(remote)) = leader.as_ref() {
             let target_ms = st
                 .remote_sources
-                .get(&remote.sender)
+                .get(remote.sender.as_str())
                 .map(|src| src.sample_unix_ms);
             if let Some(target_ms) = target_ms {
                 st.disciplined_clock.steer_unix_ms(now_mono_ns, target_ms);
@@ -2057,6 +2104,7 @@ impl Router {
             } else {
                 (None, None)
             };
+            Self::reconcile_pending_timesync_request_locked(&mut st, &leader, now_ms);
 
             if let Some(TimeSyncLeader::Remote(remote)) = leader.as_ref() {
                 let target_ms = st
@@ -2549,9 +2597,7 @@ impl Router {
 
     /// Process packets in the transmit queue for up to `timeout_ms` milliseconds.
     /// If `timeout_ms == 0`, drains the queue fully.
-    pub fn process_tx_queue_with_timeout(&self, timeout_ms: u32) -> TelemetryResult<()> {
-        #[cfg(feature = "timesync")]
-        let _ = self.poll_timesync()?;
+    fn process_tx_queue_with_timeout_impl(&self, timeout_ms: u32) -> TelemetryResult<()> {
         let start = self.clock.now_ms();
         loop {
             self.process_reliable_timeouts()?;
@@ -2568,6 +2614,14 @@ impl Router {
         Ok(())
     }
 
+    /// Process packets in the transmit queue for up to `timeout_ms` milliseconds.
+    /// If `timeout_ms == 0`, drains the queue fully.
+    pub fn process_tx_queue_with_timeout(&self, timeout_ms: u32) -> TelemetryResult<()> {
+        #[cfg(feature = "timesync")]
+        let _ = self.poll_timesync()?;
+        self.process_tx_queue_with_timeout_impl(timeout_ms)
+    }
+
     /// Process a single queued receive item.
     #[inline]
     fn process_rx_queue_item(&self, item: RouterRxItem) -> TelemetryResult<()> {
@@ -2576,9 +2630,7 @@ impl Router {
 
     /// Process packets in the receive queue for up to `timeout_ms` milliseconds.
     /// If `timeout_ms == 0`, drains the queue fully.
-    pub fn process_rx_queue_with_timeout(&self, timeout_ms: u32) -> TelemetryResult<()> {
-        #[cfg(feature = "timesync")]
-        let _ = self.poll_timesync()?;
+    fn process_rx_queue_with_timeout_impl(&self, timeout_ms: u32) -> TelemetryResult<()> {
         let start = self.clock.now_ms();
         loop {
             let item_opt = self.isr_rx_queue.pop_front().unwrap_or(None).or_else(|| {
@@ -2594,11 +2646,17 @@ impl Router {
         Ok(())
     }
 
-    /// Process both transmit and receive queues for up to `timeout_ms` milliseconds.
-    /// If `timeout_ms == 0`, drains both queues fully.
-    pub fn process_all_queues_with_timeout(&self, timeout_ms: u32) -> TelemetryResult<()> {
+    /// Process packets in the receive queue for up to `timeout_ms` milliseconds.
+    /// If `timeout_ms == 0`, drains the queue fully.
+    pub fn process_rx_queue_with_timeout(&self, timeout_ms: u32) -> TelemetryResult<()> {
         #[cfg(feature = "timesync")]
         let _ = self.poll_timesync()?;
+        self.process_rx_queue_with_timeout_impl(timeout_ms)
+    }
+
+    /// Process both transmit and receive queues for up to `timeout_ms` milliseconds.
+    /// If `timeout_ms == 0`, drains both queues fully.
+    fn process_all_queues_with_timeout_impl(&self, timeout_ms: u32) -> TelemetryResult<()> {
         let drain_fully = timeout_ms == 0;
         let start = if drain_fully { 0 } else { self.clock.now_ms() };
 
@@ -2639,6 +2697,43 @@ impl Router {
         Ok(())
     }
 
+    /// Process both transmit and receive queues for up to `timeout_ms` milliseconds.
+    /// If `timeout_ms == 0`, drains both queues fully.
+    pub fn process_all_queues_with_timeout(&self, timeout_ms: u32) -> TelemetryResult<()> {
+        #[cfg(feature = "timesync")]
+        let _ = self.poll_timesync()?;
+        self.process_all_queues_with_timeout_impl(timeout_ms)
+    }
+
+    /// Runs one application-loop maintenance cycle.
+    ///
+    /// This polls built-in time sync and discovery when those features are compiled in, then
+    /// drains queued TX/RX work for up to `timeout_ms` milliseconds.
+    pub fn periodic(&self, timeout_ms: u32) -> TelemetryResult<()> {
+        #[cfg(feature = "timesync")]
+        let _ = self.poll_timesync()?;
+
+        #[cfg(feature = "discovery")]
+        {
+            let _ = self.poll_discovery()?;
+        }
+
+        self.process_all_queues_with_timeout_impl(timeout_ms)
+    }
+
+    /// Runs one application-loop maintenance cycle without polling built-in time sync.
+    ///
+    /// Discovery is still polled when that feature is compiled in, then queued TX/RX work is
+    /// drained for up to `timeout_ms` milliseconds.
+    pub fn periodic_no_timesync(&self, timeout_ms: u32) -> TelemetryResult<()> {
+        #[cfg(feature = "discovery")]
+        {
+            let _ = self.poll_discovery()?;
+        }
+
+        self.process_all_queues_with_timeout_impl(timeout_ms)
+    }
+
     /// Enqueue an item for later transmission with flags.
     #[inline]
     fn tx_queue_item_with_flags(
@@ -2647,8 +2742,18 @@ impl Router {
         ignore_local: bool,
     ) -> TelemetryResult<()> {
         let mut st = self.state.lock();
-        st.transmit_queue
-            .push_back(TxQueued { item, ignore_local })?;
+        let priority = match &item {
+            RouterTxItem::Broadcast(data) => Self::router_item_priority(data)?,
+            RouterTxItem::ToSide { data, .. } => Self::router_item_priority(data)?,
+        };
+        st.transmit_queue.push_back_prioritized(
+            TxQueued {
+                item,
+                ignore_local,
+                priority,
+            },
+            |queued| queued.priority,
+        )?;
         Ok(())
     }
 
@@ -2669,11 +2774,17 @@ impl Router {
     /// Enqueue serialized bytes for RX processing (local source).
     #[inline]
     pub fn rx_serialized_queue(&self, bytes: &[u8]) -> TelemetryResult<()> {
+        let data = RouterItem::Serialized(Arc::from(bytes));
+        let priority = Self::router_item_priority(&data)?;
         let mut st = self.state.lock();
-        st.received_queue.push_back(RouterRxItem {
-            src: None,
-            data: RouterItem::Serialized(Arc::from(bytes)),
-        })?;
+        st.received_queue.push_back_prioritized(
+            RouterRxItem {
+                src: None,
+                data,
+                priority,
+            },
+            |queued| queued.priority,
+        )?;
         Ok(())
     }
 
@@ -2683,9 +2794,12 @@ impl Router {
     /// currently mutating the ISR RX queue.
     #[inline]
     pub fn rx_serialized_queue_isr(&self, bytes: &[u8]) -> TelemetryResult<()> {
-        self.isr_rx_queue.push_back(RouterRxItem {
+        let data = RouterItem::Serialized(Arc::from(bytes));
+        let priority = Self::router_item_priority(&data)?;
+        self.isr_rx_queue.push_back_prioritized(RouterRxItem {
             src: None,
-            data: RouterItem::Serialized(Arc::from(bytes)),
+            data,
+            priority,
         })
     }
 
@@ -2693,11 +2807,17 @@ impl Router {
     #[inline]
     pub fn rx_queue(&self, pkt: Packet) -> TelemetryResult<()> {
         pkt.validate()?;
+        let data = RouterItem::Packet(pkt);
+        let priority = Self::router_item_priority(&data)?;
         let mut st = self.state.lock();
-        st.received_queue.push_back(RouterRxItem {
-            src: None,
-            data: RouterItem::Packet(pkt),
-        })?;
+        st.received_queue.push_back_prioritized(
+            RouterRxItem {
+                src: None,
+                data,
+                priority,
+            },
+            |queued| queued.priority,
+        )?;
         Ok(())
     }
 
@@ -2708,9 +2828,12 @@ impl Router {
     #[inline]
     pub fn rx_queue_isr(&self, pkt: Packet) -> TelemetryResult<()> {
         pkt.validate()?;
-        self.isr_rx_queue.push_back(RouterRxItem {
+        let data = RouterItem::Packet(pkt);
+        let priority = Self::router_item_priority(&data)?;
+        self.isr_rx_queue.push_back_prioritized(RouterRxItem {
             src: None,
-            data: RouterItem::Packet(pkt),
+            data,
+            priority,
         })
     }
 
@@ -2718,11 +2841,17 @@ impl Router {
     #[inline]
     pub fn rx_queue_from_side(&self, pkt: Packet, side: RouterSideId) -> TelemetryResult<()> {
         pkt.validate()?;
+        let data = RouterItem::Packet(pkt);
+        let priority = Self::router_item_priority(&data)?;
         let mut st = self.state.lock();
-        st.received_queue.push_back(RouterRxItem {
-            src: Some(side),
-            data: RouterItem::Packet(pkt),
-        })?;
+        st.received_queue.push_back_prioritized(
+            RouterRxItem {
+                src: Some(side),
+                data,
+                priority,
+            },
+            |queued| queued.priority,
+        )?;
         Ok(())
     }
 
@@ -2733,9 +2862,12 @@ impl Router {
     #[inline]
     pub fn rx_queue_from_side_isr(&self, pkt: Packet, side: RouterSideId) -> TelemetryResult<()> {
         pkt.validate()?;
-        self.isr_rx_queue.push_back(RouterRxItem {
+        let data = RouterItem::Packet(pkt);
+        let priority = Self::router_item_priority(&data)?;
+        self.isr_rx_queue.push_back_prioritized(RouterRxItem {
             src: Some(side),
-            data: RouterItem::Packet(pkt),
+            data,
+            priority,
         })
     }
 
@@ -2746,11 +2878,17 @@ impl Router {
         bytes: &[u8],
         side: RouterSideId,
     ) -> TelemetryResult<()> {
+        let data = RouterItem::Serialized(Arc::from(bytes));
+        let priority = Self::router_item_priority(&data)?;
         let mut st = self.state.lock();
-        st.received_queue.push_back(RouterRxItem {
-            src: Some(side),
-            data: RouterItem::Serialized(Arc::from(bytes)),
-        })?;
+        st.received_queue.push_back_prioritized(
+            RouterRxItem {
+                src: Some(side),
+                data,
+                priority,
+            },
+            |queued| queued.priority,
+        )?;
         Ok(())
     }
 
@@ -2764,9 +2902,12 @@ impl Router {
         bytes: &[u8],
         side: RouterSideId,
     ) -> TelemetryResult<()> {
-        self.isr_rx_queue.push_back(RouterRxItem {
+        let data = RouterItem::Serialized(Arc::from(bytes));
+        let priority = Self::router_item_priority(&data)?;
+        self.isr_rx_queue.push_back_prioritized(RouterRxItem {
             src: Some(side),
-            data: RouterItem::Serialized(Arc::from(bytes)),
+            data,
+            priority,
         })
     }
 
@@ -3491,9 +3632,11 @@ impl Router {
     /// Receive serialized bytes (local source).
     #[inline]
     pub fn rx_serialized(&self, bytes: &[u8]) -> TelemetryResult<()> {
+        let data = RouterItem::Serialized(Arc::from(bytes));
         let item = RouterRxItem {
             src: None,
-            data: RouterItem::Serialized(Arc::from(bytes)),
+            priority: Self::router_item_priority(&data)?,
+            data,
         };
         self.rx_item(&item, false)
     }
@@ -3501,9 +3644,11 @@ impl Router {
     /// Receive a packet (local source).
     #[inline]
     pub fn rx(&self, pkt: &Packet) -> TelemetryResult<()> {
+        let data = RouterItem::Packet(pkt.clone());
         let item = RouterRxItem {
             src: None,
-            data: RouterItem::Packet(pkt.clone()),
+            priority: Self::router_item_priority(&data)?,
+            data,
         };
         self.rx_item(&item, false)
     }
@@ -3511,9 +3656,11 @@ impl Router {
     /// Receive a packet with explicit ingress side.
     #[inline]
     pub fn rx_from_side(&self, pkt: &Packet, side: RouterSideId) -> TelemetryResult<()> {
+        let data = RouterItem::Packet(pkt.clone());
         let item = RouterRxItem {
             src: Some(side),
-            data: RouterItem::Packet(pkt.clone()),
+            priority: Self::router_item_priority(&data)?,
+            data,
         };
         self.rx_item(&item, false)
     }
@@ -3521,9 +3668,11 @@ impl Router {
     /// Receive serialized bytes with explicit ingress side.
     #[inline]
     pub fn rx_serialized_from_side(&self, bytes: &[u8], side: RouterSideId) -> TelemetryResult<()> {
+        let data = RouterItem::Serialized(Arc::from(bytes));
         let item = RouterRxItem {
             src: Some(side),
-            data: RouterItem::Serialized(Arc::from(bytes)),
+            priority: Self::router_item_priority(&data)?,
+            data,
         };
         self.rx_item(&item, false)
     }

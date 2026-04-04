@@ -201,6 +201,22 @@ SedsResult seds_router_announce_discovery(SedsRouter * r);
 SedsResult seds_router_poll_discovery(SedsRouter * r, bool * out_did_queue);
 
 /**
+ * @brief Run one router maintenance cycle.
+ *
+ * This polls time sync, polls discovery when enabled in the build, and then
+ * processes RX/TX queues for up to @p timeout_ms milliseconds.
+ */
+SedsResult seds_router_periodic(SedsRouter * r, uint32_t timeout_ms);
+
+/**
+ * @brief Run one router maintenance cycle without polling time sync.
+ *
+ * This still polls discovery when enabled in the build, then processes RX/TX
+ * queues for up to @p timeout_ms milliseconds.
+ */
+SedsResult seds_router_periodic_no_timesync(SedsRouter * r, uint32_t timeout_ms);
+
+/**
  * @brief Set the router's local/master network time source with partial fields.
  *
  * Requires a build with the `timesync` feature. Presence flags indicate which
@@ -577,6 +593,14 @@ SedsResult seds_relay_announce_discovery(SedsRelay * r);
  * Requires a build with the `discovery` feature.
  */
 SedsResult seds_relay_poll_discovery(SedsRelay * r, bool * out_did_queue);
+
+/**
+ * @brief Run one relay maintenance cycle.
+ *
+ * This polls discovery when enabled in the build, then processes RX/TX queues
+ * for up to @p timeout_ms milliseconds.
+ */
+SedsResult seds_relay_periodic(SedsRelay * r, uint32_t timeout_ms);
 
 /**
  * @brief Add a new side/network to the relay.

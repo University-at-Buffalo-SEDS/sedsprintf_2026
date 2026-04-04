@@ -1,5 +1,33 @@
 # Changelogs
 
+## Version 3.5.2 highlights
+
+- Time sync failover recovery:
+    - Fixed router-managed time sync so a consumer drops stale pending requests when the selected
+      remote source times out or leadership changes.
+    - Consumers now re-issue `TIME_SYNC_REQUEST` traffic toward the newly elected replacement
+      source instead of remaining stuck on holdover until restart.
+    - Added Rust system-test coverage for the disconnect/reconnect failover path where a
+      replacement source must be requested and accepted after timeout-driven re-election.
+- Full
+  changelog: [v3.5.1...v3.5.2](https://github.com/Rylan-Meilutis/sedsprintf_rs/compare/v3.5.1...v3.5.2)
+
+## Version 3.5.1 highlights
+
+- Main-loop maintenance API cleanup:
+    - Added `Router::periodic(timeout_ms)` and `Router::periodic_no_timesync(timeout_ms)` so
+      applications can drive discovery, optional time sync, and queue draining through one call.
+    - Added `Relay::periodic(timeout_ms)` so relays can drive discovery plus queue draining through
+      one call as well.
+    - Added matching C ABI and Python binding entry points for the new periodic helpers.
+- Documentation refresh:
+    - Updated Rust, Python, C/C++, and time-sync usage docs to recommend the periodic helpers for
+      normal application loops.
+    - Kept the lower-level `poll_timesync()` and `poll_discovery()` APIs documented for advanced
+      callers that want explicit control over maintenance phases.
+- Full
+  changelog: [v3.5.0...v3.5.1](https://github.com/Rylan-Meilutis/sedsprintf_rs/compare/v3.5.0...v3.5.1)
+
 ## Version 3.4.2 highlights
 
 - Time sync election and continuity:

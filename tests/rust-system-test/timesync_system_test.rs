@@ -262,6 +262,73 @@ mod timesync_system_test {
     }
 
     #[test]
+    fn router_clears_stale_pending_request_when_source_fails_over() {
+        let now = Arc::new(AtomicU64::new(0));
+        let request_seqs = Arc::new(Mutex::new(Vec::new()));
+        let request_seqs_c = request_seqs.clone();
+        let router = Router::new_with_clock(
+            RouterMode::Sink,
+            RouterConfig::default().with_timesync(TimeSyncConfig {
+                role: TimeSyncRole::Consumer,
+                priority: 50,
+                source_timeout_ms: 1_000,
+                request_interval_ms: 1_000,
+                max_slew_ppm: 999_999,
+                ..Default::default()
+            }),
+            shared_clock(now.clone()),
+        );
+        router.add_side_packet("CAP", move |pkt| {
+            if pkt.data_type() == DataType::TimeSyncRequest {
+                request_seqs_c
+                    .lock()
+                    .unwrap()
+                    .push(pkt.data_as_u64().unwrap()[0]);
+            }
+            Ok(())
+        });
+
+        let leader_a =
+            build_timesync_announce_with_sender("SRC_A", 1, 1_700_000_000_000).unwrap();
+        router.rx(&leader_a).unwrap();
+        router.process_tx_queue().unwrap();
+
+        now.store(1_500, Ordering::SeqCst);
+        let leader_b =
+            build_timesync_announce_with_sender("SRC_B", 2, 1_700_000_001_500).unwrap();
+        router.rx(&leader_b).unwrap();
+        router.process_tx_queue().unwrap();
+
+        let request_seqs = request_seqs.lock().unwrap().clone();
+        assert_eq!(request_seqs, vec![1, 2]);
+
+        let before_response = router.network_time_ms().expect("network time unavailable");
+        let resp_b_wire = build_timesync_response(
+            request_seqs[1],
+            1_500,
+            1_700_000_001_550,
+            1_700_000_001_550,
+        )
+        .unwrap();
+        let resp_b = Packet::new(
+            DataType::TimeSyncResponse,
+            &[DataEndpoint::TimeSync],
+            "SRC_B",
+            resp_b_wire.timestamp(),
+            resp_b_wire.payload().into(),
+        )
+        .unwrap();
+        router.rx(&resp_b).unwrap();
+
+        now.store(1_600, Ordering::SeqCst);
+        let after_response = router.network_time_ms().expect("network time unavailable");
+        assert!(
+            after_response >= before_response + 140,
+            "failover response from replacement source should be accepted and influence the slewed clock: before={before_response}, after={after_response}"
+        );
+    }
+
+    #[test]
     fn router_merges_partial_network_time_sources() {
         let now = Arc::new(AtomicU64::new(2_000));
         let router = Router::new_with_clock(

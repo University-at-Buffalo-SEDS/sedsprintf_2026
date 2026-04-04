@@ -44,6 +44,25 @@ pub struct BoundedDeque<T> {
 }
 
 impl<T: ByteCost> BoundedDeque<T> {
+    fn prepare_push_fifo(&mut self, cost: usize) -> TelemetryResult<()> {
+        if cost > self.max_bytes {
+            return Err(TelemetryError::PacketTooLarge(
+                "Item exceeds maximum byte budget",
+            ));
+        }
+
+        while !self.q.is_empty() && self.cur_bytes + cost > self.max_bytes {
+            let _ = self.pop_front();
+        }
+
+        if self.q.len() >= self.max_elems {
+            let _ = self.pop_front();
+        }
+
+        self.ensure_room_for_one();
+        Ok(())
+    }
+
     /// Create new bounded deque with byte budget and element cap.
     ///
     /// `starting_elems` controls the initial allocation but will be clamped
@@ -99,7 +118,7 @@ impl<T: ByteCost> BoundedDeque<T> {
     /// Get iterator over items.
     #[allow(dead_code)]
     #[inline]
-    pub fn iter(&self) -> impl Iterator<Item=&T> {
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
         self.q.iter()
     }
 
@@ -239,29 +258,7 @@ impl<T: ByteCost> BoundedDeque<T> {
     /// - Maintains `cur_bytes` consistency.
     pub fn push_back(&mut self, v: T) -> TelemetryResult<()> {
         let cost = v.byte_cost();
-
-        // If a single item is bigger than the entire budget, drop it.
-        if cost > self.max_bytes {
-            return Err(TelemetryError::PacketTooLarge(
-                "Item exceeds maximum byte budget",
-            ));
-        }
-
-        // Evict until it fits in the byte budget.
-        // (If the queue is empty, it will fit since cost <= max_bytes.)
-        while !self.q.is_empty() && self.cur_bytes + cost > self.max_bytes {
-            let _ = self.pop_front();
-        }
-
-        // Ring behavior to enforce hard element cap (and prevent allocation growth).
-        // If we're full, evict one before pushing.
-        if self.q.len() >= self.max_elems {
-            let _ = self.pop_front();
-        }
-
-        // Ensure push won't trigger implicit growth.
-
-        self.ensure_room_for_one();
+        self.prepare_push_fifo(cost)?;
 
         // At this point, push cannot require a reallocation because:
         // - capacity was pre-allocated to max_elems
@@ -269,5 +266,146 @@ impl<T: ByteCost> BoundedDeque<T> {
         self.q.push_back(v);
         self.cur_bytes = self.cur_bytes.saturating_add(cost);
         Ok(())
+    }
+
+    /// Push while preserving descending priority order.
+    ///
+    /// `priority_of` must return a larger value for higher-priority items.
+    /// Items with equal priority preserve FIFO order.
+    pub fn push_back_prioritized<F>(&mut self, v: T, mut priority_of: F) -> TelemetryResult<()>
+    where
+        F: FnMut(&T) -> u8,
+    {
+        let cost = v.byte_cost();
+        if cost > self.max_bytes {
+            return Err(TelemetryError::PacketTooLarge(
+                "Item exceeds maximum byte budget",
+            ));
+        }
+
+        let new_priority = priority_of(&v);
+        while !self.q.is_empty() && self.cur_bytes + cost > self.max_bytes {
+            let tail_priority = self.q.back().map(&mut priority_of).unwrap_or(0);
+            if tail_priority > new_priority {
+                return Err(TelemetryError::Io("priority queue saturated"));
+            }
+            let _ = self.pop_back();
+        }
+
+        if self.q.len() >= self.max_elems {
+            let tail_priority = self.q.back().map(&mut priority_of).unwrap_or(0);
+            if tail_priority > new_priority {
+                return Err(TelemetryError::Io("priority queue saturated"));
+            }
+            let _ = self.pop_back();
+        }
+
+        self.ensure_room_for_one();
+
+        let insert_at = self
+            .q
+            .iter()
+            .position(|existing| priority_of(existing) < new_priority);
+        if let Some(idx) = insert_at {
+            self.q.insert(idx, v);
+        } else {
+            self.q.push_back(v);
+        }
+        self.cur_bytes = self.cur_bytes.saturating_add(cost);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct Item {
+        id: u8,
+        cost: usize,
+        priority: u8,
+    }
+
+    impl ByteCost for Item {
+        fn byte_cost(&self) -> usize {
+            self.cost
+        }
+    }
+
+    #[test]
+    fn prioritized_queue_preserves_fifo_within_same_priority() {
+        let mut q = BoundedDeque::new(64, 16, 2.0);
+        q.push_back_prioritized(
+            Item {
+                id: 1,
+                cost: 1,
+                priority: 10,
+            },
+            |item| item.priority,
+        )
+        .unwrap();
+        q.push_back_prioritized(
+            Item {
+                id: 2,
+                cost: 1,
+                priority: 10,
+            },
+            |item| item.priority,
+        )
+        .unwrap();
+        q.push_back_prioritized(
+            Item {
+                id: 3,
+                cost: 1,
+                priority: 20,
+            },
+            |item| item.priority,
+        )
+        .unwrap();
+
+        assert_eq!(q.pop_front().unwrap().id, 3);
+        assert_eq!(q.pop_front().unwrap().id, 1);
+        assert_eq!(q.pop_front().unwrap().id, 2);
+    }
+
+    #[test]
+    fn prioritized_queue_drops_lower_priority_when_saturated() {
+        let mut q = BoundedDeque::new(64, 32, 2.0);
+        q.push_back_prioritized(
+            Item {
+                id: 1,
+                cost: 32,
+                priority: 20,
+            },
+            |item| item.priority,
+        )
+        .unwrap();
+        q.push_back_prioritized(
+            Item {
+                id: 2,
+                cost: 32,
+                priority: 20,
+            },
+            |item| item.priority,
+        )
+        .unwrap();
+
+        let err = q
+            .push_back_prioritized(
+                Item {
+                    id: 3,
+                    cost: 32,
+                    priority: 10,
+                },
+                |item| item.priority,
+            )
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            TelemetryError::Io("priority queue saturated")
+        ));
+        assert_eq!(q.pop_front().unwrap().id, 1);
+        assert_eq!(q.pop_front().unwrap().id, 2);
     }
 }

@@ -1,5 +1,28 @@
 # Changelog
 
+## 3.5.2
+
+- Fixed router-managed time sync failover so a consumer clears stale pending sync requests when
+  the selected remote source disappears or leadership changes.
+- This resolves a reconnection case where a consumer could continue holding over on an old source
+  and fail to issue a new `TIME_SYNC_REQUEST` to the replacement source until rebooted.
+- Added regression coverage for remote-source failover to ensure the replacement source is
+  re-requested and accepted after timeout-driven re-election.
+
+## 3.5.1
+
+- Added consolidated router maintenance helpers: `periodic(timeout_ms)` and
+  `periodic_no_timesync(timeout_ms)`. These bundle discovery polling and queue draining, and the
+  latter lets applications skip time-sync maintenance for a loop iteration without disabling the
+  feature globally.
+- Added relay `periodic(timeout_ms)` to bundle discovery polling and queue draining into one main
+  loop call.
+- Exposed the new periodic APIs through the C ABI and Python bindings so Rust, C, and Python users
+  have matching main-loop maintenance entry points.
+- Updated Rust, C/C++, Python, and time-sync documentation to prefer the periodic helpers for
+  ordinary application loops while keeping `poll_timesync()` / `poll_discovery()` documented as
+  lower-level hooks.
+
 ## 3.5.0
 
 - Removed schema-level `broadcast_mode` from the active telemetry schema model. Routing is now determined by discovery
