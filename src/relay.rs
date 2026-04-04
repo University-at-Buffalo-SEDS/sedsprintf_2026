@@ -9,7 +9,7 @@ use crate::discovery::{
 use crate::packet::{hash_bytes_u64, Packet};
 use crate::queue::{BoundedDeque, ByteCost};
 use crate::serialize;
-use crate::{is_reliable_type, reliable_mode};
+use crate::{is_reliable_type, message_priority, reliable_mode};
 use crate::{
     router::Clock,
     {lock::RouterMutex, TelemetryError, TelemetryResult},
@@ -60,6 +60,7 @@ pub enum RelayItem {
 struct RelayRxItem {
     src: RelaySideId,
     data: RelayItem,
+    priority: u8,
 }
 
 impl ByteCost for RelayRxItem {
@@ -76,6 +77,7 @@ impl ByteCost for RelayRxItem {
 struct RelayTxItem {
     dst: RelaySideId,
     data: RelayItem,
+    priority: u8,
 }
 
 impl ByteCost for RelayTxItem {
@@ -147,6 +149,14 @@ enum RemoteSidePlan {
 }
 
 impl Relay {
+    fn relay_item_priority(data: &RelayItem) -> TelemetryResult<u8> {
+        let ty = match data {
+            RelayItem::Packet(pkt) => pkt.data_type(),
+            RelayItem::Serialized(bytes) => serialize::peek_envelope(bytes.as_ref())?.ty,
+        };
+        Ok(message_priority(ty))
+    }
+
     /// Create a new relay with the given clock.
     pub fn new(clock: Box<dyn Clock + Send + Sync>) -> Self {
         Self {
@@ -452,10 +462,10 @@ impl Relay {
                 }
                 if restrict_link_local
                     && st
-                    .sides
-                    .get(side)
-                    .map(|s| !s.opts.link_local_enabled)
-                    .unwrap_or(true)
+                        .sides
+                        .get(side)
+                        .map(|s| !s.opts.link_local_enabled)
+                        .unwrap_or(true)
                 {
                     continue;
                 }
@@ -611,10 +621,16 @@ impl Relay {
             if !endpoints.is_empty() {
                 let pkt =
                     discovery::build_discovery_announce("RELAY", now_ms, endpoints.as_slice())?;
-                st.tx_queue.push_back(RelayTxItem {
-                    dst,
-                    data: RelayItem::Packet(Arc::new(pkt)),
-                })?;
+                let data = RelayItem::Packet(Arc::new(pkt));
+                let priority = Self::relay_item_priority(&data)?;
+                st.tx_queue.push_back_prioritized(
+                    RelayTxItem {
+                        dst,
+                        data,
+                        priority,
+                    },
+                    |queued| queued.priority,
+                )?;
             }
             if !timesync_sources.is_empty() {
                 let pkt = discovery::build_discovery_timesync_sources(
@@ -622,10 +638,16 @@ impl Relay {
                     now_ms,
                     timesync_sources.as_slice(),
                 )?;
-                st.tx_queue.push_back(RelayTxItem {
-                    dst,
-                    data: RelayItem::Packet(Arc::new(pkt)),
-                })?;
+                let data = RelayItem::Packet(Arc::new(pkt));
+                let priority = Self::relay_item_priority(&data)?;
+                st.tx_queue.push_back_prioritized(
+                    RelayTxItem {
+                        dst,
+                        data,
+                        priority,
+                    },
+                    |queued| queued.priority,
+                )?;
             }
         }
         Ok(())
@@ -649,8 +671,8 @@ impl Relay {
                     )
                     .is_empty()
                     || !self
-                    .advertised_discovery_timesync_sources_for_link_locked(&st, now_ms)
-                    .is_empty()
+                        .advertised_discovery_timesync_sources_for_link_locked(&st, now_ms)
+                        .is_empty()
             });
             if st.sides.is_empty() || !has_any {
                 return Ok(false);
@@ -965,10 +987,16 @@ impl Relay {
             return Err(TelemetryError::HandlerError("relay: invalid side id"));
         }
 
-        st.rx_queue.push_back(RelayRxItem {
-            src,
-            data: RelayItem::Serialized(Arc::from(bytes)),
-        })
+        let data = RelayItem::Serialized(Arc::from(bytes));
+        let priority = Self::relay_item_priority(&data)?;
+        st.rx_queue.push_back_prioritized(
+            RelayRxItem {
+                src,
+                data,
+                priority,
+            },
+            |queued| queued.priority,
+        )
     }
 
     /// Enqueue a full Packet that originated from `src` into the relay RX queue.
@@ -981,10 +1009,16 @@ impl Relay {
             return Err(TelemetryError::HandlerError("relay: invalid side id"));
         }
 
-        st.rx_queue.push_back(RelayRxItem {
-            src,
-            data: RelayItem::Packet(Arc::new(packet)),
-        })
+        let data = RelayItem::Packet(Arc::new(packet));
+        let priority = Self::relay_item_priority(&data)?;
+        st.rx_queue.push_back_prioritized(
+            RelayRxItem {
+                src,
+                data,
+                priority,
+            },
+            |queued| queued.priority,
+        )
     }
 
     /// Clear both RX and TX queues.
@@ -1137,7 +1171,11 @@ impl Relay {
             return Ok(());
         }
 
-        let RelayRxItem { src, data } = item;
+        let RelayRxItem {
+            src,
+            data,
+            priority: _,
+        } = item;
         self.learn_discovery_item(src, &data)?;
 
         let plan = self.remote_side_plan(&data, src)?;
@@ -1149,18 +1187,28 @@ impl Relay {
                     if dst == src {
                         continue;
                     }
-                    st.tx_queue.push_back(RelayTxItem {
-                        dst,
-                        data: data.clone(),
-                    })?;
+                    let priority = Self::relay_item_priority(&data)?;
+                    st.tx_queue.push_back_prioritized(
+                        RelayTxItem {
+                            dst,
+                            data: data.clone(),
+                            priority,
+                        },
+                        |queued| queued.priority,
+                    )?;
                 }
             }
             RemoteSidePlan::Target(sides) => {
                 for dst in sides {
-                    st.tx_queue.push_back(RelayTxItem {
-                        dst,
-                        data: data.clone(),
-                    })?;
+                    let priority = Self::relay_item_priority(&data)?;
+                    st.tx_queue.push_back_prioritized(
+                        RelayTxItem {
+                            dst,
+                            data: data.clone(),
+                            priority,
+                        },
+                        |queued| queued.priority,
+                    )?;
                 }
             }
         }

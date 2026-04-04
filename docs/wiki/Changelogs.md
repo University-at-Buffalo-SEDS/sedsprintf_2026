@@ -1,5 +1,17 @@
 # Changelogs
 
+## Version 3.5.2 highlights
+
+- Time sync failover recovery:
+    - Fixed router-managed time sync so a consumer drops stale pending requests when the selected
+      remote source times out or leadership changes.
+    - Consumers now re-issue `TIME_SYNC_REQUEST` traffic toward the newly elected replacement
+      source instead of remaining stuck on holdover until restart.
+    - Added Rust system-test coverage for the disconnect/reconnect failover path where a
+      replacement source must be requested and accepted after timeout-driven re-election.
+- Full
+  changelog: [v3.5.1...v3.5.2](https://github.com/Rylan-Meilutis/sedsprintf_rs/compare/v3.5.1...v3.5.2)
+
 ## Version 3.5.1 highlights
 
 - Main-loop maintenance API cleanup:

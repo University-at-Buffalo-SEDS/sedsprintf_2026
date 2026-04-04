@@ -340,6 +340,8 @@ struct JsonType {
     reliable: Option<bool>,
     #[serde(default)]
     reliable_mode: Option<String>,
+    #[serde(default)]
+    priority: Option<u8>,
 
     element: JsonElement,
     class: String,
@@ -875,6 +877,7 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
                 element: MessageElement::Dynamic(MessageDataType::String, MessageClass::Error),
                 endpoints: &[#(#endpoints_tokens),*],
                 reliable: crate::ReliableMode::Ordered,
+                priority: 200,
             },
         }
     };
@@ -897,6 +900,7 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
         };
 
         let class_ts = msg_class_token(&ty.class);
+        let priority = ty.priority.unwrap_or(0);
 
         let endpoints_tokens: Vec<proc_macro2::TokenStream> = ty
             .endpoints
@@ -924,6 +928,7 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
                 element: #element_ts,
                 endpoints: &[#(#endpoints_tokens),*],
                 reliable: #reliable_mode,
+                priority: #priority,
             },
         }
     });
@@ -935,18 +940,21 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
                 element: MessageElement::Static(2, MessageDataType::UInt64, MessageClass::Data),
                 endpoints: &[DataEndpoint::TimeSync],
                 reliable: crate::ReliableMode::None,
+                priority: 255,
             },
             DataType::TimeSyncRequest => MessageMeta {
                 name: "TIME_SYNC_REQUEST",
                 element: MessageElement::Static(2, MessageDataType::UInt64, MessageClass::Data),
                 endpoints: &[DataEndpoint::TimeSync],
                 reliable: crate::ReliableMode::None,
+                priority: 255,
             },
             DataType::TimeSyncResponse => MessageMeta {
                 name: "TIME_SYNC_RESPONSE",
                 element: MessageElement::Static(4, MessageDataType::UInt64, MessageClass::Data),
                 endpoints: &[DataEndpoint::TimeSync],
                 reliable: crate::ReliableMode::None,
+                priority: 255,
             },
         }
     } else {
@@ -960,12 +968,14 @@ pub fn define_telemetry_schema(input: TokenStream) -> TokenStream {
                 element: MessageElement::Dynamic(MessageDataType::UInt32, MessageClass::Data),
                 endpoints: &[DataEndpoint::Discovery],
                 reliable: crate::ReliableMode::None,
+                priority: 240,
             },
             DataType::DiscoveryTimeSyncSources => MessageMeta {
                 name: "DISCOVERY_TIMESYNC_SOURCES",
                 element: MessageElement::Dynamic(MessageDataType::UInt8, MessageClass::Data),
                 endpoints: &[DataEndpoint::Discovery],
                 reliable: crate::ReliableMode::None,
+                priority: 240,
             },
         }
     } else {
@@ -1040,6 +1050,7 @@ mod tests {
             doc: None,
             reliable: Some(false),
             reliable_mode: Some("None".to_string()),
+            priority: Some(0),
             element: JsonElement::Dynamic {
                 data_type: "String".to_string(),
             },
