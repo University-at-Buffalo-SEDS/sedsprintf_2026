@@ -34,6 +34,17 @@ class TelemetryConfigEditorPathTests(unittest.TestCase):
         ):
             self.assertEqual(editor.find_ipc_schema_json(), absolute)
 
+    def test_type_row_text_includes_priority_when_nonzero(self) -> None:
+        row = editor._type_row_text(
+            {
+                "rust": "GpsData",
+                "name": "GPS_DATA",
+                "reliable_mode": "None",
+                "priority": 7,
+            }
+        )
+        self.assertIn("[Prio:7]", row)
+
 
 if __name__ == "__main__":
     unittest.main()

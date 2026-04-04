@@ -57,6 +57,7 @@ ELEMENT_KIND_OPTIONS = ["Static", "Dynamic"]
 RELIABLE_MODE_OPTIONS = ["None", "Ordered", "Unordered"]
 SCHEMA_SCOPE_BASE = "base"
 SCHEMA_SCOPE_IPC = "ipc"
+MAX_TYPE_PRIORITY = 255
 
 
 def _is_reserved_telemetry_error(rust: str) -> bool:
@@ -168,7 +169,9 @@ def _type_row_text(ty: Dict[str, Any]) -> str:
         rel = " [R]" if bool(ty.get("reliable", False)) else ""
     else:
         rel = f" [Rel:{rel_mode}]"
-    return f"{ty.get('rust', '')}  [{ty.get('name', '')}]{rel}"
+    priority = int(ty.get("priority", 0) or 0)
+    prio = f" [Prio:{priority}]" if priority > 0 else ""
+    return f"{ty.get('rust', '')}  [{ty.get('name', '')}]{rel}{prio}"
 
 
 def _update_listbox_row(lb: tk.Listbox, idx: int, text: str) -> None:
@@ -412,6 +415,7 @@ class TelemetryConfigEditor(tk.Tk):
         self.ty_dtype_var.trace_add("write", lambda *_: self._schedule_live_type_apply())  # type: ignore
         self.ty_count_var.trace_add("write", lambda *_: self._schedule_live_type_apply())  # type: ignore
         self.ty_reliable_mode_var.trace_add("write", lambda *_: self._schedule_live_type_apply())  # type: ignore
+        self.ty_priority_var.trace_add("write", lambda *_: self._schedule_live_type_apply())  # type: ignore
         self.ty_doc_text.bind("<<Modified>>", self._on_ty_doc_modified)
 
     def _on_ep_doc_modified(self, _e=None):
@@ -555,6 +559,7 @@ class TelemetryConfigEditor(tk.Tk):
         new_dtype = (self.ty_dtype_var.get() or DATA_TYPE_OPTIONS[0]).strip()
         new_doc = self.ty_doc_text.get("1.0", tk.END).strip()
         new_reliable_mode = (self.ty_reliable_mode_var.get() or "None").strip()
+        new_priority_s = (self.ty_priority_var.get() or "0").strip()
 
         if new_rust and _is_reserved_telemetry_error(new_rust):
             self._set_status("TelemetryError data type is built-in and cannot be added.")
@@ -573,6 +578,12 @@ class TelemetryConfigEditor(tk.Tk):
         if new_dtype not in DATA_TYPE_OPTIONS:
             return
         if new_reliable_mode not in RELIABLE_MODE_OPTIONS:
+            return
+        try:
+            new_priority = int(new_priority_s)
+        except Exception:
+            return
+        if new_priority < 0 or new_priority > MAX_TYPE_PRIORITY:
             return
 
         element: Dict[str, Any] = {"kind": new_kind, "data_type": new_dtype}
@@ -594,6 +605,7 @@ class TelemetryConfigEditor(tk.Tk):
         ty["doc"] = new_doc
         ty["reliable_mode"] = new_reliable_mode
         ty["reliable"] = new_reliable_mode != "None"
+        ty["priority"] = new_priority
         ty["class"] = new_class
         ty["element"] = element
         ty["endpoints"] = [e for e in sel_eps if e in known_eps]
@@ -851,12 +863,19 @@ class TelemetryConfigEditor(tk.Tk):
             row=5, column=1, sticky="w", padx=(10, 0), pady=(10, 0)
         )
 
-        ttk.Label(right, text="Doc (optional):").grid(row=6, column=0, sticky="w", pady=(10, 0))
+        ttk.Label(right, text=f"Queue priority (0-{MAX_TYPE_PRIORITY}):").grid(
+            row=6, column=0, sticky="w", pady=(10, 0)
+        )
+        self.ty_priority_var = tk.StringVar(value="0")
+        self.ty_priority_entry = ttk.Entry(right, textvariable=self.ty_priority_var, width=10)
+        self.ty_priority_entry.grid(row=6, column=1, sticky="w", padx=(10, 0), pady=(10, 0))
+
+        ttk.Label(right, text="Doc (optional):").grid(row=7, column=0, sticky="w", pady=(10, 0))
         self.ty_doc_text = tk.Text(right, height=5)
-        self.ty_doc_text.grid(row=6, column=1, sticky="ew", padx=(10, 0), pady=(10, 0))
+        self.ty_doc_text.grid(row=7, column=1, sticky="ew", padx=(10, 0), pady=(10, 0))
 
         epbox = ttk.LabelFrame(right, text="Endpoints for this DataType", padding=8)
-        epbox.grid(row=7, column=0, columnspan=2, sticky="nsew", pady=(12, 0))
+        epbox.grid(row=8, column=0, columnspan=2, sticky="nsew", pady=(12, 0))
         epbox.columnconfigure(0, weight=1)
         epbox.columnconfigure(1, weight=0)
         epbox.columnconfigure(2, weight=1)
@@ -886,7 +905,7 @@ class TelemetryConfigEditor(tk.Tk):
             right,
             text="Edits apply in-memory automatically. Use Ctrl/Cmd+S to write JSON.",
             foreground="gray",
-        ).grid(row=8, column=0, columnspan=2, sticky="w", pady=(14, 0))
+        ).grid(row=9, column=0, columnspan=2, sticky="w", pady=(14, 0))
 
         self._type_lock_widgets = [
             self.ty_rust_entry,
@@ -895,6 +914,7 @@ class TelemetryConfigEditor(tk.Tk):
             self.ty_dtype_combo,
             self.ty_count_entry,
             self.ty_reliable_mode_combo,
+            self.ty_priority_entry,
         ]
 
         self._update_count_visibility()
@@ -1255,6 +1275,15 @@ class TelemetryConfigEditor(tk.Tk):
                     raise RuntimeError(
                         f"types[{i}].reliable_mode must be one of {RELIABLE_MODE_OPTIONS}, got {rm!r}"
                     )
+            priority = ty.get("priority", 0)
+            try:
+                priority_i = int(priority)
+            except Exception:
+                raise RuntimeError(f"types[{i}].priority must be an integer, got {priority!r}")
+            if priority_i < 0 or priority_i > MAX_TYPE_PRIORITY:
+                raise RuntimeError(
+                    f"types[{i}].priority must be in 0..={MAX_TYPE_PRIORITY}, got {priority_i}"
+                )
 
             eps = ty.get("endpoints", [])
             if not isinstance(eps, list):
@@ -1304,6 +1333,7 @@ class TelemetryConfigEditor(tk.Tk):
             self.ty_dtype_var.set(DATA_TYPE_OPTIONS[0])
             self.ty_count_var.set("1")
             self.ty_reliable_mode_var.set("None")
+            self.ty_priority_var.set("0")
             self.ty_doc_text.configure(state="normal")
             self.ty_doc_text.delete("1.0", tk.END)
             self.ty_doc_text.edit_modified(False)
@@ -1383,6 +1413,7 @@ class TelemetryConfigEditor(tk.Tk):
                 "doc": "",
                 "reliable": False,
                 "reliable_mode": "None",
+                "priority": 0,
                 "class": "Data",
                 "element": {"kind": "Static", "data_type": "Float32", "count": 1},
                 "endpoints": [],
@@ -1439,6 +1470,7 @@ class TelemetryConfigEditor(tk.Tk):
             if reliable_mode not in RELIABLE_MODE_OPTIONS:
                 reliable_mode = "None"
             self.ty_reliable_mode_var.set(reliable_mode)
+            self.ty_priority_var.set(str(int(ty.get("priority", 0) or 0)))
 
             if kind == "Static":
                 self.ty_count_var.set(str(el.get("count", 1)))

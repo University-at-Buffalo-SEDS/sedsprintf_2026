@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.5.2
+
+- Fixed router-managed time sync failover so a consumer clears stale pending sync requests when
+  the selected remote source disappears or leadership changes.
+- This resolves a reconnection case where a consumer could continue holding over on an old source
+  and fail to issue a new `TIME_SYNC_REQUEST` to the replacement source until rebooted.
+- Added regression coverage for remote-source failover to ensure the replacement source is
+  re-requested and accepted after timeout-driven re-election.
+
 ## 3.5.1
 
 - Added consolidated router maintenance helpers: `periodic(timeout_ms)` and

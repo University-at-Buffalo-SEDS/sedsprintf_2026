@@ -6,7 +6,7 @@
 // Therefore, if you are trying to optimize
 // this routine, and it fails (it most surely will),
 // please increase this counter as a warning for the next person:
-// total hours wasted on this project = 825
+// total hours wasted on this project = 1253
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(unused_doc_comments)]
@@ -423,6 +423,8 @@ pub struct MessageMeta {
     endpoints: &'static [DataEndpoint],
     /// Reliable delivery mode for this type.
     reliable: ReliableMode,
+    /// Queue priority for this type. Higher values are serviced first.
+    priority: u8,
 }
 
 impl DataType {
@@ -451,6 +453,12 @@ pub const fn is_reliable_type(ty: DataType) -> bool {
 #[inline]
 pub const fn reliable_mode(ty: DataType) -> ReliableMode {
     get_message_meta(ty).reliable
+}
+
+/// Return the queue priority for the given [`DataType`].
+#[inline]
+pub const fn message_priority(ty: DataType) -> u8 {
+    get_message_meta(ty).priority
 }
 
 // ---- Convenience multiplication helpers ----
