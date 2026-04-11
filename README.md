@@ -58,7 +58,9 @@ With the optional `discovery` feature, routers and relays can exchange built-in 
 endpoints are reachable through which sides, adapt the announce rate as the topology changes, and export a live topology
 snapshot for inspection. When `timesync` is also enabled, discovery can advertise concrete time source sender IDs so
 `TIME_SYNC` requests prefer exact source paths instead of generic endpoint flooding. When a route is known, forwarding
-becomes more selective; when it is not known, the system falls back to ordinary flooding.
+becomes more selective; when it is not known, the system falls back to ordinary flooding. `DISCOVERY` and `TIME_SYNC`
+are reserved internal router endpoints: applications can use the discovery and time-sync APIs, but must not register
+local endpoint handlers for those endpoints or try to override their built-in handling.
 
 The size of the header in a serialized packet is around 20 bytes (the size will change based on the total number of
 endpoints in your system and the length of the sender string), plus a 4-byte CRC32 trailer. As a rough example, a packet
