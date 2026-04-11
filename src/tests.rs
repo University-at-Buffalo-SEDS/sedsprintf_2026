@@ -960,6 +960,65 @@ mod timeout_tests {
         // At least something should have happened
         assert!(tx_count.load(Ordering::SeqCst) + rx_count.load(Ordering::SeqCst) >= 1);
     }
+
+    #[cfg(feature = "discovery")]
+    #[test]
+    fn process_all_queues_timeout_does_not_starve_rx_after_slow_tx() {
+        use crate::discovery::build_discovery_announce;
+        use std::sync::Mutex;
+
+        struct ManualClock {
+            now_ms: Arc<AtomicU64>,
+        }
+
+        impl Clock for ManualClock {
+            fn now_ms(&self) -> u64 {
+                self.now_ms.load(Ordering::SeqCst)
+            }
+        }
+
+        let now_ms = Arc::new(AtomicU64::new(0));
+        let tx_count = Arc::new(AtomicUsize::new(0));
+        let tx_count_c = tx_count.clone();
+        let now_ms_c = now_ms.clone();
+        let seen_remote: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+        let seen_remote_c = seen_remote.clone();
+
+        let router = Router::new_with_clock(
+            RouterMode::Sink,
+            RouterConfig::new(vec![EndpointHandler::new_packet_handler(
+                DataEndpoint::Radio,
+                |_pkt| Ok(()),
+            )]),
+            Box::new(ManualClock {
+                now_ms: now_ms.clone(),
+            }),
+        );
+        let side_remote =
+            router.add_side_packet("REMOTE", move |pkt: &Packet| -> TelemetryResult<()> {
+                tx_count_c.fetch_add(1, Ordering::SeqCst);
+                now_ms_c.store(2, Ordering::SeqCst);
+                seen_remote_c.lock().unwrap().push(pkt.clone());
+                Ok(())
+            });
+
+        router
+            .log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0])
+            .unwrap();
+        let discovery_pkt =
+            build_discovery_announce("REMOTE_NODE", 0, &[DataEndpoint::Radio]).unwrap();
+        let discovery_bytes = crate::serialize::serialize_packet(&discovery_pkt);
+        router
+            .rx_serialized_queue_from_side(discovery_bytes.as_ref(), side_remote)
+            .unwrap();
+
+        router.process_all_queues_with_timeout(2).unwrap();
+
+        assert_eq!(tx_count.load(Ordering::SeqCst), 1);
+        let topo = router.export_topology();
+        assert_eq!(topo.routes.len(), 1);
+        assert_eq!(topo.routes[0].reachable_endpoints, vec![DataEndpoint::Radio]);
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -3759,17 +3818,30 @@ mod router_tests {
 
     use crate::config::{DataEndpoint, DataType};
     use crate::packet::Packet;
-    use crate::router::{EndpointHandler, Router, RouterMode};
+    use crate::router::{EndpointHandler, Router, RouterConfig, RouterMode};
     use crate::tests::timeout_tests::StepClock;
     use crate::{serialize, TelemetryResult};
     use std::sync::{Arc, Mutex};
+
+    #[cfg(feature = "discovery")]
+    #[test]
+    #[should_panic(expected = "reserved internal endpoint handlers must not be user-registered")]
+    fn user_cannot_register_discovery_endpoint_handler() {
+        let _ = EndpointHandler::new_packet_handler(DataEndpoint::Discovery, |_pkt| Ok(()));
+    }
+
+    #[cfg(feature = "timesync")]
+    #[test]
+    #[should_panic(expected = "reserved internal endpoint handlers must not be user-registered")]
+    fn user_cannot_register_timesync_endpoint_handler() {
+        let _ = EndpointHandler::new_packet_handler(DataEndpoint::TimeSync, |_pkt| Ok(()));
+    }
 
     /// In `Relay` mode, receiving a packet that includes at least one
     /// non-local endpoint should cause the router to re-transmit (re-broadcast)
     /// the packet.
     #[test]
     fn relay_mode_retransmits_when_remote_endpoint_present() {
-        use crate::router::RouterConfig;
         use std::sync::atomic::{AtomicUsize, Ordering};
         static TX_CALLS: AtomicUsize = AtomicUsize::new(0);
 
@@ -3809,7 +3881,6 @@ mod router_tests {
     /// In `Sink` mode, receiving a packet should never re-transmit.
     #[test]
     fn sink_mode_never_retransmits_on_receive() {
-        use crate::router::RouterConfig;
         use std::sync::atomic::{AtomicUsize, Ordering};
 
         static TX_CALLS: AtomicUsize = AtomicUsize::new(0);
@@ -3975,6 +4046,76 @@ mod router_tests {
             assert_eq!(got_a.len(), 1);
             assert!(got_b.is_empty());
             assert_eq!(got_a[0].data_type(), DataType::GpsData);
+        }
+
+        #[test]
+        fn queued_packet_discovery_updates_route_table_after_full_queue_drain() {
+            let router = Router::new_with_clock(
+                RouterMode::Sink,
+                RouterConfig::new(vec![EndpointHandler::new_packet_handler(
+                    DataEndpoint::SdCard,
+                    |_pkt| Ok(()),
+                )]),
+                zero_clock(),
+            );
+            let side_fill =
+                router.add_side_packet("FILL", |_pkt: &Packet| -> TelemetryResult<()> { Ok(()) });
+
+            let discovery_pkt =
+                build_discovery_announce("AB", 0, &[DataEndpoint::Radio, DataEndpoint::TimeSync])
+                    .unwrap();
+            router.rx_queue_from_side(discovery_pkt, side_fill).unwrap();
+            router.process_all_queues_with_timeout(0).unwrap();
+
+            let topo = router.export_topology();
+            assert_eq!(topo.routes.len(), 1);
+            assert_eq!(topo.routes[0].side_name, "FILL");
+            assert_eq!(
+                topo.routes[0].reachable_endpoints,
+                vec![DataEndpoint::Radio, DataEndpoint::TimeSync]
+            );
+            assert!(topo.advertised_endpoints.contains(&DataEndpoint::SdCard));
+            assert!(topo.advertised_endpoints.contains(&DataEndpoint::Radio));
+        }
+
+        #[test]
+        fn queued_serialized_discovery_timesync_sources_update_route_table_after_full_queue_drain(
+        ) {
+            let router = Router::new_with_clock(
+                RouterMode::Sink,
+                RouterConfig::new(vec![EndpointHandler::new_packet_handler(
+                    DataEndpoint::SdCard,
+                    |_pkt| Ok(()),
+                )]),
+                zero_clock(),
+            );
+            let side_fill =
+                router.add_side_packet("FILL", |_pkt: &Packet| -> TelemetryResult<()> { Ok(()) });
+
+            let announce = build_discovery_announce("AB", 0, &[DataEndpoint::Radio]).unwrap();
+            let announce_bytes = crate::serialize::serialize_packet(&announce);
+            router
+                .rx_serialized_queue_from_side(announce_bytes.as_ref(), side_fill)
+                .unwrap();
+
+            let sources =
+                build_discovery_timesync_sources("AB", 0, &["AB", "AB_BACKUP"]).unwrap();
+            let source_bytes = crate::serialize::serialize_packet(&sources);
+            router
+                .rx_serialized_queue_from_side(source_bytes.as_ref(), side_fill)
+                .unwrap();
+
+            router.process_all_queues_with_timeout(0).unwrap();
+
+            let topo = router.export_topology();
+            assert_eq!(topo.routes.len(), 1);
+            assert_eq!(topo.routes[0].side_name, "FILL");
+            assert_eq!(topo.routes[0].reachable_endpoints, vec![DataEndpoint::Radio]);
+            assert_eq!(
+                topo.routes[0].reachable_timesync_sources,
+                vec!["AB".to_string(), "AB_BACKUP".to_string()]
+            );
+            assert!(topo.advertised_timesync_sources.contains(&"AB".to_string()));
         }
 
         #[test]
@@ -4700,4 +4841,3 @@ mod router_tests {
         }
     }
 }
-
