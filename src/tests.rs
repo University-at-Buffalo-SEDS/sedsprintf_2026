@@ -4223,6 +4223,46 @@ mod router_tests {
         }
 
         #[test]
+        fn end_to_end_tracking_still_registers_on_serialized_sides_without_link_reliability() {
+            let router = Router::new_with_clock(
+                RouterMode::Sink,
+                RouterConfig::default(),
+                zero_clock(),
+            );
+            let side = router.add_side_serialized_with_options(
+                "A",
+                |_bytes: &[u8]| -> TelemetryResult<()> { Ok(()) },
+                crate::router::RouterSideOptions {
+                    reliable_enabled: false,
+                    ..Default::default()
+                },
+            );
+
+            router
+                .rx_from_side(
+                    &build_discovery_announce("DEST_A", 0, &[DataEndpoint::Radio]).unwrap(),
+                    side,
+                )
+                .unwrap();
+            router.process_all_queues().unwrap();
+
+            let pkt = Packet::from_f32_slice(
+                DataType::GpsData,
+                &[1.0, 2.0, 3.0],
+                &[DataEndpoint::Radio],
+                78,
+            )
+            .unwrap();
+            let packet_id = pkt.packet_id();
+            router.tx(pkt).unwrap();
+
+            assert_eq!(
+                router.debug_end_to_end_pending_destination_count(packet_id),
+                Some(1)
+            );
+        }
+
+        #[test]
         fn relay_end_to_end_acked_holders_clear_when_discovered_holder_expires() {
             let now_ms = Arc::new(AtomicU64::new(0));
             let relay = Relay::new(Box::new(SharedClock {

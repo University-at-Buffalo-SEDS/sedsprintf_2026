@@ -1260,13 +1260,14 @@ impl Router {
         &self,
         st: &RouterInner,
         now_ms: u64,
+        side_id: RouterSideId,
         link_local_enabled: bool,
     ) -> Vec<DataEndpoint> {
         let mut eps = self.local_discovery_endpoints();
-        if !link_local_enabled {
-            eps.retain(|ep| !ep.is_link_local_only());
-        }
-        for route in st.discovery_routes.values() {
+        for (&route_side, route) in st.discovery_routes.iter() {
+            if route_side == side_id {
+                continue;
+            }
             if now_ms.saturating_sub(route.last_seen_ms) > DISCOVERY_ROUTE_TTL_MS {
                 continue;
             }
@@ -1286,9 +1287,13 @@ impl Router {
         &self,
         st: &RouterInner,
         now_ms: u64,
+        side_id: RouterSideId,
     ) -> Vec<String> {
         let mut sources = self.local_discovery_timesync_sources(now_ms);
-        for route in st.discovery_routes.values() {
+        for (&route_side, route) in st.discovery_routes.iter() {
+            if route_side == side_id {
+                continue;
+            }
             if now_ms.saturating_sub(route.last_seen_ms) > DISCOVERY_ROUTE_TTL_MS {
                 continue;
             }
@@ -1319,10 +1324,15 @@ impl Router {
                     let endpoints = self.advertised_discovery_endpoints_for_link_locked(
                         &st,
                         now_ms,
+                        side_id,
                         side.opts.link_local_enabled,
                     );
                     let timesync_sources =
-                        self.advertised_discovery_timesync_sources_for_link_locked(&st, now_ms);
+                        self.advertised_discovery_timesync_sources_for_link_locked(
+                            &st,
+                            now_ms,
+                            side_id,
+                        );
                     (side_id, endpoints, timesync_sources)
                 })
                 .collect::<Vec<_>>()
@@ -1367,16 +1377,21 @@ impl Router {
                 self.reconcile_end_to_end_reliable_destinations_locked(&mut st)?;
                 Self::note_discovery_topology_change_locked(&mut st, now_ms);
             }
-            let has_any = st.sides.iter().any(|side| {
+            let has_any = st.sides.iter().enumerate().any(|(side_id, side)| {
                 !self
                     .advertised_discovery_endpoints_for_link_locked(
                         &st,
                         now_ms,
+                        side_id,
                         side.opts.link_local_enabled,
                     )
                     .is_empty()
                     || !self
-                        .advertised_discovery_timesync_sources_for_link_locked(&st, now_ms)
+                        .advertised_discovery_timesync_sources_for_link_locked(
+                            &st,
+                            now_ms,
+                            side_id,
+                        )
                         .is_empty()
             });
             if st.sides.is_empty() || !has_any {
@@ -1575,8 +1590,7 @@ impl Router {
         let Some(side_ref) = st.sides.get(side) else {
             return false;
         };
-        side_ref.opts.reliable_enabled
-            && matches!(side_ref.tx_handler, RouterTxHandlerFn::Serialized(_))
+        matches!(side_ref.tx_handler, RouterTxHandlerFn::Serialized(_))
     }
 
     fn queue_end_to_end_reliable_ack(&self, pkt: &Packet) -> TelemetryResult<()> {
