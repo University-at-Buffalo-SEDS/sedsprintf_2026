@@ -14,7 +14,9 @@ Key outcomes:
 - Consistent message definitions across Rust, C/C++, and Python.
 - Small, predictable packets that are easy to send over low‑bandwidth links.
 - A central Router API that handles validation, dedupe, and dispatch.
-- Optional TCP‑like reliability (ACKs, retransmits, ordered/unordered delivery) for types marked reliable in the schema.
+- Optional TCP‑like reliability (ACKs, retransmits, ordered/unordered delivery) for types marked
+  reliable in the schema, plus discovery-coupled end-to-end verification on reliable serialized
+  links.
 - CRC32 integrity checks on all serialized frames (corrupt frames are dropped; reliable modes request retransmit).
 - Optional adaptive discovery that learns which endpoints are reachable on which sides and exports a live topology view.
 
@@ -31,6 +33,9 @@ through their handlers; side-aware RX functions are only needed when you explici
 - **Relay**: A simpler fan‑out component that forwards packets between sides without knowing the schema.
 - **Discovery**: An optional internal control plane that advertises reachable endpoints, adapts its announce rate to
   topology changes, and helps routers/relays forward more selectively.
+- **End-to-end reliable delivery**: An internal reliability layer that uses discovery to keep a
+  reliable packet pending until the currently discovered destination holders have all confirmed
+  local delivery.
 
 ## A simple mental model
 
@@ -60,7 +65,9 @@ the usual flood behavior.
 4) It calls any local handlers for the targeted endpoints.
 5) If configured to relay, it forwards the packet to other links.
 
-With discovery enabled, step 5 becomes "forward to known matching sides when possible, otherwise flood."
+With discovery enabled, step 5 becomes "forward to known matching sides when possible, otherwise
+flood." For reliable serialized traffic, the source also tracks which discovered holders still owe
+end-to-end ACKs and only retransmits toward those remaining holders.
 
 ## Typical deployment shapes
 
@@ -85,6 +92,7 @@ log(GPS_DATA)  ->  serialize -> bytes -> send -> bytes -> rx_serialized()
 
 - If you want the concepts explained without code: [Concepts](Concepts)
 - If you want integration steps: [Build-and-Configure](Build-and-Configure)
+- If you want the validation surface: [Testing](Testing)
 - If you want routing internals: [Technical-Router-Details](Technical-Router-Details)
 - If you need time sync details: [Time-Sync](Time-Sync)
 - If you want implementation details: [Technical-Architecture](Technical-Architecture)

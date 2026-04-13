@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- Backported the newer discovery-coupled end-to-end reliable transport into this repo without
+  changing the external API. `RouterMode`, existing constructors, and the current C/Python ABI
+  remain intact.
+- Reliable serialized links now keep a packet in flight until every currently discovered holder of
+  the target endpoint has ACKed local delivery, instead of stopping after the first remote success.
+- End-to-end ACKs and retransmit requests now follow discovery-learned return paths instead of
+  flooding unrelated sides.
+- Relay discovery state now tracks individual announcers per side so learned holder ACK state can
+  be pruned correctly when topology changes.
+- Pending reliable destinations are reconciled against discovery during timeout handling, so boards
+  that disappear from topology are removed from the outstanding set instead of causing infinite
+  retries.
+- Added regression coverage for router pending-destination expiry and relay learned-ACK expiry.
+- `./build.py test` passes after the backport, including clippy, unit tests, Rust and C system
+  tests, benchmark smoke, Python build validation, and embedded build validation.
+
 ## 3.5.2
 
 - Fixed router-managed time sync failover so a consumer clears stale pending sync requests when

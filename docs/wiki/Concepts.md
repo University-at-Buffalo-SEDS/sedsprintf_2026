@@ -92,14 +92,18 @@ If you need the details, see [Time-Sync](Time-Sync).
 
 ## Reliability
 
-Reliability is opt‑in and only applies to types marked reliable in the schema. When enabled on a link, the router uses
-ACKs, retransmits, and optional ordering to deliver messages more like TCP.
+Reliability is opt‑in and only applies to types marked reliable in the schema. When enabled on a
+reliable serialized link, the router uses ACKs, retransmits, and optional ordering to deliver
+messages more like TCP.
 
 This is useful on lossy links, but you can disable it for transports that are already reliable.
 
-With discovery enabled, reliable packets are sent to all currently known candidate sides for the target endpoints. This
-improves delivery across known paths, but it is still link-level reliability. It does not prove that every remote
-application endpoint processed the packet unless you add an application-level acknowledgement.
+With discovery enabled, reliable packets are sent toward all currently known holders of the target
+endpoints. The transport then keeps the packet pending until every currently discovered holder has
+ACKed local delivery. Those ACKs are routed back only toward the source instead of being flooded.
+
+Discovery still matters here because the destination set is soft state. If a holder disappears from
+topology, it is removed from the pending set so the router does not retry forever.
 
 ## Dedupe
 

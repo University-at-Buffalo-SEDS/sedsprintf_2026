@@ -60,7 +60,8 @@ With the `discovery` feature enabled, the router has a built-in internal control
 - When `timesync` is also enabled, `DISCOVERY_TIMESYNC_SOURCES` is also built in.
 - Discovery packets are handled internally, not through user endpoint handlers.
 - The router keeps soft-state reachability data per side:
-  reachable endpoints, reachable time source sender IDs, and last-seen timestamp.
+  reachable endpoints, reachable time source sender IDs, sender-specific announcers, and
+  last-seen timestamp.
 - Unknown or expired routes fall back to ordinary flood behavior.
 
 Discovery advertisements are adaptive:
@@ -75,7 +76,10 @@ Discovery advertisements are adaptive:
 ## Receive pipeline (rx*)
 
 1) Bytes or packets are accepted immediately or queued.
-2) For reliable types, sequence/ACK headers are processed first (ACK-only frames are consumed here).
+2) For reliable types, sequence/ACK headers are processed first.
+   - Per-link ACK-only frames are consumed here.
+   - Discovery-coupled end-to-end ACK packets are also consumed here and update the outstanding
+     destination set for the originating reliable packet.
 3) Packet ID is computed for dedupe (unreliable / unsequenced frames).
     - Serialized bytes use `packet_id_from_wire` when possible.
     - If wire parsing fails, raw bytes are hashed as fallback.
@@ -99,6 +103,8 @@ With discovery enabled, forwarding also consults the learned side map:
 - If no side is known yet, the router falls back to flooding.
 - Link-local-only endpoints are only forwarded to sides marked `link_local_enabled: true`.
 - Reliable packets are sent to all known candidate sides for their endpoints.
+- When multiple discovered holders exist for the same endpoint, end-to-end retransmits are narrowed
+  to only the holders that have not ACKed local delivery yet.
 - For time sync traffic, exact discovered source IDs win over generic `TIME_SYNC` endpoint matches
   when the router knows which source it currently wants to talk to.
 - Source-side `TIME_SYNC_RESPONSE` traffic is returned to the requesting ingress side rather than
@@ -146,10 +152,22 @@ This makes local handlers idempotent: a resent packet can be processed again aft
 
 ## Reliability boundary
 
-Reliable delivery in the router is per side. With discovery enabled, a reliable packet is transmitted reliably to every
-currently known candidate side for its endpoints. That improves reachability across the known topology, but it is not an
-end-to-end proof that every remote application endpoint consumed the packet. If you need that guarantee, add an
-application-level acknowledgement on top of the transport-level reliable mode.
+Reliable delivery on this branch has two layers on reliable serialized sides:
+
+- Per-link reliability: sequence numbers, ACKs, retransmit requests, CRC-triggered resend, and
+  ordered or unordered delivery on each individual side.
+- Discovery-coupled end-to-end reliability: once a reliable packet is forwarded toward discovered
+  remote holders, the source keeps it pending until every currently discovered holder of the target
+  endpoint has confirmed local delivery with an internal end-to-end ACK.
+
+Important limits:
+
+- End-to-end verification only applies on reliable serialized sides. Packet-handler sides do not
+  participate in the wire-level ACK path.
+- The destination set is discovery-driven and therefore soft state. If a board disappears from the
+  discovered topology, it is removed from the pending set and the packet can complete without it.
+- Reliable control traffic is routed directionally. End-to-end ACKs go back only toward the learned
+  source side, and retransmits are limited to still-pending holders instead of flooding all sides.
 
 ## Router modes
 

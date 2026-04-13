@@ -3982,10 +3982,21 @@ mod router_tests {
             router::{Router, RouterMode},
         };
         use crate::{DataEndpoint, DataType, TelemetryResult};
+        use std::sync::atomic::{AtomicU64, Ordering};
         use std::sync::{Arc, Mutex};
 
         fn zero_clock() -> Box<dyn Clock + Send + Sync> {
             StepClock::new_box(0, 0)
+        }
+
+        struct SharedClock {
+            now_ms: Arc<AtomicU64>,
+        }
+
+        impl Clock for SharedClock {
+            fn now_ms(&self) -> u64 {
+                self.now_ms.load(Ordering::SeqCst)
+            }
         }
 
         fn endpoint_by_name(name: &str) -> Option<DataEndpoint> {
@@ -4159,6 +4170,97 @@ mod router_tests {
             assert_eq!(got_a.len(), 1);
             assert!(got_b.is_empty());
             assert_eq!(got_a[0].data_type(), DataType::GpsData);
+        }
+
+        #[test]
+        fn end_to_end_pending_destinations_clear_when_discovered_holder_expires() {
+            let now_ms = Arc::new(AtomicU64::new(0));
+            let router =
+                Router::new_with_clock(
+                    RouterMode::Sink,
+                    RouterConfig::default(),
+                    Box::new(SharedClock {
+                        now_ms: now_ms.clone(),
+                    }),
+                );
+            let side = router.add_side_serialized_with_options(
+                "A",
+                |_bytes: &[u8]| -> TelemetryResult<()> { Ok(()) },
+                crate::router::RouterSideOptions {
+                    reliable_enabled: true,
+                    ..Default::default()
+                },
+            );
+
+            router
+                .rx_from_side(
+                    &build_discovery_announce("DEST_A", 0, &[DataEndpoint::Radio]).unwrap(),
+                    side,
+                )
+                .unwrap();
+            router.process_all_queues().unwrap();
+
+            let pkt = Packet::from_f32_slice(
+                DataType::GpsData,
+                &[1.0, 2.0, 3.0],
+                &[DataEndpoint::Radio],
+                77,
+            )
+            .unwrap();
+            let packet_id = pkt.packet_id();
+            router.tx(pkt).unwrap();
+            assert_eq!(
+                router.debug_end_to_end_pending_destination_count(packet_id),
+                Some(1)
+            );
+
+            now_ms.store(crate::discovery::DISCOVERY_ROUTE_TTL_MS + 1, Ordering::SeqCst);
+            router.periodic(0).unwrap();
+            assert_eq!(
+                router.debug_end_to_end_pending_destination_count(packet_id),
+                None
+            );
+        }
+
+        #[test]
+        fn relay_end_to_end_acked_holders_clear_when_discovered_holder_expires() {
+            let now_ms = Arc::new(AtomicU64::new(0));
+            let relay = Relay::new(Box::new(SharedClock {
+                now_ms: now_ms.clone(),
+            }));
+            let side =
+                relay.add_side_packet("A", |_pkt: &Packet| -> TelemetryResult<()> { Ok(()) });
+
+            relay
+                .rx_from_side(
+                    side,
+                    build_discovery_announce("DEST_A", 0, &[DataEndpoint::Radio]).unwrap(),
+                )
+                .unwrap();
+            relay.process_all_queues().unwrap();
+
+            let packet_id = 77u64;
+            let ack = Packet::new(
+                DataType::ReliableAck,
+                crate::message_meta(DataType::ReliableAck).endpoints,
+                "E2EACK:DEST_A",
+                0,
+                Arc::<[u8]>::from(packet_id.to_le_bytes().to_vec()),
+            )
+            .unwrap();
+            relay.rx_from_side(side, ack).unwrap();
+            relay.process_all_queues().unwrap();
+            assert_eq!(
+                relay.debug_end_to_end_acked_destination_count(packet_id),
+                Some(1)
+            );
+
+            now_ms.store(crate::discovery::DISCOVERY_ROUTE_TTL_MS + 1, Ordering::SeqCst);
+            relay.periodic(0).unwrap();
+            assert_eq!(
+                relay.debug_end_to_end_acked_destination_count(packet_id),
+                None
+            );
         }
 
         #[test]

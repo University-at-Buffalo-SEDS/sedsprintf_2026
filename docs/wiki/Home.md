@@ -13,6 +13,7 @@ These pages are written for readers who want a clear mental model before digging
 - [Overview](Overview)
 - [Concepts](Concepts)
 - [Examples](Examples)
+- [Testing](Testing)
 - [Changelogs](Changelogs)
 
 ## How-to guides (practical steps)
@@ -20,6 +21,7 @@ These pages are written for readers who want a clear mental model before digging
 Step-by-step setup and usage by language.
 
 - [Build-and-Configure](Build-and-Configure)
+- [Testing](Testing)
 - [Time-Sync](Time-Sync)
 - [Usage-Rust](Usage-Rust)
 - [Usage-C-Cpp](Usage-C-Cpp)

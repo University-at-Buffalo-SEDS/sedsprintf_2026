@@ -18,6 +18,10 @@ internal behavior.
 - [Technical-Router-Details](Technical-Router-Details)
 - [Technical-Queues-and-Memory](Technical-Queues-and-Memory)
 
+## Validation
+
+- [Testing](Testing)
+
 ## Bindings and interop
 
 - [Technical-Bindings-and-FFI](Technical-Bindings-and-FFI)

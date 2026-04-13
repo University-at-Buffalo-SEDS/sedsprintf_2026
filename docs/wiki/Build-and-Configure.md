@@ -171,3 +171,18 @@ Bare-metal builds expect the following symbols to be provided by the host enviro
 - `void telemetry_panic_hook(const char *, size_t)`
 
 See [Usage-C-Cpp](Usage-C-Cpp) for an example stub implementation.
+
+## Test surface
+
+For this repo, `./build.py test` is the main validation entry point. It currently covers:
+
+- `cargo clippy --all-targets -- -D warnings`
+- `cargo clippy --features python --all-targets -- -D warnings`
+- `cargo clippy --no-default-features --target thumbv7em-none-eabihf --features embedded --lib -- -D warnings`
+- `cargo test --features timesync`
+- short Criterion benchmark smoke runs
+- `cargo build --features python`
+- `cargo build --no-default-features --target thumbv7em-none-eabihf --features embedded`
+
+See [Testing](Testing) for the breakdown of unit tests, Rust system tests, C system tests, and the
+reliability/discovery regressions that cover the end-to-end transport behavior.

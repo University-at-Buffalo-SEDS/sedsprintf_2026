@@ -1,5 +1,24 @@
 # Changelogs
 
+## Unreleased highlights
+
+- End-to-end reliable transport backport:
+    - Backported the discovery-coupled end-to-end reliable transport into this repo without
+      changing the external API surface.
+    - Reliable serialized links now remain pending until all currently discovered holders of the
+      target endpoint have ACKed local delivery.
+    - End-to-end ACKs and reliable retransmits now follow directed discovery-informed paths instead
+      of flooding unrelated sides.
+    - Disappeared discovered holders are removed from the pending set so retries do not continue
+      forever after topology loss.
+- Relay and topology tracking:
+    - Relay discovery state now tracks per-announcer holder information so learned ACK state can be
+      pruned accurately when a holder ages out.
+    - Added router and relay regression tests for holder-expiry cleanup.
+- Validation:
+    - `./build.py test` now passes in this repo, including clippy, host tests, Rust and C system
+      tests, benchmark smoke, Python build validation, and embedded build validation.
+
 ## Version 3.5.2 highlights
 
 - Time sync failover recovery:

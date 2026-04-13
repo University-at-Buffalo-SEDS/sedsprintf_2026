@@ -62,6 +62,13 @@ becomes more selective; when it is not known, the system falls back to ordinary 
 are reserved internal router endpoints: applications can use the discovery and time-sync APIs, but must not register
 local endpoint handlers for those endpoints or try to override their built-in handling.
 
+For reliable schema types on reliable serialized sides, the transport now combines the existing
+per-link ACK/retransmit layer with discovery-informed end-to-end delivery tracking. A reliable send
+stays pending until every currently discovered holder of the target endpoint has confirmed local
+delivery, end-to-end ACK traffic is routed only back toward the source instead of being flooded,
+and holders that disappear from topology are removed from the pending set so retries do not
+continue forever.
+
 The size of the header in a serialized packet is around 20 bytes (the size will change based on the total number of
 endpoints in your system and the length of the sender string), plus a 4-byte CRC32 trailer. As a rough example, a packet
 containing three floats is on the order of mid-30s bytes total. This small size makes it ideal for use in low bandwidth
@@ -82,6 +89,19 @@ environments.
 - The generated C and Python stubs, plus the C telemetry examples, were refreshed to match the current logging and
   discovery API surface.
 - Full changelog: [CHANGELOG.md](./CHANGELOG.md)
+
+## Current transport notes
+
+- The external API in this repo is unchanged: `RouterMode`, existing constructors, and the C/Python
+  bindings still behave the same at the interface level.
+- Internally, reliable serialized links now use discovery-coupled end-to-end delivery verification
+  in addition to per-link sequencing and retransmit.
+- If multiple boards currently advertise the same destination endpoint, reliable traffic remains
+  in-flight until all discovered holders ACK local delivery.
+- If discovery later ages out one of those holders, the router/relay drops that holder from the
+  obligation set instead of retrying forever.
+- `./build.py test` now passes in this repo, including clippy, unit tests, C and Rust system
+  tests, benchmark smoke, Python build validation, and embedded build validation.
 
 ## Version 3.4.2 highlights
 

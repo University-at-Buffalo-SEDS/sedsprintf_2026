@@ -76,6 +76,13 @@ the router can provide
 ordered delivery and retransmits on **serialized sides**. ACK frames are sent back on the
 ingress side automatically via the side's serialized TX handler.
 
+On this branch, reliable serialized sides also participate in an internal end-to-end layer:
+
+- discovery identifies which remote boards currently hold the target endpoint,
+- the source keeps the packet pending until those discovered holders ACK local delivery,
+- retransmits are directed only toward holders that are still outstanding,
+- and holders that disappear from topology are removed from the pending set automatically.
+
 ```rust
 let router = Router::new(RouterMode::Sink, cfg);
 router.add_side_serialized_with_options(
@@ -109,6 +116,13 @@ let cfg = RouterConfig::new([handler]).with_reliable_enabled(false);
 let router = Router::new(RouterMode::Sink, cfg);
 router.add_side_serialized("RADIO", tx);
 ```
+
+Notes:
+
+- The public API is unchanged here. You still configure forwarding with `RouterMode` and opt into
+  reliability with `RouterConfig` plus per-side `RouterSideOptions`.
+- End-to-end verification only applies to reliable serialized sides. Packet-output sides do not
+  generate the internal wire-level ACKs needed for this path.
 
 ## Logging telemetry
 
