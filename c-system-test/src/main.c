@@ -246,11 +246,13 @@ int main(void)
     pthread_join(thD, NULL);
 
     // 5) Wait until expected hits arrive or timeout
-    const uint64_t deadline_us = 5ULL * 1000 * 1000; // 5s safety
+    const uint64_t deadline_us = 15ULL * 1000 * 1000; // 15s safety for slower CI / local machines
     struct timeval start, now;
     gettimeofday(&start, NULL);
 
-    while (!(radioBoard.radio_hits == num_endpoint_hits && flightControllerBoard.sd_hits == num_endpoint_hits))
+    while (!(radioBoard.radio_hits == num_endpoint_hits
+             && flightControllerBoard.sd_hits == num_endpoint_hits
+             && valve_board.radio_hits == num_endpoint_hits))
     {
         gettimeofday(&now, NULL);
         uint64_t elapsed_us =
