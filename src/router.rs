@@ -1531,7 +1531,10 @@ impl Router {
         let pending_destinations = self.expected_end_to_end_destinations_locked(&st, data)?;
         #[cfg(not(feature = "discovery"))]
         let pending_destinations = BTreeMap::new();
-        let tracked_destinations = !pending_destinations.is_empty();
+        if pending_destinations.is_empty() {
+            return Ok(());
+        }
+        let tracked_destinations = true;
         st.end_to_end_reliable_tx.insert(
             packet_id,
             EndToEndReliableSent {
@@ -2860,10 +2863,14 @@ impl Router {
                 })
             })
             .collect();
-        let advertised_endpoints =
-            self.advertised_discovery_endpoints_for_link_locked(&st, now_ms, true);
-        let advertised_timesync_sources =
-            self.advertised_discovery_timesync_sources_for_link_locked(&st, now_ms);
+        let advertised_endpoints = self.advertised_discovery_endpoints_for_link_locked(
+            &st,
+            now_ms,
+            usize::MAX,
+            true,
+        );
+        let advertised_timesync_sources = self
+            .advertised_discovery_timesync_sources_for_link_locked(&st, now_ms, usize::MAX);
         TopologySnapshot {
             advertised_endpoints,
             advertised_timesync_sources,
