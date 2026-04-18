@@ -1596,6 +1596,39 @@ impl Router {
         matches!(side_ref.tx_handler, RouterTxHandlerFn::Serialized(_))
     }
 
+    #[cfg(feature = "discovery")]
+    fn side_has_multiple_announcers_locked(
+        &self,
+        st: &RouterInner,
+        side: RouterSideId,
+        now_ms: u64,
+    ) -> bool {
+        st.discovery_routes
+            .get(&side)
+            .map(|route| {
+                route
+                    .announcers
+                    .values()
+                    .filter(|sender| {
+                        now_ms.saturating_sub(sender.last_seen_ms) <= DISCOVERY_ROUTE_TTL_MS
+                    })
+                    .take(2)
+                    .count()
+                    > 1
+            })
+            .unwrap_or(false)
+    }
+
+    #[cfg(not(feature = "discovery"))]
+    fn side_has_multiple_announcers_locked(
+        &self,
+        _st: &RouterInner,
+        _side: RouterSideId,
+        _now_ms: u64,
+    ) -> bool {
+        false
+    }
+
     fn queue_end_to_end_reliable_ack(&self, pkt: &Packet) -> TelemetryResult<()> {
         let ack = Packet::new(
             DataType::ReliableAck,
@@ -1864,13 +1897,16 @@ impl Router {
     }
 
     fn send_reliable_to_side(&self, side: RouterSideId, data: RouterItem) -> TelemetryResult<()> {
-        let (handler, opts) = {
+        let (handler, opts, hop_reliable_enabled) = {
             let st = self.state.lock();
             let side_ref = st
                 .sides
                 .get(side)
                 .ok_or(TelemetryError::HandlerError("router: invalid side id"))?;
-            (side_ref.tx_handler.clone(), side_ref.opts)
+            let hop_reliable_enabled = side_ref.opts.reliable_enabled
+                && self.cfg.reliable_enabled()
+                && !self.side_has_multiple_announcers_locked(&st, side, self.clock.now_ms());
+            (side_ref.tx_handler.clone(), side_ref.opts, hop_reliable_enabled)
         };
 
         let ty = match &data {
@@ -1890,8 +1926,10 @@ impl Router {
             return self.call_side_tx_handler(&handler, &data);
         };
 
-        if !opts.reliable_enabled || !self.cfg.reliable_enabled() {
-            if let Some(adjusted) = self.adjust_reliable_for_side(opts, data)? {
+        if !hop_reliable_enabled {
+            let mut adjusted_opts = opts;
+            adjusted_opts.reliable_enabled = false;
+            if let Some(adjusted) = self.adjust_reliable_for_side(adjusted_opts, data)? {
                 return self.call_side_tx_handler(&handler, &adjusted);
             }
             return Ok(());

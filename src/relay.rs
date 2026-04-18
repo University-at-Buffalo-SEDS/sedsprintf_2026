@@ -475,13 +475,15 @@ impl Relay {
     }
 
     fn send_reliable_to_side(&self, side: RelaySideId, data: RelayItem) -> TelemetryResult<()> {
-        let (handler, opts) = {
+        let (handler, opts, hop_reliable_enabled) = {
             let st = self.state.lock();
             let side_ref = st
                 .sides
                 .get(side)
                 .ok_or(TelemetryError::HandlerError("relay: invalid side id"))?;
-            (side_ref.tx_handler.clone(), side_ref.opts)
+            let hop_reliable_enabled = side_ref.opts.reliable_enabled
+                && !self.side_has_multiple_announcers_locked(&st, side, self.clock.now_ms());
+            (side_ref.tx_handler.clone(), side_ref.opts, hop_reliable_enabled)
         };
 
         let ty = match &data {
@@ -504,8 +506,10 @@ impl Relay {
             return self.call_tx_handler(&handler, &data);
         };
 
-        if !opts.reliable_enabled {
-            if let Some(adjusted) = self.adjust_reliable_for_side(opts, data)? {
+        if !hop_reliable_enabled {
+            let mut adjusted_opts = opts;
+            adjusted_opts.reliable_enabled = false;
+            if let Some(adjusted) = self.adjust_reliable_for_side(adjusted_opts, data)? {
                 return self.call_tx_handler(&handler, &adjusted);
             }
             return Ok(());
@@ -1267,6 +1271,39 @@ impl Relay {
             current_announce_interval_ms: st.discovery_cadence.current_interval_ms,
             next_announce_ms: st.discovery_cadence.next_announce_ms,
         }
+    }
+
+    #[cfg(feature = "discovery")]
+    fn side_has_multiple_announcers_locked(
+        &self,
+        st: &RelayInner,
+        side: RelaySideId,
+        now_ms: u64,
+    ) -> bool {
+        st.discovery_routes
+            .get(&side)
+            .map(|route| {
+                route
+                    .announcers
+                    .values()
+                    .filter(|sender| {
+                        now_ms.saturating_sub(sender.last_seen_ms) <= DISCOVERY_ROUTE_TTL_MS
+                    })
+                    .take(2)
+                    .count()
+                    > 1
+            })
+            .unwrap_or(false)
+    }
+
+    #[cfg(not(feature = "discovery"))]
+    fn side_has_multiple_announcers_locked(
+        &self,
+        _st: &RelayInner,
+        _side: RelaySideId,
+        _now_ms: u64,
+    ) -> bool {
+        false
     }
 
     #[cfg(test)]
