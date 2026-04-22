@@ -80,24 +80,6 @@
       "priority": 0
     },
     {
-      "rust": "KalmanFilterData",
-      "name": "KALMAN_FILTER_DATA",
-      "doc": "Kalman Filter Data: altitude and velocity.",
-      "class": "Data",
-      "element": {
-        "kind": "Static",
-        "data_type": "Float32",
-        "count": 2
-      },
-      "endpoints": [
-        "GroundStation",
-        "SdCard"
-      ],
-      "reliable_mode": "None",
-      "reliable": false,
-      "priority": 0
-    },
-    {
       "rust": "GyroData",
       "name": "GYRO_DATA",
       "doc": "Gyro Data: 3 \u00d7 float32 elements (x, y, z).",
@@ -329,7 +311,8 @@
         "GroundStation"
       ],
       "reliable_mode": "Ordered",
-      "reliable": true
+      "reliable": true,
+      "priority": 0
     },
     {
       "rust": "MessageData",
@@ -484,6 +467,61 @@
       "endpoints": [
         "SdCard",
         "GroundStation"
+      ]
+    },
+    {
+      "rust": "AscentState",
+      "name": "ASCENT_STATE",
+      "doc": "Ascent State: Quaternion vector (4 x 1 x float32) and shared state (2 x 1 x float32).",
+      "reliable": false,
+      "reliable_mode": "None",
+      "priority": 0,
+      "class": "Data",
+      "element": {
+        "kind": "Static",
+        "data_type": "Float32",
+        "count": 6
+      },
+      "endpoints": [
+        "SdCard",
+        "GroundStation"
+      ]
+    },
+    {
+      "rust": "DescentState",
+      "name": "DESCENT_STATE",
+      "doc": "Descent State: low pass coordinates (2 x 1 x float32) and shared state (2 x 1 x float32).",
+      "reliable": false,
+      "reliable_mode": "None",
+      "priority": 0,
+      "class": "Data",
+      "element": {
+        "kind": "Static",
+        "data_type": "Float32",
+        "count": 4
+      },
+      "endpoints": [
+        "SdCard",
+        "GroundStation"
+      ]
+    },
+    {
+      "rust": "AscentBiases",
+      "name": "ASCENT_BIASES",
+      "doc": "Ascent Biases: pre-launch command to update biases of Ascent KF (4 x float32).",
+      "reliable": true,
+      "reliable_mode": "Unordered",
+      "priority": 0,
+      "class": "Data",
+      "element": {
+        "kind": "Static",
+        "data_type": "Float32",
+        "count": 4
+      },
+      "endpoints": [
+        "SdCard",
+        "GroundStation",
+        "FlightController"
       ]
     }
   ]
