@@ -417,29 +417,11 @@
       "priority": 0
     },
     {
-      "rust": "AscentQuaternion",
-      "name": "ASCENT_QUATERNION",
-      "doc": "Ascent KF quaternion: 4 x float32 values.",
-      "reliable": false,
-      "reliable_mode": "None",
-      "priority": 0,
-      "class": "Data",
-      "element": {
-        "kind": "Static",
-        "data_type": "Float32",
-        "count": 4
-      },
-      "endpoints": [
-        "SdCard",
-        "GroundStation"
-      ]
-    },
-    {
       "rust": "EulerAngles",
       "name": "EULER_ANGLES",
       "doc": "Initial condition euler angles: 3 x float32 values.",
-      "reliable": false,
-      "reliable_mode": "None",
+      "reliable": true,
+      "reliable_mode": "Unordered",
       "priority": 0,
       "class": "Data",
       "element": {
