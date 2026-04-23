@@ -33,7 +33,8 @@
     {
       "rust": "HeartBeat",
       "name": "HEART_BEAT",
-      "doc": "Endpoint for heartbeat messages"
+      "doc": "Endpoint for heartbeat messages",
+      "broadcast_mode": "Default"
     },
     {
       "rust": "ActuatorBoard",
@@ -56,7 +57,8 @@
         "GroundStation"
       ],
       "reliable_mode": "Ordered",
-      "reliable": true
+      "reliable": true,
+      "priority": 0
     },
     {
       "rust": "GpsData",
@@ -74,24 +76,8 @@
         "FlightController"
       ],
       "reliable_mode": "None",
-      "reliable": false
-    },
-    {
-      "rust": "KalmanFilterData",
-      "name": "KALMAN_FILTER_DATA",
-      "doc": "Kalman Filter Data: 3 \u00d7 float32 elements.",
-      "class": "Data",
-      "element": {
-        "kind": "Static",
-        "data_type": "Float32",
-        "count": 3
-      },
-      "endpoints": [
-        "GroundStation",
-        "SdCard"
-      ],
-      "reliable_mode": "None",
-      "reliable": false
+      "reliable": false,
+      "priority": 0
     },
     {
       "rust": "GyroData",
@@ -108,7 +94,8 @@
         "GroundStation"
       ],
       "reliable_mode": "None",
-      "reliable": false
+      "reliable": false,
+      "priority": 0
     },
     {
       "rust": "AccelData",
@@ -125,7 +112,8 @@
         "SdCard"
       ],
       "reliable_mode": "None",
-      "reliable": false
+      "reliable": false,
+      "priority": 0
     },
     {
       "rust": "BatteryVoltage",
@@ -142,7 +130,8 @@
         "SdCard"
       ],
       "reliable_mode": "None",
-      "reliable": false
+      "reliable": false,
+      "priority": 0
     },
     {
       "rust": "BatteryCurrent",
@@ -159,7 +148,8 @@
         "SdCard"
       ],
       "reliable_mode": "None",
-      "reliable": false
+      "reliable": false,
+      "priority": 0
     },
     {
       "rust": "BarometerData",
@@ -176,7 +166,8 @@
         "SdCard"
       ],
       "reliable_mode": "None",
-      "reliable": false
+      "reliable": false,
+      "priority": 0
     },
     {
       "rust": "Abort",
@@ -192,7 +183,8 @@
         "SdCard"
       ],
       "reliable_mode": "Unordered",
-      "reliable": true
+      "reliable": true,
+      "priority": 0
     },
     {
       "rust": "FuelFlow",
@@ -209,7 +201,8 @@
         "SdCard"
       ],
       "reliable_mode": "None",
-      "reliable": false
+      "reliable": false,
+      "priority": 0
     },
     {
       "rust": "ValveCommand",
@@ -226,7 +219,8 @@
         "ValveBoard"
       ],
       "reliable_mode": "Ordered",
-      "reliable": true
+      "reliable": true,
+      "priority": 0
     },
     {
       "rust": "FlightCommand",
@@ -244,7 +238,8 @@
         "FlightController"
       ],
       "reliable_mode": "Ordered",
-      "reliable": true
+      "reliable": true,
+      "priority": 0
     },
     {
       "rust": "FuelTankPressure",
@@ -261,12 +256,13 @@
         "SdCard"
       ],
       "reliable_mode": "None",
-      "reliable": false
+      "reliable": false,
+      "priority": 0
     },
     {
       "rust": "FlightState",
       "name": "FLIGHT_STATE",
-      "doc": "Flight State: 1 \u00d7 uint8 element.",
+      "doc": "Flight State: 1 \\u00d7 uint8 element.",
       "class": "Data",
       "element": {
         "kind": "Static",
@@ -279,7 +275,8 @@
         "GroundStation"
       ],
       "reliable_mode": "Ordered",
-      "reliable": true
+      "reliable": true,
+      "priority": 0
     },
     {
       "rust": "Heartbeat",
@@ -293,10 +290,12 @@
       },
       "endpoints": [
         "HeartBeat",
-        "GroundStation"
+        "GroundStation",
+        "FlightController"
       ],
       "reliable_mode": "None",
-      "reliable": false
+      "reliable": false,
+      "priority": 0
     },
     {
       "rust": "Warning",
@@ -312,7 +311,8 @@
         "GroundStation"
       ],
       "reliable_mode": "Ordered",
-      "reliable": true
+      "reliable": true,
+      "priority": 0
     },
     {
       "rust": "MessageData",
@@ -327,7 +327,8 @@
         "GroundStation"
       ],
       "reliable_mode": "None",
-      "reliable": false
+      "reliable": false,
+      "priority": 0
     },
     {
       "rust": "ActuatorCommand",
@@ -344,7 +345,8 @@
       "endpoints": [
         "ActuatorBoard",
         "GroundStation"
-      ]
+      ],
+      "priority": 0
     },
     {
       "rust": "UmbilicalStatus",
@@ -360,7 +362,8 @@
       },
       "endpoints": [
         "GroundStation"
-      ]
+      ],
+      "priority": 0
     },
     {
       "rust": "KG1000",
@@ -376,7 +379,8 @@
       },
       "endpoints": [
         "GroundStation"
-      ]
+      ],
+      "priority": 0
     },
     {
       "rust": "KG50",
@@ -392,7 +396,8 @@
       },
       "endpoints": [
         "GroundStation"
-      ]
+      ],
+      "priority": 0
     },
     {
       "rust": "GpsSatelliteNumber",
@@ -408,6 +413,97 @@
       },
       "endpoints": [
         "GroundStation"
+      ],
+      "priority": 0
+    },
+    {
+      "rust": "EulerAngles",
+      "name": "EULER_ANGLES",
+      "doc": "Initial condition euler angles: 3 x float32 values.",
+      "reliable": true,
+      "reliable_mode": "Unordered",
+      "priority": 0,
+      "class": "Data",
+      "element": {
+        "kind": "Static",
+        "data_type": "Float32",
+        "count": 3
+      },
+      "endpoints": [
+        "SdCard",
+        "GroundStation"
+      ]
+    },
+    {
+      "rust": "OrderedMessage",
+      "name": "ORDERED_MESSAGE",
+      "doc": "Ordered Message: MessageData variant for responses to manual commands and critical state changes.",
+      "reliable": true,
+      "reliable_mode": "Ordered",
+      "priority": 0,
+      "class": "Data",
+      "element": {
+        "kind": "Dynamic",
+        "data_type": "String"
+      },
+      "endpoints": [
+        "SdCard",
+        "GroundStation"
+      ]
+    },
+    {
+      "rust": "AscentState",
+      "name": "ASCENT_STATE",
+      "doc": "Ascent State: Quaternion vector (4 x 1 x float32) and shared state (2 x 1 x float32).",
+      "reliable": false,
+      "reliable_mode": "None",
+      "priority": 0,
+      "class": "Data",
+      "element": {
+        "kind": "Static",
+        "data_type": "Float32",
+        "count": 6
+      },
+      "endpoints": [
+        "SdCard",
+        "GroundStation"
+      ]
+    },
+    {
+      "rust": "DescentState",
+      "name": "DESCENT_STATE",
+      "doc": "Descent State: low pass coordinates (2 x 1 x float32) and shared state (2 x 1 x float32).",
+      "reliable": false,
+      "reliable_mode": "None",
+      "priority": 0,
+      "class": "Data",
+      "element": {
+        "kind": "Static",
+        "data_type": "Float32",
+        "count": 4
+      },
+      "endpoints": [
+        "SdCard",
+        "GroundStation"
+      ]
+    },
+    {
+      "rust": "AscentBiases",
+      "name": "ASCENT_BIASES",
+      "doc": "Ascent Biases: pre-launch command to update biases of Ascent KF (4 x float32).",
+      "reliable": true,
+      "reliable_mode": "Unordered",
+      "priority": 0,
+      "class": "Data",
+      "element": {
+        "kind": "Static",
+        "data_type": "Float32",
+        "count": 4
+      },
+      "endpoints": [
+        "SdCard",
+        "GroundStation",
+        "FlightController"
       ]
     }
   ]
