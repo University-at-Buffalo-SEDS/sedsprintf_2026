@@ -82,7 +82,7 @@
     {
       "rust": "GyroData",
       "name": "GYRO_DATA",
-      "doc": "Gyro Data: 3 \u00d7 float32 elements (x, y, z).",
+      "doc": "Gyro Data: 3 \u00d7 float32 elements (x, y, z). Logged only to GroundStation.",
       "class": "Data",
       "element": {
         "kind": "Static",
@@ -90,7 +90,6 @@
         "count": 3
       },
       "endpoints": [
-        "SdCard",
         "GroundStation"
       ],
       "reliable_mode": "None",
@@ -100,7 +99,7 @@
     {
       "rust": "AccelData",
       "name": "ACCEL_DATA",
-      "doc": "Accel Data: 3 \u00d7 float32 elements (x, y, z).",
+      "doc": "Accel Data: 3 \u00d7 float32 elements (x, y, z). Logged only to GroundStation.",
       "class": "Data",
       "element": {
         "kind": "Static",
@@ -108,8 +107,7 @@
         "count": 3
       },
       "endpoints": [
-        "GroundStation",
-        "SdCard"
+        "GroundStation"
       ],
       "reliable_mode": "None",
       "reliable": false,
@@ -154,7 +152,7 @@
     {
       "rust": "BarometerData",
       "name": "BAROMETER_DATA",
-      "doc": "Barometer Data: 3 \u00d7 float32 elements.",
+      "doc": "Barometer Data: 3 \u00d7 float32 elements (alt, prs, tmp). Logged only to GroundStation.",
       "class": "Data",
       "element": {
         "kind": "Static",
@@ -162,8 +160,7 @@
         "count": 3
       },
       "endpoints": [
-        "GroundStation",
-        "SdCard"
+        "GroundStation"
       ],
       "reliable_mode": "None",
       "reliable": false,
@@ -504,6 +501,91 @@
         "SdCard",
         "GroundStation",
         "FlightController"
+      ]
+    },
+    {
+      "rust": "GyroLocal",
+      "name": "GYRO_LOCAL",
+      "doc": "Gyro Data: 3 \u00d7 float32 elements (x, y, z). Logged only to SD.",
+      "reliable": false,
+      "reliable_mode": "None",
+      "priority": 0,
+      "class": "Data",
+      "element": {
+        "kind": "Static",
+        "data_type": "Float32",
+        "count": 3
+      },
+      "endpoints": [
+        "SdCard"
+      ]
+    },
+    {
+      "rust": "AccelLocal",
+      "name": "ACCEL_LOCAL",
+      "doc": "Accel Data: 3 \u00d7 float32 elements (x, y, z). Logged only to SD.",
+      "reliable": false,
+      "reliable_mode": "None",
+      "priority": 0,
+      "class": "Data",
+      "element": {
+        "kind": "Static",
+        "data_type": "Float32",
+        "count": 3
+      },
+      "endpoints": [
+        "SdCard"
+      ]
+    },
+    {
+      "rust": "IMUData",
+      "name": "IMU_DATA",
+      "doc": "Accel and Gyro Data: 6 \u00d7 float32 elements (ax, ay, az, gx, gy, gz). Logged only to GroundStation.",
+      "reliable": false,
+      "reliable_mode": "None",
+      "priority": 0,
+      "class": "Data",
+      "element": {
+        "kind": "Static",
+        "data_type": "Float32",
+        "count": 6
+      },
+      "endpoints": [
+        "GroundStation"
+      ]
+    },
+    {
+      "rust": "IMULocal",
+      "name": "IMU_LOCAL",
+      "doc": "Accel and Gyro Data: 6 \u00d7 float32 elements (ax, ay, az, gx, gy, gz). Logged only to SD.",
+      "reliable": false,
+      "reliable_mode": "None",
+      "priority": 0,
+      "class": "Data",
+      "element": {
+        "kind": "Static",
+        "data_type": "Float32",
+        "count": 6
+      },
+      "endpoints": [
+        "SdCard"
+      ]
+    },
+    {
+      "rust": "BarometerLocal",
+      "name": "BAROMETER_LOCAL",
+      "doc": "Barometer Data: 3 \u00d7 float32 elements (alt, prs, tmp). Logged only to SD.",
+      "reliable": false,
+      "reliable_mode": "None",
+      "priority": 0,
+      "class": "Data",
+      "element": {
+        "kind": "Static",
+        "data_type": "Float32",
+        "count": 3
+      },
+      "endpoints": [
+        "SdCard"
       ]
     }
   ]
