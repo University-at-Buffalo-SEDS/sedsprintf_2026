@@ -451,7 +451,7 @@
     {
       "rust": "AscentState",
       "name": "ASCENT_STATE",
-      "doc": "Ascent State: Quaternion vector (4 x 1 x float32) and shared state (2 x 1 x float32).",
+      "doc": "Ascent State: Quaternion vector (4 x 1 x float32) and shared state (2 x 1 x float32). Logged only to GroundStation.",
       "reliable": false,
       "reliable_mode": "None",
       "priority": 0,
@@ -462,14 +462,13 @@
         "count": 6
       },
       "endpoints": [
-        "SdCard",
         "GroundStation"
       ]
     },
     {
       "rust": "DescentState",
       "name": "DESCENT_STATE",
-      "doc": "Descent State: low pass coordinates (2 x 1 x float32) and shared state (2 x 1 x float32).",
+      "doc": "Descent State: low pass coordinates (2 x 1 x float32) and shared state (2 x 1 x float32). Logged only to GroundStation.",
       "reliable": false,
       "reliable_mode": "None",
       "priority": 0,
@@ -480,7 +479,6 @@
         "count": 4
       },
       "endpoints": [
-        "SdCard",
         "GroundStation"
       ]
     },
@@ -583,6 +581,40 @@
         "kind": "Static",
         "data_type": "Float32",
         "count": 3
+      },
+      "endpoints": [
+        "SdCard"
+      ]
+    },
+    {
+      "rust": "AscentLocal",
+      "name": "ASCENT_LOCAL",
+      "doc": "Ascent State: Quaternion vector (4 x 1 x float32) and shared state (2 x 1 x float32). Logged only to SD.",
+      "reliable": false,
+      "reliable_mode": "None",
+      "priority": 0,
+      "class": "Data",
+      "element": {
+        "kind": "Static",
+        "data_type": "Float32",
+        "count": 6
+      },
+      "endpoints": [
+        "SdCard"
+      ]
+    },
+    {
+      "rust": "DescentLocal",
+      "name": "DESCENT_LOCAL",
+      "doc": "Descent State: low pass coordinates (2 x 1 x float32) and shared state (2 x 1 x float32). Logged only to SD.",
+      "reliable": false,
+      "reliable_mode": "None",
+      "priority": 0,
+      "class": "Data",
+      "element": {
+        "kind": "Static",
+        "data_type": "Float32",
+        "count": 4
       },
       "endpoints": [
         "SdCard"
