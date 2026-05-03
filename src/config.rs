@@ -111,7 +111,7 @@ pub const MAX_HANDLER_RETRIES: usize = match option_env!("MAX_HANDLER_RETRIES") 
 /// Reliable retransmit timeout in milliseconds.
 pub const RELIABLE_RETRANSMIT_MS: u64 = match option_env!("RELIABLE_RETRANSMIT_MS") {
     Some(val) => parse_usize(val) as u64,
-    None => 200,
+    None => 1_500,
 };
 
 /// Maximum number of retransmit attempts before giving up.

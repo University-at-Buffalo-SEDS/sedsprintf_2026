@@ -784,6 +784,20 @@ fn has_nonlocal_endpoint(eps: &[DataEndpoint], cfg: &RouterConfig) -> bool {
 }
 
 #[inline]
+fn discovery_match_endpoints(eps: &[DataEndpoint], cfg: &RouterConfig) -> Vec<DataEndpoint> {
+    let nonlocal: Vec<DataEndpoint> = eps
+        .iter()
+        .copied()
+        .filter(|ep| !cfg.is_local_endpoint(*ep))
+        .collect();
+    if nonlocal.is_empty() {
+        eps.to_vec()
+    } else {
+        nonlocal
+    }
+}
+
+#[inline]
 fn is_internal_control_type(ty: DataType) -> bool {
     if matches!(ty, DataType::ReliableAck | DataType::ReliablePacketRequest) {
         return true;
@@ -1034,6 +1048,7 @@ impl Router {
         #[cfg(feature = "discovery")]
         {
             let (eps, ty) = self.item_route_info(data)?;
+            let match_eps = discovery_match_endpoints(&eps, &self.cfg);
             let reliable_discovery_only = is_reliable_type(ty) && !is_internal_control_type(ty);
             if let Some(packet_id) = Self::reliable_control_target_packet_id(data)? {
                 let st = self.state.lock();
@@ -1060,8 +1075,8 @@ impl Router {
             let preferred_timesync_source: Option<String> = None;
 
             let st = self.state.lock();
-            let has_nonlocal = has_nonlocal_endpoint(&eps, &self.cfg);
-            let restrict_link_local = Self::endpoints_are_link_local_only(&eps);
+            let has_nonlocal = has_nonlocal_endpoint(&match_eps, &self.cfg);
+            let restrict_link_local = Self::endpoints_are_link_local_only(&match_eps);
             if st.discovery_routes.is_empty() {
                 if restrict_link_local {
                     let targets = st
@@ -1114,7 +1129,7 @@ impl Router {
                     exact_targets.push(side);
                     continue;
                 }
-                let score = eps
+                let score = match_eps
                     .iter()
                     .copied()
                     .filter(|ep| route.reachable.contains(ep))
@@ -1563,8 +1578,9 @@ impl Router {
         data: &RouterItem,
     ) -> TelemetryResult<BTreeMap<u64, RouterSideId>> {
         let (eps, ty) = self.item_route_info(data)?;
+        let match_eps = discovery_match_endpoints(&eps, &self.cfg);
         let now_ms = self.clock.now_ms();
-        let restrict_link_local = Self::endpoints_are_link_local_only(&eps);
+        let restrict_link_local = Self::endpoints_are_link_local_only(&match_eps);
         let reliable_discovery_only = is_reliable_type(ty) && !is_internal_control_type(ty);
         let mut out = BTreeMap::new();
         let mut scored = Vec::new();
@@ -1585,7 +1601,7 @@ impl Router {
                 if now_ms.saturating_sub(sender_state.last_seen_ms) > DISCOVERY_ROUTE_TTL_MS {
                     continue;
                 }
-                let score = eps
+                let score = match_eps
                     .iter()
                     .copied()
                     .filter(|ep| sender_state.reachable.contains(ep))

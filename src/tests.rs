@@ -1006,7 +1006,7 @@ mod timeout_tests {
             .log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0])
             .unwrap();
         let discovery_pkt =
-            build_discovery_announce("REMOTE_NODE", 0, &[DataEndpoint::Radio]).unwrap();
+            build_discovery_announce("REMOTE_NODE", 0, &[DataEndpoint::SdCard]).unwrap();
         let discovery_bytes = crate::serialize::serialize_packet(&discovery_pkt);
         router
             .rx_serialized_queue_from_side(discovery_bytes.as_ref(), side_remote)
@@ -1019,7 +1019,7 @@ mod timeout_tests {
         assert_eq!(topo.routes.len(), 1);
         assert_eq!(
             topo.routes[0].reachable_endpoints,
-            vec![DataEndpoint::Radio]
+            vec![DataEndpoint::SdCard]
         );
     }
 }
@@ -3594,7 +3594,7 @@ mod reliable_tests {
     use crate::tests::timeout_tests::StepClock;
     use crate::{TelemetryResult, packet::Packet, serialize};
 
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
     fn zero_clock() -> Box<dyn Clock + Send + Sync> {
@@ -3759,6 +3759,62 @@ mod reliable_tests {
             vec![1, 2],
             "ordered reliable delivery must reorder"
         );
+    }
+
+    #[test]
+    fn reliable_retransmit_waits_until_timeout_before_retrying() {
+        struct ManualClock {
+            now_ms: Arc<AtomicU64>,
+        }
+
+        impl Clock for ManualClock {
+            fn now_ms(&self) -> u64 {
+                self.now_ms.load(Ordering::SeqCst)
+            }
+        }
+
+        let now_ms = Arc::new(AtomicU64::new(0));
+        let tx_hits = Arc::new(AtomicUsize::new(0));
+        let tx_hits_c = tx_hits.clone();
+
+        let router = Router::new_with_clock(
+            RouterMode::Sink,
+            RouterConfig::default().with_reliable_enabled(true),
+            Box::new(ManualClock {
+                now_ms: now_ms.clone(),
+            }),
+        );
+
+        router.add_side_serialized_with_options(
+            "RELIABLE",
+            move |_bytes: &[u8]| -> TelemetryResult<()> {
+                tx_hits_c.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+            RouterSideOptions {
+                reliable_enabled: true,
+                link_local_enabled: false,
+            },
+        );
+
+        let pkt = Packet::from_f32_slice(
+            DataType::GpsData,
+            &[1.0_f32, 2.0, 3.0],
+            &[DataEndpoint::SdCard],
+            0,
+        )
+        .unwrap();
+
+        router.tx(pkt).unwrap();
+        assert_eq!(tx_hits.load(Ordering::SeqCst), 1);
+
+        now_ms.store(crate::config::RELIABLE_RETRANSMIT_MS - 1, Ordering::SeqCst);
+        router.process_tx_queue_with_timeout(0).unwrap();
+        assert_eq!(tx_hits.load(Ordering::SeqCst), 1);
+
+        now_ms.store(crate::config::RELIABLE_RETRANSMIT_MS + 1, Ordering::SeqCst);
+        router.process_tx_queue_with_timeout(0).unwrap();
+        assert_eq!(tx_hits.load(Ordering::SeqCst), 2);
     }
 
     #[test]
@@ -4628,6 +4684,64 @@ mod router_tests {
             assert!(seen_a.lock().unwrap().is_empty());
             assert_eq!(seen_b.lock().unwrap().len(), 1);
             assert_eq!(seen_b.lock().unwrap()[0].data_type(), DataType::GpsData);
+        }
+
+        #[test]
+        fn reliable_discovery_prefers_board_specific_holder_over_shared_holder() {
+            let seen_shared: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_specific: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_shared_c = seen_shared.clone();
+            let seen_specific_c = seen_specific.clone();
+
+            let router =
+                Router::new_with_clock(RouterMode::Sink, RouterConfig::default(), zero_clock());
+            let side_shared =
+                router.add_side_packet("SHARED", move |pkt: &Packet| -> TelemetryResult<()> {
+                    seen_shared_c.lock().unwrap().push(pkt.clone());
+                    Ok(())
+                });
+            let side_specific =
+                router.add_side_packet("SPECIFIC", move |pkt: &Packet| -> TelemetryResult<()> {
+                    seen_specific_c.lock().unwrap().push(pkt.clone());
+                    Ok(())
+                });
+
+            let (ty, shared_ep, specific_ep) = match (
+                datatype_by_name("ACTUATOR_COMMAND"),
+                endpoint_by_name("GROUND_STATION"),
+                endpoint_by_name("ACTUATOR_BOARD"),
+            ) {
+                (Some(ty), Some(shared), Some(specific)) => (ty, shared, specific),
+                _ => (DataType::GpsData, DataEndpoint::SdCard, DataEndpoint::Radio),
+            };
+
+            router
+                .rx_from_side(
+                    &build_discovery_announce("SHARED_NODE", 0, &[shared_ep]).unwrap(),
+                    side_shared,
+                )
+                .unwrap();
+            router
+                .rx_from_side(
+                    &build_discovery_announce(
+                        "SPECIFIC_NODE",
+                        0,
+                        &[shared_ep, specific_ep],
+                    )
+                    .unwrap(),
+                    side_specific,
+                )
+                .unwrap();
+
+            let meta = crate::message_meta(ty);
+            let payload = Arc::<[u8]>::from(vec![0u8; crate::get_needed_message_size(ty)]);
+            let pkt = Packet::new(ty, meta.endpoints, "GS", 0, payload).unwrap();
+            router.tx_queue(pkt).unwrap();
+            router.process_tx_queue().unwrap();
+
+            assert!(seen_shared.lock().unwrap().is_empty());
+            assert_eq!(seen_specific.lock().unwrap().len(), 1);
+            assert_eq!(seen_specific.lock().unwrap()[0].data_type(), ty);
         }
 
         #[test]
