@@ -276,14 +276,12 @@ mod timesync_system_test {
             Ok(())
         });
 
-        let leader_a =
-            build_timesync_announce_with_sender("SRC_A", 1, 1_700_000_000_000).unwrap();
+        let leader_a = build_timesync_announce_with_sender("SRC_A", 1, 1_700_000_000_000).unwrap();
         router.rx(&leader_a).unwrap();
         router.process_tx_queue().unwrap();
 
         now.store(1_500, Ordering::SeqCst);
-        let leader_b =
-            build_timesync_announce_with_sender("SRC_B", 2, 1_700_000_001_500).unwrap();
+        let leader_b = build_timesync_announce_with_sender("SRC_B", 2, 1_700_000_001_500).unwrap();
         router.rx(&leader_b).unwrap();
         router.process_tx_queue().unwrap();
 
@@ -291,13 +289,9 @@ mod timesync_system_test {
         assert_eq!(request_seqs, vec![1, 2]);
 
         let before_response = router.network_time_ms().expect("network time unavailable");
-        let resp_b_wire = build_timesync_response(
-            request_seqs[1],
-            1_500,
-            1_700_000_001_550,
-            1_700_000_001_550,
-        )
-        .unwrap();
+        let resp_b_wire =
+            build_timesync_response(request_seqs[1], 1_500, 1_700_000_001_550, 1_700_000_001_550)
+                .unwrap();
         let resp_b = Packet::new(
             DataType::TimeSyncResponse,
             &[DataEndpoint::TimeSync],
@@ -425,7 +419,7 @@ mod timesync_system_test {
                         ts,
                         Arc::<[u8]>::from(payload.as_slice()),
                     )
-                        .expect("packet build failed");
+                    .expect("packet build failed");
 
                     let wire = serialize::serialize_packet(&pkt);
                     let decoded = serialize::deserialize_packet(&wire).expect("deserialize failed");

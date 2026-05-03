@@ -14,15 +14,15 @@
 #[cfg(feature = "timesync")]
 use crate::timesync::{NetworkTimeReading, PartialNetworkTime, TimeSyncConfig};
 use crate::{
-    config::DataEndpoint, do_vec_log_typed, get_needed_message_size, message_meta, packet::Packet,
-    router::{endpoint_is_router_internal, Clock, LeBytes, RouterSideOptions},
-    router::{EndpointHandler, Router, RouterConfig}, serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet}, DataType,
-    MessageElement,
-    TelemetryError,
-    TelemetryErrorCode,
-    TelemetryResult,
+    DataType, MessageElement, TelemetryError, TelemetryErrorCode, TelemetryResult,
+    config::DataEndpoint,
+    do_vec_log_typed, get_needed_message_size, message_meta,
+    packet::Packet,
+    router::{Clock, LeBytes, RouterSideOptions, endpoint_is_router_internal},
+    router::{EndpointHandler, Router, RouterConfig},
+    serialize::{deserialize_packet, packet_wire_size, peek_envelope, serialize_packet},
 };
-use crate::{get_data_type, MessageDataType::NoData};
+use crate::{MessageDataType::NoData, get_data_type};
 use alloc::{boxed::Box, string::String, sync::Arc, vec, vec::Vec};
 use core::{ffi::c_char, ffi::c_void, mem::size_of, ptr, slice, str::from_utf8};
 
@@ -2509,7 +2509,7 @@ pub extern "C" fn seds_owned_header_view(
 #[cfg(all(test, feature = "discovery"))]
 mod tests {
     use super::*;
-    use crate::discovery::{build_discovery_announce, DISCOVERY_FAST_INTERVAL_MS};
+    use crate::discovery::{DISCOVERY_FAST_INTERVAL_MS, build_discovery_announce};
     use crate::router::RouterMode;
     use alloc::sync::Arc;
     use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};

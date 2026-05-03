@@ -11,10 +11,10 @@ use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use crate::router::{encode_slice_le, Router};
+use crate::router::{Router, encode_slice_le};
 use crate::{
-    config::DEVICE_IDENTIFIER, message_meta, packet::Packet, DataEndpoint, DataType,
-    TelemetryError, TelemetryResult,
+    DataEndpoint, DataType, TelemetryError, TelemetryResult, config::DEVICE_IDENTIFIER,
+    message_meta, packet::Packet,
 };
 
 /// Number of `u64` words carried by a time sync announce payload.

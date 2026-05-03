@@ -10,10 +10,10 @@
 //! the header fields used by `peek_envelope`.
 
 use crate::{
-    get_message_name, is_reliable_type, packet::Packet, try_enum_from_u32, DataEndpoint,
-    TelemetryError,
-    TelemetryResult,
-    {config::DataType, MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE},
+    DataEndpoint, TelemetryError, TelemetryResult, get_message_name, is_reliable_type,
+    packet::Packet,
+    try_enum_from_u32,
+    {MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE, config::DataType},
 };
 
 use crate::packet::hash_bytes_u64;

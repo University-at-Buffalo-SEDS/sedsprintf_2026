@@ -1,12 +1,12 @@
 #[cfg(test)]
 mod reliable_drop_tests {
+    use sedsprintf_rs_2026::TelemetryResult;
     use sedsprintf_rs_2026::config::{DataEndpoint, DataType, RELIABLE_RETRANSMIT_MS};
     use sedsprintf_rs_2026::packet::Packet;
     use sedsprintf_rs_2026::router::{
         Clock, EndpointHandler, Router, RouterConfig, RouterMode, RouterSideOptions,
     };
     use sedsprintf_rs_2026::serialize;
-    use sedsprintf_rs_2026::TelemetryResult;
 
     use std::collections::VecDeque;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -96,7 +96,7 @@ mod reliable_drop_tests {
                 &[DataEndpoint::Radio],
                 i as u64,
             )
-                .expect("failed to build packet");
+            .expect("failed to build packet");
             router_a.tx(pkt).expect("tx failed");
         }
 
@@ -164,7 +164,10 @@ mod reliable_drop_tests {
         let expected: Vec<u32> = (0..TOTAL).collect();
 
         assert!(dropped_data_once, "test did not drop a data frame");
-        assert!(dropped_control_once, "test did not drop a reliable control frame");
+        assert!(
+            dropped_control_once,
+            "test did not drop a reliable control frame"
+        );
         assert_eq!(got, expected, "reliable delivery should recover from drops");
     }
 
@@ -206,14 +209,14 @@ mod reliable_drop_tests {
             &[DataEndpoint::Radio],
             1,
         )
-            .expect("failed to build packet");
+        .expect("failed to build packet");
         let pkt2 = Packet::from_f32_slice(
             DataType::GpsData,
             &[2.0_f32, 0.0, 0.0],
             &[DataEndpoint::Radio],
             2,
         )
-            .expect("failed to build packet");
+        .expect("failed to build packet");
 
         let seq1 = serialize::serialize_packet_with_reliable(
             &pkt1,

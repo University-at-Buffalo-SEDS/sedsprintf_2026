@@ -1,8 +1,8 @@
-use crate::config::{get_message_meta, STATIC_HEX_LENGTH, STATIC_STRING_LENGTH};
+use crate::config::{STATIC_HEX_LENGTH, STATIC_STRING_LENGTH, get_message_meta};
 use crate::get_needed_message_size;
 use crate::packet::Packet;
 use crate::router::{Clock, EndpointHandler};
-use crate::{get_data_type, message_meta, DataEndpoint, DataType, MessageDataType, TelemetryError};
+use crate::{DataEndpoint, DataType, MessageDataType, TelemetryError, get_data_type, message_meta};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -178,13 +178,13 @@ mod tests2 {
 
     use crate::router::RouterMode;
     use crate::tests::timeout_tests::StepClock;
-    use crate::tests::{get_sd_card_handler, SeenType};
+    use crate::tests::{SeenType, get_sd_card_handler};
     use crate::{
+        TelemetryResult,
         config::{DataEndpoint, DataType},
         packet::Packet,
         router::Router,
         serialize,
-        TelemetryResult,
     };
     use std::sync::{Arc, Mutex};
     use std::vec::Vec;
@@ -530,7 +530,7 @@ mod handler_failure_tests {
     use crate::router::{EndpointHandler, RouterMode};
     use crate::router::{Router, RouterConfig};
     use crate::tests::timeout_tests::StepClock;
-    use crate::{DataType, TelemetryError, MAX_VALUE_DATA_TYPE};
+    use crate::{DataType, MAX_VALUE_DATA_TYPE, TelemetryError};
     use alloc::{sync::Arc, vec, vec::Vec};
     use core::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
@@ -693,10 +693,10 @@ mod timeout_tests {
 
     use crate::config::DataEndpoint;
     use crate::router::{EndpointHandler, RouterMode};
-    use crate::tests::{get_handler, UnixClock};
+    use crate::tests::{UnixClock, get_handler};
     use crate::{
-        packet::Packet, router::Clock, router::Router, router::RouterConfig, DataType,
-        TelemetryResult,
+        DataType, TelemetryResult, packet::Packet, router::Clock, router::Router,
+        router::RouterConfig,
     };
     use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     use std::sync::Arc;
@@ -1017,7 +1017,10 @@ mod timeout_tests {
         assert_eq!(tx_count.load(Ordering::SeqCst), 1);
         let topo = router.export_topology();
         assert_eq!(topo.routes.len(), 1);
-        assert_eq!(topo.routes[0].reachable_endpoints, vec![DataEndpoint::Radio]);
+        assert_eq!(
+            topo.routes[0].reachable_endpoints,
+            vec![DataEndpoint::Radio]
+        );
     }
 }
 
@@ -1034,11 +1037,11 @@ mod tests_extra {
     use crate::router::RouterMode;
     use crate::tests::test_payload_len_for;
     use crate::{
-        config::DataType, packet::Packet, router::{Clock, EndpointHandler, Router, RouterConfig},
+        TelemetryError, TelemetryErrorCode, TelemetryResult,
+        config::DataType,
+        packet::Packet,
+        router::{Clock, EndpointHandler, Router, RouterConfig},
         serialize,
-        TelemetryError,
-        TelemetryErrorCode,
-        TelemetryResult,
     };
     use alloc::{string::String, sync::Arc};
     use core::sync::atomic::{AtomicUsize, Ordering};
@@ -1219,10 +1222,10 @@ mod tests_extra {
     #[test]
     fn endpoints_bitpack_roundtrip_many_and_extremes() {
         use crate::{
+            MAX_VALUE_DATA_ENDPOINT,
             config::{DataEndpoint, DataType},
             packet::Packet,
             serialize,
-            MAX_VALUE_DATA_ENDPOINT,
         };
 
         // Build a long endpoint list by cycling through all enum values (0..=MAX)
@@ -1299,10 +1302,10 @@ mod tests_extra {
     #[test]
     fn corrupt_endpoint_bits_yields_bad_endpoint_error() {
         use crate::{
+            MAX_VALUE_DATA_ENDPOINT,
             config::{DataEndpoint, DataType},
             packet::Packet,
             serialize,
-            MAX_VALUE_DATA_ENDPOINT,
         };
 
         // Recompute EP_BITS the same way the module does.
@@ -1638,13 +1641,13 @@ mod tests_more {
     use crate::router::RouterMode;
     use crate::tests::UnixClock;
     use crate::{
-        config::{DataEndpoint, DataType}, get_data_type, get_needed_message_size, message_meta,
-        packet::Packet, router::{Clock, EndpointHandler, Router, RouterConfig}, serialize,
-        MessageDataType,
-        MessageElement, TelemetryError, TelemetryErrorCode,
-        TelemetryResult,
-        MAX_VALUE_DATA_ENDPOINT,
-        MAX_VALUE_DATA_TYPE,
+        MAX_VALUE_DATA_ENDPOINT, MAX_VALUE_DATA_TYPE, MessageDataType, MessageElement,
+        TelemetryError, TelemetryErrorCode, TelemetryResult,
+        config::{DataEndpoint, DataType},
+        get_data_type, get_needed_message_size, message_meta,
+        packet::Packet,
+        router::{Clock, EndpointHandler, Router, RouterConfig},
+        serialize,
     };
     use alloc::{sync::Arc, vec::Vec};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -2107,14 +2110,14 @@ mod concurrency_tests {
 
     use crate::router::RouterMode;
     use crate::{
+        TelemetryResult,
         config::{DataEndpoint, DataType},
         packet::Packet,
         router::{Clock, EndpointHandler, Router, RouterConfig},
         serialize,
-        TelemetryResult,
     };
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::thread;
     use std::time::Duration;
 
@@ -2661,7 +2664,7 @@ mod data_conversion_types {
 
     use crate::config::{DataEndpoint, DataType};
     use crate::packet::Packet;
-    use crate::{get_data_type, MessageDataType, TelemetryError, MAX_VALUE_DATA_TYPE};
+    use crate::{MAX_VALUE_DATA_TYPE, MessageDataType, TelemetryError, get_data_type};
 
     /// data_as_f32 should round-trip values written via from_f32_slice.
     #[test]
@@ -2733,7 +2736,7 @@ mod relay_tests {
 
     use crate::relay::Relay;
     use crate::tests::timeout_tests::StepClock;
-    use crate::{packet::Packet, serialize, TelemetryError, TelemetryResult};
+    use crate::{TelemetryError, TelemetryResult, packet::Packet, serialize};
     use core::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
@@ -3004,10 +3007,10 @@ mod dedupe_tests {
     use crate::relay::Relay;
     use crate::router::{Clock, EndpointHandler, Router, RouterConfig, RouterMode};
     use crate::tests::timeout_tests::StepClock;
-    use crate::{packet::Packet, serialize, TelemetryResult};
+    use crate::{TelemetryResult, packet::Packet, serialize};
 
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     /// Simple clock that always returns 0.
     fn zero_clock() -> Box<dyn Clock + Send + Sync> {
@@ -3297,7 +3300,7 @@ mod relay_reliable_tests {
     use crate::relay::{Relay, RelaySideOptions};
     use crate::router::Clock;
     use crate::tests::timeout_tests::StepClock;
-    use crate::{packet::Packet, serialize, TelemetryResult};
+    use crate::{TelemetryResult, packet::Packet, serialize};
 
     use std::sync::{Arc, Mutex};
 
@@ -3589,7 +3592,7 @@ mod reliable_tests {
         Clock, EndpointHandler, Router, RouterConfig, RouterMode, RouterSideOptions,
     };
     use crate::tests::timeout_tests::StepClock;
-    use crate::{packet::Packet, serialize, TelemetryResult};
+    use crate::{TelemetryResult, packet::Packet, serialize};
 
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
@@ -3820,7 +3823,7 @@ mod router_tests {
     use crate::packet::Packet;
     use crate::router::{EndpointHandler, Router, RouterConfig, RouterMode};
     use crate::tests::timeout_tests::StepClock;
-    use crate::{serialize, TelemetryResult};
+    use crate::{TelemetryResult, serialize};
     use std::sync::{Arc, Mutex};
 
     #[cfg(feature = "discovery")]
@@ -3972,16 +3975,16 @@ mod router_tests {
     #[cfg(feature = "discovery")]
     mod discovery_tests {
         use crate::discovery::{
-            build_discovery_announce, build_discovery_timesync_sources, DISCOVERY_FAST_INTERVAL_MS,
+            DISCOVERY_FAST_INTERVAL_MS, build_discovery_announce, build_discovery_timesync_sources,
         };
         use crate::relay::Relay;
         use crate::router::{Clock, EndpointHandler, RouterConfig};
         use crate::tests::timeout_tests::StepClock;
+        use crate::{DataEndpoint, DataType, TelemetryResult};
         use crate::{
             packet::Packet,
             router::{Router, RouterMode},
         };
-        use crate::{DataEndpoint, DataType, TelemetryResult};
         use std::sync::atomic::{AtomicU64, Ordering};
         use std::sync::{Arc, Mutex};
 
@@ -4090,8 +4093,8 @@ mod router_tests {
         }
 
         #[test]
-        fn queued_serialized_discovery_timesync_sources_update_route_table_after_full_queue_drain(
-        ) {
+        fn queued_serialized_discovery_timesync_sources_update_route_table_after_full_queue_drain()
+        {
             let router = Router::new_with_clock(
                 RouterMode::Sink,
                 RouterConfig::new(vec![EndpointHandler::new_packet_handler(
@@ -4109,8 +4112,7 @@ mod router_tests {
                 .rx_serialized_queue_from_side(announce_bytes.as_ref(), side_fill)
                 .unwrap();
 
-            let sources =
-                build_discovery_timesync_sources("AB", 0, &["AB", "AB_BACKUP"]).unwrap();
+            let sources = build_discovery_timesync_sources("AB", 0, &["AB", "AB_BACKUP"]).unwrap();
             let source_bytes = crate::serialize::serialize_packet(&sources);
             router
                 .rx_serialized_queue_from_side(source_bytes.as_ref(), side_fill)
@@ -4121,7 +4123,10 @@ mod router_tests {
             let topo = router.export_topology();
             assert_eq!(topo.routes.len(), 1);
             assert_eq!(topo.routes[0].side_name, "FILL");
-            assert_eq!(topo.routes[0].reachable_endpoints, vec![DataEndpoint::Radio]);
+            assert_eq!(
+                topo.routes[0].reachable_endpoints,
+                vec![DataEndpoint::Radio]
+            );
             assert_eq!(
                 topo.routes[0].reachable_timesync_sources,
                 vec!["AB".to_string(), "AB_BACKUP".to_string()]
@@ -4175,14 +4180,13 @@ mod router_tests {
         #[test]
         fn end_to_end_pending_destinations_clear_when_discovered_holder_expires() {
             let now_ms = Arc::new(AtomicU64::new(0));
-            let router =
-                Router::new_with_clock(
-                    RouterMode::Sink,
-                    RouterConfig::default(),
-                    Box::new(SharedClock {
-                        now_ms: now_ms.clone(),
-                    }),
-                );
+            let router = Router::new_with_clock(
+                RouterMode::Sink,
+                RouterConfig::default(),
+                Box::new(SharedClock {
+                    now_ms: now_ms.clone(),
+                }),
+            );
             let side = router.add_side_serialized_with_options(
                 "A",
                 |_bytes: &[u8]| -> TelemetryResult<()> { Ok(()) },
@@ -4214,7 +4218,10 @@ mod router_tests {
                 Some(1)
             );
 
-            now_ms.store(crate::discovery::DISCOVERY_ROUTE_TTL_MS + 1, Ordering::SeqCst);
+            now_ms.store(
+                crate::discovery::DISCOVERY_ROUTE_TTL_MS + 1,
+                Ordering::SeqCst,
+            );
             router.periodic(0).unwrap();
             assert_eq!(
                 router.debug_end_to_end_pending_destination_count(packet_id),
@@ -4224,11 +4231,8 @@ mod router_tests {
 
         #[test]
         fn end_to_end_tracking_still_registers_on_serialized_sides_without_link_reliability() {
-            let router = Router::new_with_clock(
-                RouterMode::Sink,
-                RouterConfig::default(),
-                zero_clock(),
-            );
+            let router =
+                Router::new_with_clock(RouterMode::Sink, RouterConfig::default(), zero_clock());
             let side = router.add_side_serialized_with_options(
                 "A",
                 |_bytes: &[u8]| -> TelemetryResult<()> { Ok(()) },
@@ -4295,7 +4299,10 @@ mod router_tests {
                 Some(1)
             );
 
-            now_ms.store(crate::discovery::DISCOVERY_ROUTE_TTL_MS + 1, Ordering::SeqCst);
+            now_ms.store(
+                crate::discovery::DISCOVERY_ROUTE_TTL_MS + 1,
+                Ordering::SeqCst,
+            );
             relay.periodic(0).unwrap();
             assert_eq!(
                 relay.debug_end_to_end_acked_destination_count(packet_id),
@@ -4465,6 +4472,41 @@ mod router_tests {
             assert_eq!(pkts.len(), 2);
             assert_eq!(pkts[0].data_type(), DataType::DiscoveryAnnounce);
             assert_eq!(pkts[1].data_type(), DataType::GpsData);
+        }
+
+        #[cfg(feature = "discovery")]
+        #[test]
+        fn process_tx_queue_applies_pending_discovery_routes_before_log_queue_send() {
+            let seen_a: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_b: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_a_c = seen_a.clone();
+            let seen_b_c = seen_b.clone();
+
+            let router =
+                Router::new_with_clock(RouterMode::Sink, RouterConfig::default(), zero_clock());
+            let side_a = router.add_side_packet("A", move |pkt: &Packet| -> TelemetryResult<()> {
+                seen_a_c.lock().unwrap().push(pkt.clone());
+                Ok(())
+            });
+            router.add_side_packet("B", move |pkt: &Packet| -> TelemetryResult<()> {
+                seen_b_c.lock().unwrap().push(pkt.clone());
+                Ok(())
+            });
+
+            let discovery_pkt =
+                build_discovery_announce("REMOTE_A", 0, &[DataEndpoint::SdCard]).unwrap();
+            router.rx_queue_from_side(discovery_pkt, side_a).unwrap();
+            router
+                .log_queue(DataType::GpsData, &[1.0_f32, 2.0, 3.0])
+                .unwrap();
+
+            router.process_tx_queue().unwrap();
+
+            let got_a = seen_a.lock().unwrap().clone();
+            let got_b = seen_b.lock().unwrap().clone();
+            assert_eq!(got_a.len(), 1);
+            assert!(got_b.is_empty());
+            assert_eq!(got_a[0].data_type(), DataType::GpsData);
         }
 
         #[test]

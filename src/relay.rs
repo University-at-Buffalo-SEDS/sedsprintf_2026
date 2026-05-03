@@ -4,15 +4,15 @@ use crate::config::{
 };
 #[cfg(feature = "discovery")]
 use crate::discovery::{
-    self, DiscoveryCadenceState, TopologySideRoute, TopologySnapshot, DISCOVERY_ROUTE_TTL_MS,
+    self, DISCOVERY_ROUTE_TTL_MS, DiscoveryCadenceState, TopologySideRoute, TopologySnapshot,
 };
-use crate::packet::{hash_bytes_u64, Packet};
+use crate::packet::{Packet, hash_bytes_u64};
 use crate::queue::{BoundedDeque, ByteCost};
 use crate::serialize;
 use crate::{is_reliable_type, message_meta, message_priority, reliable_mode};
 use crate::{
     router::Clock,
-    {lock::RouterMutex, TelemetryError, TelemetryResult},
+    {TelemetryError, TelemetryResult, lock::RouterMutex},
 };
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
@@ -483,7 +483,11 @@ impl Relay {
                 .ok_or(TelemetryError::HandlerError("relay: invalid side id"))?;
             let hop_reliable_enabled = side_ref.opts.reliable_enabled
                 && !self.side_has_multiple_announcers_locked(&st, side, self.clock.now_ms());
-            (side_ref.tx_handler.clone(), side_ref.opts, hop_reliable_enabled)
+            (
+                side_ref.tx_handler.clone(),
+                side_ref.opts,
+                hop_reliable_enabled,
+            )
         };
 
         let ty = match &data {
@@ -496,8 +500,10 @@ impl Relay {
             }
         };
 
-        if matches!(ty, crate::DataType::ReliableAck | crate::DataType::ReliablePacketRequest)
-            && matches!(&handler, RelayTxHandlerFn::Packet(_))
+        if matches!(
+            ty,
+            crate::DataType::ReliableAck | crate::DataType::ReliablePacketRequest
+        ) && matches!(&handler, RelayTxHandlerFn::Packet(_))
         {
             return Ok(());
         }
@@ -678,21 +684,25 @@ impl Relay {
             }
 
             if had_exact {
-                Ok(RemoteSidePlan::Target(self.filter_end_to_end_satisfied_sides_locked(
-                    &st,
-                    data,
-                    exact_targets,
-                    &eps,
-                    ty,
-                )?))
+                Ok(RemoteSidePlan::Target(
+                    self.filter_end_to_end_satisfied_sides_locked(
+                        &st,
+                        data,
+                        exact_targets,
+                        &eps,
+                        ty,
+                    )?,
+                ))
             } else if had_known {
-                Ok(RemoteSidePlan::Target(self.filter_end_to_end_satisfied_sides_locked(
-                    &st,
-                    data,
-                    generic_targets,
-                    &eps,
-                    ty,
-                )?))
+                Ok(RemoteSidePlan::Target(
+                    self.filter_end_to_end_satisfied_sides_locked(
+                        &st,
+                        data,
+                        generic_targets,
+                        &eps,
+                        ty,
+                    )?,
+                ))
             } else if restrict_link_local {
                 let targets = st
                     .sides
@@ -1564,13 +1574,17 @@ impl Relay {
                     } else {
                         let vals = pkt.data_as_u32()?;
                         if vals.len() != 2 {
-                            return Err(TelemetryError::Deserialize("bad reliable control payload"));
+                            return Err(TelemetryError::Deserialize(
+                                "bad reliable control payload",
+                            ));
                         }
                         let ty = crate::DataType::try_from_u32(vals[0])
                             .ok_or(TelemetryError::InvalidType)?;
                         let seq = vals[1];
                         match pkt.data_type() {
-                            crate::DataType::ReliableAck => self.handle_reliable_ack(item.src, ty, seq),
+                            crate::DataType::ReliableAck => {
+                                self.handle_reliable_ack(item.src, ty, seq)
+                            }
                             crate::DataType::ReliablePacketRequest => {
                                 self.queue_reliable_retransmit(item.src, ty, seq)?
                             }

@@ -13,7 +13,7 @@ use crate::config::{
 };
 #[cfg(feature = "discovery")]
 use crate::discovery::{
-    self, DiscoveryCadenceState, TopologySideRoute, TopologySnapshot, DISCOVERY_ROUTE_TTL_MS,
+    self, DISCOVERY_ROUTE_TTL_MS, DiscoveryCadenceState, TopologySideRoute, TopologySnapshot,
 };
 use crate::packet::hash_bytes_u64;
 use crate::queue::{BoundedDeque, ByteCost};
@@ -21,23 +21,23 @@ use crate::queue::{BoundedDeque, ByteCost};
 use crate::seds_error_msg;
 #[cfg(feature = "timesync")]
 use crate::timesync::{
-    advance_network_time, compute_network_time_sample, decode_timesync_announce,
-    decode_timesync_request, decode_timesync_response, NetworkClock,
+    INTERNAL_TIMESYNC_SOURCE_ID, LOCAL_TIMESYNC_DATE_SOURCE_ID, LOCAL_TIMESYNC_FULL_SOURCE_ID,
+    LOCAL_TIMESYNC_SUBSEC_SOURCE_ID, LOCAL_TIMESYNC_TOD_SOURCE_ID, NetworkClock,
     NetworkTimeReading, PartialNetworkTime, SlewedNetworkClock, TimeSyncConfig, TimeSyncLeader,
-    TimeSyncTracker, INTERNAL_TIMESYNC_SOURCE_ID, LOCAL_TIMESYNC_DATE_SOURCE_ID, LOCAL_TIMESYNC_FULL_SOURCE_ID,
-    LOCAL_TIMESYNC_SUBSEC_SOURCE_ID, LOCAL_TIMESYNC_TOD_SOURCE_ID,
+    TimeSyncTracker, advance_network_time, compute_network_time_sample, decode_timesync_announce,
+    decode_timesync_request, decode_timesync_response,
 };
 use crate::{
+    MessageElement, TelemetryError, TelemetryResult,
     config::{
-        DataEndpoint, DataType, DEVICE_IDENTIFIER, MAX_HANDLER_RETRIES, RELIABLE_MAX_PENDING,
+        DEVICE_IDENTIFIER, DataEndpoint, DataType, MAX_HANDLER_RETRIES, RELIABLE_MAX_PENDING,
         RELIABLE_MAX_RETRIES, RELIABLE_RETRANSMIT_MS,
-    }, get_needed_message_size, impl_letype_num,
-    is_reliable_type,
-    lock::RouterMutex, message_meta, message_priority,
+    },
+    get_needed_message_size, impl_letype_num, is_reliable_type,
+    lock::RouterMutex,
+    message_meta, message_priority,
     packet::Packet,
     reliable_mode, serialize,
-    MessageElement,
-    TelemetryError, TelemetryResult,
 };
 use alloc::string::{String, ToString};
 use alloc::{
@@ -1327,11 +1327,9 @@ impl Router {
                         side_id,
                         side.opts.link_local_enabled,
                     );
-                    let timesync_sources =
-                        self.advertised_discovery_timesync_sources_for_link_locked(
-                            &st,
-                            now_ms,
-                            side_id,
+                    let timesync_sources = self
+                        .advertised_discovery_timesync_sources_for_link_locked(
+                            &st, now_ms, side_id,
                         );
                     (side_id, endpoints, timesync_sources)
                 })
@@ -1387,11 +1385,7 @@ impl Router {
                     )
                     .is_empty()
                     || !self
-                        .advertised_discovery_timesync_sources_for_link_locked(
-                            &st,
-                            now_ms,
-                            side_id,
-                        )
+                        .advertised_discovery_timesync_sources_for_link_locked(&st, now_ms, side_id)
                         .is_empty()
             });
             if st.sides.is_empty() || !has_any {
@@ -1463,6 +1457,63 @@ impl Router {
             Self::note_discovery_topology_change_locked(&mut st, now_ms);
         }
         Ok(true)
+    }
+
+    #[cfg(feature = "discovery")]
+    fn rx_item_is_discovery(item: &RouterRxItem) -> TelemetryResult<bool> {
+        match &item.data {
+            RouterItem::Packet(pkt) => Ok(discovery::is_discovery_type(pkt.data_type())),
+            RouterItem::Serialized(bytes) => Ok(discovery::is_discovery_type(
+                serialize::peek_envelope(bytes.as_ref())?.ty,
+            )),
+        }
+    }
+
+    #[cfg(feature = "discovery")]
+    fn process_pending_discovery_rx(&self) -> TelemetryResult<bool> {
+        let mut deferred_isr = Vec::new();
+        let mut deferred_rx = Vec::new();
+        let mut processed_any = false;
+
+        loop {
+            let Some(item) = self.isr_rx_queue.pop_front()? else {
+                break;
+            };
+            if Self::rx_item_is_discovery(&item)? {
+                self.process_rx_queue_item(item)?;
+                processed_any = true;
+            } else {
+                deferred_isr.push(item);
+            }
+        }
+
+        loop {
+            let item = {
+                let mut st = self.state.lock();
+                st.received_queue.pop_front()
+            };
+            let Some(item) = item else { break };
+            if Self::rx_item_is_discovery(&item)? {
+                self.process_rx_queue_item(item)?;
+                processed_any = true;
+            } else {
+                deferred_rx.push(item);
+            }
+        }
+
+        for item in deferred_isr {
+            self.isr_rx_queue.push_back_prioritized(item)?;
+        }
+
+        if !deferred_rx.is_empty() {
+            let mut st = self.state.lock();
+            for item in deferred_rx {
+                st.received_queue
+                    .push_back_prioritized(item, |queued| queued.priority)?;
+            }
+        }
+
+        Ok(processed_any)
     }
 
     #[cfg(not(feature = "discovery"))]
@@ -1800,7 +1851,12 @@ impl Router {
             .insert(packet_id, ReliableReturnRouteState { side });
     }
 
-    fn queue_reliable_ack(&self, side: RouterSideId, ty: DataType, seq: u32) -> TelemetryResult<()> {
+    fn queue_reliable_ack(
+        &self,
+        side: RouterSideId,
+        ty: DataType,
+        seq: u32,
+    ) -> TelemetryResult<()> {
         let pkt = self.reliable_control_packet(DataType::ReliableAck, ty, seq)?;
         self.tx_queue_item_with_priority(
             RouterTxItem::ToSide {
@@ -1857,7 +1913,9 @@ impl Router {
         {
             let mut st = self.state.lock();
             let tx_state = self.reliable_tx_state_mut(&mut st, side, ty);
-            if let Some(sent) = tx_state.sent.get_mut(&seq) && !sent.queued {
+            if let Some(sent) = tx_state.sent.get_mut(&seq)
+                && !sent.queued
+            {
                 sent.queued = true;
                 queued = Some(sent.bytes.clone());
             }
@@ -1874,7 +1932,11 @@ impl Router {
         Ok(())
     }
 
-    fn send_reliable_raw_to_side(&self, side: RouterSideId, bytes: Arc<[u8]>) -> TelemetryResult<()> {
+    fn send_reliable_raw_to_side(
+        &self,
+        side: RouterSideId,
+        bytes: Arc<[u8]>,
+    ) -> TelemetryResult<()> {
         let handler = {
             let st = self.state.lock();
             st.sides
@@ -1906,7 +1968,11 @@ impl Router {
             let hop_reliable_enabled = side_ref.opts.reliable_enabled
                 && self.cfg.reliable_enabled()
                 && !self.side_has_multiple_announcers_locked(&st, side, self.clock.now_ms());
-            (side_ref.tx_handler.clone(), side_ref.opts, hop_reliable_enabled)
+            (
+                side_ref.tx_handler.clone(),
+                side_ref.opts,
+                hop_reliable_enabled,
+            )
         };
 
         let ty = match &data {
@@ -1946,7 +2012,9 @@ impl Router {
             let mut st = self.state.lock();
             let tx_state = self.reliable_tx_state_mut(&mut st, side, ty);
             if tx_state.sent.len() >= RELIABLE_MAX_PENDING {
-                return Err(TelemetryError::PacketTooLarge("router reliable history full"));
+                return Err(TelemetryError::PacketTooLarge(
+                    "router reliable history full",
+                ));
             }
             let seq = tx_state.next_seq;
             let next = tx_state.next_seq.wrapping_add(1);
@@ -2901,14 +2969,10 @@ impl Router {
                 })
             })
             .collect();
-        let advertised_endpoints = self.advertised_discovery_endpoints_for_link_locked(
-            &st,
-            now_ms,
-            usize::MAX,
-            true,
-        );
-        let advertised_timesync_sources = self
-            .advertised_discovery_timesync_sources_for_link_locked(&st, now_ms, usize::MAX);
+        let advertised_endpoints =
+            self.advertised_discovery_endpoints_for_link_locked(&st, now_ms, usize::MAX, true);
+        let advertised_timesync_sources =
+            self.advertised_discovery_timesync_sources_for_link_locked(&st, now_ms, usize::MAX);
         TopologySnapshot {
             advertised_endpoints,
             advertised_timesync_sources,
@@ -3077,6 +3141,8 @@ impl Router {
     fn process_tx_queue_with_timeout_impl(&self, timeout_ms: u32) -> TelemetryResult<()> {
         let start = self.clock.now_ms();
         loop {
+            #[cfg(feature = "discovery")]
+            let _ = self.process_pending_discovery_rx()?;
             self.process_reliable_timeouts()?;
             self.process_end_to_end_reliable_timeouts()?;
             let pkt_opt = {
@@ -3137,6 +3203,9 @@ impl Router {
     fn process_all_queues_with_timeout_impl(&self, timeout_ms: u32) -> TelemetryResult<()> {
         if timeout_ms == 0 {
             loop {
+                #[cfg(feature = "discovery")]
+                let mut did_any = self.process_pending_discovery_rx()?;
+                #[cfg(not(feature = "discovery"))]
                 let mut did_any = false;
                 self.process_reliable_timeouts()?;
                 self.process_end_to_end_reliable_timeouts()?;
@@ -3169,6 +3238,8 @@ impl Router {
 
         let tx_start = self.clock.now_ms();
         loop {
+            #[cfg(feature = "discovery")]
+            let _ = self.process_pending_discovery_rx()?;
             self.process_reliable_timeouts()?;
             self.process_end_to_end_reliable_timeouts()?;
             let pkt_opt = {
@@ -3781,7 +3852,11 @@ impl Router {
         Ok(())
     }
 
-    fn dispatch_rx_data(&self, item: &RouterRxItem, called_from_queue: bool) -> TelemetryResult<()> {
+    fn dispatch_rx_data(
+        &self,
+        item: &RouterRxItem,
+        called_from_queue: bool,
+    ) -> TelemetryResult<()> {
         match &item.data {
             RouterItem::Packet(pkt) => {
                 pkt.validate()?;
@@ -3847,28 +3922,30 @@ impl Router {
                     for h in self.cfg.handlers.iter().filter(|h| h.endpoint == dest) {
                         match (&h.handler, &bytes_opt) {
                             (EndpointHandlerFn::Serialized(_), Some(bytes)) => {
-                                if self.call_handler_with_retries(
-                                    dest,
-                                    h,
-                                    Some(bytes.as_ref()),
-                                    Some(pkt),
-                                    None,
-                                )
-                                .is_ok()
+                                if self
+                                    .call_handler_with_retries(
+                                        dest,
+                                        h,
+                                        Some(bytes.as_ref()),
+                                        Some(pkt),
+                                        None,
+                                    )
+                                    .is_ok()
                                 {
                                     delivered_local = true;
                                 }
                             }
                             (EndpointHandlerFn::Serialized(_), None) => {
                                 let bytes = serialize::serialize_packet(pkt);
-                                if self.call_handler_with_retries(
-                                    dest,
-                                    h,
-                                    Some(bytes.as_ref()),
-                                    Some(pkt),
-                                    None,
-                                )
-                                .is_ok()
+                                if self
+                                    .call_handler_with_retries(
+                                        dest,
+                                        h,
+                                        Some(bytes.as_ref()),
+                                        Some(pkt),
+                                        None,
+                                    )
+                                    .is_ok()
                                 {
                                     delivered_local = true;
                                 }
@@ -3908,13 +3985,19 @@ impl Router {
 
                 if let Some(src) = item.src
                     && is_reliable_type(env.ty)
-                    && !matches!(env.ty, DataType::ReliableAck | DataType::ReliablePacketRequest)
+                    && !matches!(
+                        env.ty,
+                        DataType::ReliableAck | DataType::ReliablePacketRequest
+                    )
                     && let Ok(packet_id) = serialize::packet_id_from_wire(bytes.as_ref())
                 {
                     self.note_reliable_return_route(src, packet_id);
                 }
 
-                if matches!(env.ty, DataType::ReliableAck | DataType::ReliablePacketRequest) {
+                if matches!(
+                    env.ty,
+                    DataType::ReliableAck | DataType::ReliablePacketRequest
+                ) {
                     let pkt = serialize::deserialize_packet(bytes.as_ref())?;
                     pkt.validate()?;
                     let _ = self.handle_internal_reliable_packet(&pkt, item.src)?;
@@ -3974,14 +4057,15 @@ impl Router {
                     for h in self.cfg.handlers.iter().filter(|h| h.endpoint == dest) {
                         match &h.handler {
                             EndpointHandlerFn::Serialized(_) => {
-                                if self.call_handler_with_retries(
-                                    dest,
-                                    h,
-                                    Some(bytes.as_ref()),
-                                    pkt_opt.as_ref(),
-                                    Some(&env),
-                                )
-                                .is_ok()
+                                if self
+                                    .call_handler_with_retries(
+                                        dest,
+                                        h,
+                                        Some(bytes.as_ref()),
+                                        pkt_opt.as_ref(),
+                                        Some(&env),
+                                    )
+                                    .is_ok()
                                 {
                                     delivered_local = true;
                                 }
@@ -3993,14 +4077,15 @@ impl Router {
                                     pkt_opt = Some(pkt);
                                 }
                                 let pkt_ref = pkt_opt.as_ref().expect("just set");
-                                if self.call_handler_with_retries(
-                                    dest,
-                                    h,
-                                    None,
-                                    Some(pkt_ref),
-                                    Some(&env),
-                                )
-                                .is_ok()
+                                if self
+                                    .call_handler_with_retries(
+                                        dest,
+                                        h,
+                                        None,
+                                        Some(pkt_ref),
+                                        Some(&env),
+                                    )
+                                    .is_ok()
                                 {
                                     delivered_local = true;
                                 }
@@ -4012,7 +4097,10 @@ impl Router {
                 if delivered_local
                     && item.src.is_some()
                     && is_reliable_type(env.ty)
-                    && !matches!(env.ty, DataType::ReliableAck | DataType::ReliablePacketRequest)
+                    && !matches!(
+                        env.ty,
+                        DataType::ReliableAck | DataType::ReliablePacketRequest
+                    )
                     && let Some(pkt_ref) = pkt_opt.as_ref()
                 {
                     self.queue_end_to_end_reliable_ack(pkt_ref)?;
@@ -4199,7 +4287,9 @@ impl Router {
                 let should_track_end_to_end = {
                     let ty = match &data {
                         RouterItem::Packet(pkt) => pkt.data_type(),
-                        RouterItem::Serialized(bytes) => serialize::peek_envelope(bytes.as_ref())?.ty,
+                        RouterItem::Serialized(bytes) => {
+                            serialize::peek_envelope(bytes.as_ref())?.ty
+                        }
                     };
                     if !is_reliable_type(ty) || is_internal_control_type(ty) {
                         false
@@ -4229,7 +4319,8 @@ impl Router {
                                     }
                                     RouterItem::Serialized(bytes) => {
                                         if let Ok(env) = serialize::peek_envelope(bytes.as_ref()) {
-                                            let _ = self.handle_callback_error_from_env(&env, None, e);
+                                            let _ =
+                                                self.handle_callback_error_from_env(&env, None, e);
                                         }
                                     }
                                 }
@@ -4246,7 +4337,8 @@ impl Router {
                                     }
                                     RouterItem::Serialized(bytes) => {
                                         if let Ok(env) = serialize::peek_envelope(bytes.as_ref()) {
-                                            let _ = self.handle_callback_error_from_env(&env, None, e);
+                                            let _ =
+                                                self.handle_callback_error_from_env(&env, None, e);
                                         }
                                     }
                                 }

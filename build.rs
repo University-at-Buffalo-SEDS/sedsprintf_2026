@@ -696,7 +696,6 @@ fn parse_seds_result_from_lib_rs(lib_rs_path: &Path) -> SedsResultEnum {
             .then_with(|| na.cmp(nb))
     });
     SedsResultEnum { members }
-
 }
 
 fn to_screaming_snake(s: &str) -> String {
