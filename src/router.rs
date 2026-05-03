@@ -1034,6 +1034,7 @@ impl Router {
         #[cfg(feature = "discovery")]
         {
             let (eps, ty) = self.item_route_info(data)?;
+            let reliable_discovery_only = is_reliable_type(ty) && !is_internal_control_type(ty);
             if let Some(packet_id) = Self::reliable_control_target_packet_id(data)? {
                 let st = self.state.lock();
                 if let Some(route) = st.reliable_return_routes.get(&packet_id) {
@@ -1088,6 +1089,8 @@ impl Router {
             let mut exact_targets = Vec::new();
             let mut had_known = false;
             let mut generic_targets = Vec::new();
+            let mut best_reliable_score = 0usize;
+            let mut best_reliable_targets = Vec::new();
 
             for (&side, route) in st.discovery_routes.iter() {
                 if exclude == Some(side)
@@ -1111,14 +1114,30 @@ impl Router {
                     exact_targets.push(side);
                     continue;
                 }
-                if eps.iter().copied().any(|ep| route.reachable.contains(&ep)) {
+                let score = eps
+                    .iter()
+                    .copied()
+                    .filter(|ep| route.reachable.contains(ep))
+                    .count();
+                if score > 0 {
                     had_known = true;
                     generic_targets.push(side);
+                    if reliable_discovery_only {
+                        if score > best_reliable_score {
+                            best_reliable_score = score;
+                            best_reliable_targets.clear();
+                            best_reliable_targets.push(side);
+                        } else if score == best_reliable_score {
+                            best_reliable_targets.push(side);
+                        }
+                    }
                 }
             }
 
             if had_exact {
                 Ok(RemoteSidePlan::Target(exact_targets))
+            } else if reliable_discovery_only && best_reliable_score > 0 {
+                Ok(RemoteSidePlan::Target(best_reliable_targets))
             } else if had_known {
                 Ok(RemoteSidePlan::Target(generic_targets))
             } else if restrict_link_local {
@@ -1135,6 +1154,8 @@ impl Router {
                     })
                     .collect();
                 Ok(RemoteSidePlan::Target(targets))
+            } else if reliable_discovery_only {
+                Ok(RemoteSidePlan::Target(Vec::new()))
             } else if has_nonlocal || bootstrap_timesync {
                 Ok(RemoteSidePlan::Flood)
             } else {
@@ -1541,10 +1562,12 @@ impl Router {
         st: &RouterInner,
         data: &RouterItem,
     ) -> TelemetryResult<BTreeMap<u64, RouterSideId>> {
-        let (eps, _) = self.item_route_info(data)?;
+        let (eps, ty) = self.item_route_info(data)?;
         let now_ms = self.clock.now_ms();
         let restrict_link_local = Self::endpoints_are_link_local_only(&eps);
+        let reliable_discovery_only = is_reliable_type(ty) && !is_internal_control_type(ty);
         let mut out = BTreeMap::new();
+        let mut scored = Vec::new();
         for (&side, route) in st.discovery_routes.iter() {
             if now_ms.saturating_sub(route.last_seen_ms) > DISCOVERY_ROUTE_TTL_MS {
                 continue;
@@ -1562,12 +1585,25 @@ impl Router {
                 if now_ms.saturating_sub(sender_state.last_seen_ms) > DISCOVERY_ROUTE_TTL_MS {
                     continue;
                 }
-                if eps
+                let score = eps
                     .iter()
                     .copied()
-                    .any(|ep| sender_state.reachable.contains(&ep))
-                {
-                    out.insert(Self::sender_hash(sender), side);
+                    .filter(|ep| sender_state.reachable.contains(ep))
+                    .count();
+                if score > 0 {
+                    if reliable_discovery_only {
+                        scored.push((score, Self::sender_hash(sender), side));
+                    } else {
+                        out.insert(Self::sender_hash(sender), side);
+                    }
+                }
+            }
+        }
+        if reliable_discovery_only {
+            let best_score = scored.iter().map(|(score, _, _)| *score).max().unwrap_or(0);
+            for (score, sender_hash, side) in scored {
+                if score == best_score {
+                    out.insert(sender_hash, side);
                 }
             }
         }

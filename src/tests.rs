@@ -4547,6 +4547,89 @@ mod router_tests {
             assert_eq!(seen_b.lock().unwrap().len(), 1);
         }
 
+        #[cfg(feature = "discovery")]
+        #[test]
+        fn reliable_log_queue_prefers_highest_overlap_discovery_holder() {
+            let seen_a: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_b: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_a_c = seen_a.clone();
+            let seen_b_c = seen_b.clone();
+
+            let router =
+                Router::new_with_clock(RouterMode::Sink, RouterConfig::default(), zero_clock());
+            let side_a = router.add_side_packet("A", move |pkt: &Packet| -> TelemetryResult<()> {
+                seen_a_c.lock().unwrap().push(pkt.clone());
+                Ok(())
+            });
+            let side_b = router.add_side_packet("B", move |pkt: &Packet| -> TelemetryResult<()> {
+                seen_b_c.lock().unwrap().push(pkt.clone());
+                Ok(())
+            });
+
+            let discovery_pkt =
+                build_discovery_announce("REMOTE_A", 0, &[DataEndpoint::SdCard]).unwrap();
+            router.rx_from_side(&discovery_pkt, side_a).unwrap();
+            let discovery_pkt = build_discovery_announce(
+                "REMOTE_B",
+                0,
+                &[DataEndpoint::SdCard, DataEndpoint::Radio],
+            )
+            .unwrap();
+            router.rx_from_side(&discovery_pkt, side_b).unwrap();
+            router
+                .log_queue(DataType::GpsData, &[7.0_f32, 8.0, 9.0])
+                .unwrap();
+            router.process_tx_queue().unwrap();
+
+            assert!(seen_a.lock().unwrap().is_empty());
+            assert_eq!(seen_b.lock().unwrap().len(), 1);
+        }
+
+        #[cfg(feature = "discovery")]
+        #[test]
+        fn reliable_immediate_tx_prefers_highest_overlap_discovery_holder() {
+            let seen_a: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_b: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_a_c = seen_a.clone();
+            let seen_b_c = seen_b.clone();
+
+            let router =
+                Router::new_with_clock(RouterMode::Sink, RouterConfig::default(), zero_clock());
+            let side_a = router.add_side_packet("A", move |pkt: &Packet| -> TelemetryResult<()> {
+                seen_a_c.lock().unwrap().push(pkt.clone());
+                Ok(())
+            });
+            let side_b = router.add_side_packet("B", move |pkt: &Packet| -> TelemetryResult<()> {
+                seen_b_c.lock().unwrap().push(pkt.clone());
+                Ok(())
+            });
+
+            let side_a_discovery =
+                build_discovery_announce("LOCAL_STORE", 0, &[DataEndpoint::SdCard]).unwrap();
+            router.rx_from_side(&side_a_discovery, side_a).unwrap();
+
+            let side_b_discovery = build_discovery_announce(
+                "RADIO_NODE",
+                0,
+                &[DataEndpoint::SdCard, DataEndpoint::Radio],
+            )
+            .unwrap();
+            router.rx_from_side(&side_b_discovery, side_b).unwrap();
+
+            let pkt = Packet::from_f32_slice(
+                DataType::GpsData,
+                &[1.0, 2.0, 3.0],
+                &[DataEndpoint::Radio, DataEndpoint::SdCard],
+                1,
+            )
+            .unwrap();
+            router.tx(pkt).unwrap();
+
+            assert!(seen_a.lock().unwrap().is_empty());
+            assert_eq!(seen_b.lock().unwrap().len(), 1);
+            assert_eq!(seen_b.lock().unwrap()[0].data_type(), DataType::GpsData);
+        }
+
         #[test]
         fn relay_exports_aggregated_topology() {
             let relay = Relay::new(zero_clock());
