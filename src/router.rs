@@ -3712,12 +3712,20 @@ impl Router {
             if let Some(sent) = st.end_to_end_reliable_tx.get_mut(&packet_id) {
                 if let Some(sender_hash) = Self::decode_end_to_end_ack_sender_hash(pkt.sender()) {
                     sent.pending_destinations.remove(&sender_hash);
-                    if sent.pending_destinations.is_empty() {
-                        st.end_to_end_reliable_tx.remove(&packet_id);
-                    }
-                } else {
+                }
+                // A bridge/router on the remote side may legitimately emit the
+                // end-to-end ack on behalf of the discovered holder behind that
+                // side. Treat the ack as satisfying any remaining destinations
+                // that map to the ingress side, even if the sender hash does not
+                // exactly match the original discovery announcer.
+                sent.pending_destinations.retain(|_, side| *side != src);
+                let clear = sent.pending_destinations.is_empty();
+                if clear {
+                    let _ = sent;
                     st.end_to_end_reliable_tx.remove(&packet_id);
                 }
+            } else {
+                st.end_to_end_reliable_tx.remove(&packet_id);
             }
             return Ok(true);
         }
