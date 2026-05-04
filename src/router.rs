@@ -165,6 +165,7 @@ struct ReliableTxState {
 
 #[derive(Debug, Clone)]
 struct ReliableSent {
+    packet_id: u64,
     bytes: Arc<[u8]>,
     last_send_ms: u64,
     retries: u32,
@@ -2033,6 +2034,10 @@ impl Router {
                 serialize::peek_frame_info(bytes.as_ref())?.envelope.ty
             }
         };
+        let packet_id = match &data {
+            RouterItem::Packet(pkt) => pkt.packet_id(),
+            RouterItem::Serialized(bytes) => serialize::packet_id_from_wire(bytes.as_ref())?,
+        };
 
         if matches!(ty, DataType::ReliableAck | DataType::ReliablePacketRequest)
             && matches!(&handler, RouterTxHandlerFn::Packet(_))
@@ -2056,6 +2061,34 @@ impl Router {
         if !is_reliable_type(ty) {
             if let Some(adjusted) = self.adjust_reliable_for_side(opts, data)? {
                 self.call_side_tx_handler(&handler, &adjusted)?;
+            }
+            return Ok(());
+        }
+
+        let existing_reliable_bytes = {
+            let st = self.state.lock();
+            st.reliable_tx
+                .get(&Self::reliable_key(side, ty))
+                .and_then(|tx_state| {
+                    tx_state
+                        .sent
+                        .values()
+                        .find(|sent| sent.packet_id == packet_id)
+                        .map(|sent| sent.bytes.clone())
+                })
+        };
+        if let Some(existing_bytes) = existing_reliable_bytes {
+            self.send_reliable_raw_to_side(side, existing_bytes.clone())?;
+
+            let mut st = self.state.lock();
+            if let Some(sent) = self
+                .reliable_tx_state_mut(&mut st, side, ty)
+                .sent
+                .values_mut()
+                .find(|sent| sent.packet_id == packet_id)
+            {
+                sent.last_send_ms = self.clock.now_ms();
+                sent.queued = false;
             }
             return Ok(());
         }
@@ -2101,6 +2134,7 @@ impl Router {
             tx_state.sent.insert(
                 seq,
                 ReliableSent {
+                    packet_id,
                     bytes: bytes.clone(),
                     last_send_ms: self.clock.now_ms(),
                     retries: 0,

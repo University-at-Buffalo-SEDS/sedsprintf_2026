@@ -3867,6 +3867,97 @@ mod reliable_tests {
         assert_eq!(rx_hits.load(Ordering::SeqCst), 1);
         assert_eq!(ack_count.load(Ordering::SeqCst), 0);
     }
+
+    #[test]
+    fn end_to_end_replay_reuses_existing_hop_reliable_sequence() {
+        let now_ms = Arc::new(AtomicU64::new(0));
+        let now_ms_c = now_ms.clone();
+        let router = Arc::new(Router::new_with_clock(
+            RouterMode::Sink,
+            RouterConfig::default().with_reliable_enabled(true),
+            Box::new(move || now_ms_c.load(Ordering::SeqCst)),
+        ));
+
+        let seen_tx: Arc<Mutex<Vec<Vec<u8>>>> = Arc::new(Mutex::new(Vec::new()));
+        let seen_tx_c = seen_tx.clone();
+        let router_for_ack = router.clone();
+        let side_id: Arc<Mutex<Option<usize>>> = Arc::new(Mutex::new(None));
+        let side_id_c = side_id.clone();
+
+        let side = router.add_side_serialized_with_options(
+            "VALVE",
+            move |bytes: &[u8]| -> TelemetryResult<()> {
+                let frame = serialize::peek_frame_info(bytes)?;
+                if !frame.ack_only() && frame.envelope.ty == DataType::GpsData {
+                    seen_tx_c.lock().unwrap().push(bytes.to_vec());
+                    if let Some(hdr) = frame.reliable
+                        && let Some(src_side) = *side_id_c.lock().unwrap()
+                    {
+                        let ack = serialize::serialize_reliable_ack(
+                            "VALVE",
+                            frame.envelope.ty,
+                            0,
+                            hdr.seq,
+                        );
+                        router_for_ack.rx_serialized_from_side(ack.as_ref(), src_side)?;
+                    }
+                }
+                Ok(())
+            },
+            RouterSideOptions {
+                reliable_enabled: true,
+                link_local_enabled: false,
+            },
+        );
+        *side_id.lock().unwrap() = Some(side);
+
+        router
+            .rx_from_side(
+                &crate::discovery::build_discovery_announce(
+                    "VALVE",
+                    0,
+                    &[DataEndpoint::SdCard],
+                )
+                .unwrap(),
+                side,
+            )
+            .unwrap();
+        router.process_all_queues_with_timeout(0).unwrap();
+
+        let pkt = Packet::from_f32_slice(
+            DataType::GpsData,
+            &[1.0, 2.0, 3.0],
+            crate::message_meta(DataType::GpsData).endpoints,
+            0,
+        )
+        .unwrap();
+        router.tx(pkt).unwrap();
+        router.process_all_queues_with_timeout(0).unwrap();
+
+        let first = seen_tx.lock().unwrap()[0].clone();
+        let first_frame = serialize::peek_frame_info(first.as_slice()).unwrap();
+        let first_hdr = first_frame.reliable.unwrap();
+        let first_packet_id = serialize::packet_id_from_wire(first.as_slice()).unwrap();
+
+        now_ms.store(crate::config::RELIABLE_RETRANSMIT_MS + 1, Ordering::SeqCst);
+        router.periodic(0).unwrap();
+        router.process_all_queues_with_timeout(0).unwrap();
+
+        let sent = seen_tx.lock().unwrap().clone();
+        assert!(sent.len() >= 2);
+        for replay in sent.iter().skip(1) {
+            let replay_frame = serialize::peek_frame_info(replay.as_slice()).unwrap();
+            let replay_hdr = replay_frame.reliable.unwrap();
+            assert_eq!(
+                serialize::packet_id_from_wire(replay.as_slice()).unwrap(),
+                first_packet_id
+            );
+            assert_eq!(
+                replay_hdr.seq, first_hdr.seq,
+                "end-to-end replay must reuse the original hop-reliable sequence for a side"
+            );
+        }
+    }
 }
 
 #[cfg(test)]
